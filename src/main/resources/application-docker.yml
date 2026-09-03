@@ -1,0 +1,18 @@
+# docker compose 안에서 Spring 을 띄울 때 쓰는 프로파일입니다.
+# 컨테이너마다 localhost 가 다릅니다. local 과 섞어 쓰지 마세요.
+app:
+  ai:
+    base-url: ${APP_AI_BASE_URL:http://python-ai:8000}
+  storage:
+    endpoint: ${APP_STORAGE_ENDPOINT:http://minio:9000}
+
+spring:
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://postgres:5432/cuea}
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:redis}
+
+logging:
+  level:
+    com.cuea: INFO

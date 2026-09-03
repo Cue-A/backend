@@ -1,0 +1,13 @@
+# IntelliJ / ./gradlew bootRun 으로 띄울 때 쓰는 프로파일입니다.
+app:
+  ai:
+    base-url: ${APP_AI_BASE_URL:http://localhost:8000}
+  storage:
+    endpoint: ${APP_STORAGE_ENDPOINT:http://localhost:9000}
+
+spring:
+  jpa:
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true

@@ -14,51 +14,123 @@ AI 면접 코칭 서비스 Cue&A의 백엔드 서버입니다.
 
 ---
 
-## 1. 사전 준비 (macOS)
+## 빠른 시작
 
-### 1.1 Homebrew
+JDK 21 과 도커만 있으면 됩니다. 처음이면 [1. 사전 준비](#1-사전-준비) 부터 보세요.
+
+```bash
+git clone git@github.com:Cue-A/backend.git
+cd backend
+
+cp .env.example .env                              # 로컬은 기본값 그대로 동작
+docker compose -f docker-compose.dev.yml up -d    # PG · Redis · MinIO 기동
+./gradlew bootRun --args='--spring.profiles.active=local'
+```
+
+http://localhost:8080/swagger-ui.html 이 열리면 성공입니다.
+**AI 서버가 없어도 돌아갑니다.** `app.ai.mock.enabled=true` 가 기본이라
+내부 목이 고정 응답을 돌려줍니다.
+
+작업을 마쳤으면:
+
+```bash
+docker compose -f docker-compose.dev.yml down     # 컨테이너만 정지 (데이터 유지)
+```
+
+| 자주 쓰는 명령 | |
+|---|---|
+| `docker compose -f docker-compose.dev.yml up -d` | 인프라 기동 |
+| `docker compose -f docker-compose.dev.yml ps` | 인프라 상태 확인 |
+| `docker compose -f docker-compose.dev.yml down` | 인프라 정지 (데이터 유지) |
+| `docker compose -f docker-compose.dev.yml down -v` | 인프라 정지 + **데이터 삭제** |
+| `./gradlew bootRun --args='--spring.profiles.active=local'` | 앱 실행 |
+| `./gradlew test` | 테스트 |
+| `./gradlew build` | 빌드 |
+
+---
+
+## 1. 사전 준비
+
+필요한 건 **JDK 21** 과 **도커** 두 개뿐입니다. 아래는 macOS 기준 설치 방법이며,
+이미 깔려 있으면 건너뛰세요.
+
+```bash
+java -version    # openjdk 21.x 가 나오면 OK
+docker info      # 오류 없이 정보가 나오면 OK
+```
+
+### 1.1 JDK 21
+
+셋 중 아무거나 편한 걸 쓰면 됩니다.
+
+- **IntelliJ 로 받기 (제일 쉬움)** — 프로젝트를 열면 SDK 선택 창이 뜹니다.
+  `Download JDK` → **Temurin 21**
+- **설치 파일** — [adoptium.net](https://adoptium.net) 에서 macOS `.pkg` 받아 실행
+- **Homebrew** — 이미 쓰고 있다면
+
+  ```bash
+  brew install openjdk@21
+  sudo ln -sfn /opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk \
+    /Library/Java/JavaVirtualMachines/openjdk-21.jdk
+  ```
+
+Gradle 은 따로 설치하지 않습니다. `./gradlew` 가 알아서 받습니다.
+
+> Java 21 이어야 합니다. 25 나 17 로는 빌드가 깨집니다.
+> 여러 버전이 깔려 있으면 `/usr/libexec/java_home -V` 로 확인하세요.
+
+### 1.2 도커
+
+PostgreSQL · Redis · MinIO 를 컨테이너로 띄웁니다. 직접 설치하지 마세요.
+
+컨테이너를 돌릴 수 있으면 뭘 쓰든 상관없습니다. **Docker Desktop 이 필수는
+아닙니다.**
+
+- **Docker Desktop** — 가장 무난합니다. [docker.com](https://www.docker.com/products/docker-desktop/)
+  에서 받거나 `brew install --cask docker`.
+  설치 후 **앱을 한 번 실행**해야 데몬이 뜹니다. 메뉴바에 고래 아이콘이 보이면 준비 완료
+- **OrbStack** — 맥에서 더 가볍고 빠릅니다. `brew install --cask orbstack`
+- **Colima** — 터미널만 쓰고 싶다면. `brew install colima docker && colima start`
+
+셋 중 뭘 쓰든 `docker compose` 명령은 동일합니다.
+
+### 1.3 Homebrew (선택)
+
+**필수가 아닙니다.** 위 설치를 명령어 한 줄로 끝내고 싶을 때만 쓰세요.
+설치 파일로 받아도 아무 문제 없습니다.
 
 ```bash
 /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
 ```
 
-Apple Silicon이면 설치 후 안내대로 PATH를 잡아야 합니다.
+Apple Silicon 이면 설치 후 안내대로 PATH 를 잡아야 합니다.
 
 ```bash
 echo 'eval "$(/opt/homebrew/bin/brew shellenv)"' >> ~/.zprofile
 source ~/.zprofile
 ```
 
-### 1.2 JDK 21
+### 1.4 에디터
 
-IntelliJ에서 받는 게 제일 편합니다. 프로젝트를 열면 SDK 선택 창이 뜨는데,
-`Download JDK` → **Temurin 21** 을 고르면 끝입니다.
+아무거나 쓰세요. IntelliJ IDEA Community 로 충분합니다.
 
-터미널에서도 쓰고 싶으면:
+**IntelliJ 를 쓴다면 두 가지만 켜두세요.** 안 하면 바로 막힙니다.
 
-```bash
-brew install openjdk@21
-sudo ln -sfn /opt/homebrew/opt/openjdk@21/libexec/openjdk.jdk \
-  /Library/Java/JavaVirtualMachines/openjdk-21.jdk
-java -version   # openjdk 21.x 확인
+```
+Settings → Build, Execution, Deployment → Compiler → Annotation Processors
+  ☑ Enable annotation processing        ← Lombok · MapStruct 가 이걸 씁니다
+
+Settings → Editor → File Encodings
+  Global / Project / Default: UTF-8     ← 한글 카테고리명(협업·갈등)이 깨집니다
 ```
 
-### 1.3 Docker Desktop
+실행은 `CueAApplication` 우클릭 → Run. 프로파일은 Run/Debug Configurations 에서
+환경변수 `SPRING_PROFILES_ACTIVE=local` 을 주거나, 그냥 터미널에서
+`./gradlew bootRun --args='--spring.profiles.active=local'` 을 쓰면 됩니다.
 
-```bash
-brew install --cask docker
-```
-
-설치 후 **앱을 한 번 실행**해야 데몬이 뜹니다. 상단 메뉴바에 고래 아이콘이
-보이면 준비된 겁니다.
-
-### 1.4 IntelliJ IDEA
-
-Community Edition으로 충분합니다.
-
-```bash
-brew install --cask intellij-idea-ce
-```
+`.env` 는 `bootRun` 이 자동으로 읽습니다. IntelliJ 의 Run 버튼으로 실행할 때도
+읽게 하려면 **EnvFile** 플러그인을 설치하고 Run Configuration 에서 `.env` 를
+지정하세요.
 
 ---
 
@@ -67,8 +139,14 @@ brew install --cask intellij-idea-ce
 ### 2.1 클론
 
 ```bash
-git clone <저장소 주소>
-cd cue-a
+git clone git@github.com:Cue-A/backend.git
+cd backend
+```
+
+`dev` 브랜치가 통합 브랜치입니다. 작업 브랜치는 여기서 땁니다.
+
+```bash
+git switch dev
 ```
 
 ### 2.2 환경변수
@@ -106,15 +184,17 @@ docker compose -f docker-compose.dev.yml ps
 
 ### 2.4 애플리케이션 실행
 
-IntelliJ에서 `CueAApplication` 우클릭 → Run.
-
-터미널에서 하려면:
-
 ```bash
 ./gradlew bootRun --args='--spring.profiles.active=local'
 ```
 
 http://localhost:8080/swagger-ui.html 이 열리면 성공입니다.
+
+IDE 를 쓴다면 `CueAApplication` 우클릭 → Run 으로도 됩니다.
+이때는 프로파일(`SPRING_PROFILES_ACTIVE=local`)을 직접 지정해야 합니다.
+
+**AI 서버는 없어도 됩니다.** `app.ai.mock.enabled` 가 기본 `true` 라
+내부 목이 응답합니다. 실제 AI 서버에 붙일 때만 `.env` 에서 `false` 로 바꾸세요.
 
 ### 2.5 종료
 
@@ -128,45 +208,7 @@ docker compose -f docker-compose.dev.yml down -v
 
 ---
 
-## 3. IntelliJ 설정
-
-### 3.1 Annotation Processing
-
-MapStruct와 Lombok을 쓰므로 반드시 켜야 합니다. 안 켜면
-`Cannot find symbol: getXxx()` 같은 오류가 쏟아집니다.
-
-```
-Settings → Build, Execution, Deployment → Compiler → Annotation Processors
-  ☑ Enable annotation processing
-```
-
-### 3.2 프로파일 지정
-
-```
-Run/Debug Configurations → Modify options → Add VM options
-  -Dspring.profiles.active=local
-```
-
-또는 Environment variables에 `SPRING_PROFILES_ACTIVE=local`.
-
-### 3.3 .env 읽기
-
-Gradle의 `bootRun`은 루트 `.env`를 자동으로 읽도록 설정해두었습니다.
-IntelliJ Run 버튼으로 실행할 때도 쓰려면 **EnvFile** 플러그인을 설치하고
-Run Configuration에서 `.env`를 지정하세요.
-
-### 3.4 인코딩
-
-```
-Settings → Editor → File Encodings
-  Global / Project / Default: UTF-8
-```
-
-한글 카테고리명(`협업·갈등` 등)을 다루므로 어긋나면 깨집니다.
-
----
-
-## 4. AI 서버 연동
+## 3. AI 서버 연동
 
 AI 서버는 별도 저장소이고 Python으로 되어 있습니다.
 백엔드 단독 개발 중에는 **더미 서버**를 씁니다.
@@ -187,7 +229,7 @@ AI 서버가 아직 없으면 `app.ai.mock.enabled=true` 로 두면
 
 ---
 
-## 5. 자주 겪는 문제
+## 4. 자주 겪는 문제
 
 **포트가 이미 사용 중이라고 나옵니다**
 
@@ -211,11 +253,31 @@ compose에 추가하세요. 느려지지만 동작은 합니다.
 
 **한글이 깨집니다**
 
-IntelliJ 인코딩(3.4)과 DB 콜레이션을 확인하세요.
+에디터 인코딩을 UTF-8 로 맞추세요. IntelliJ 면
+`Settings → Editor → File Encodings` 의 세 항목을 전부 UTF-8 로 둡니다.
+DB 는 compose 에서 UTF8 로 초기화하고 있습니다.
+
+**`Cannot find symbol: getXxx()` / `DocumentMapperImpl` 을 못 찾습니다**
+
+Lombok · MapStruct 가 만드는 코드입니다. IDE 의 annotation processing 이
+꺼져 있으면 이 오류가 쏟아집니다.
+`Settings → Build, Execution, Deployment → Compiler → Annotation Processors`
+에서 **Enable annotation processing** 을 켜세요.
+터미널의 `./gradlew build` 는 이 설정과 무관하게 항상 동작합니다.
+
+**Java 버전 오류가 납니다**
+
+Java 21 이어야 합니다. `/usr/libexec/java_home -V` 로 깔린 버전을 보고,
+21 이 없으면 [1.1](#11-jdk-21) 을 보세요. 21 이 있는데도 다른 게 잡히면
+`JAVA_HOME` 을 지정해서 실행하세요.
+
+```bash
+JAVA_HOME=$(/usr/libexec/java_home -v 21) ./gradlew bootRun --args='--spring.profiles.active=local'
+```
 
 ---
 
-## 6. 프로젝트 구조
+## 5. 프로젝트 구조
 
 ```
 cue-a/
@@ -302,7 +364,7 @@ controller  →  service  →  repository
 
 ---
 
-## 7. 개발 흐름
+## 6. 개발 흐름
 
 **모든 작업은 이슈에서 시작합니다. 이슈 없이 브랜치를 따거나 PR 을 올리지 않습니다.**
 작업 브랜치는 `dev` 에서 따고 `dev` 로 되돌립니다.
@@ -333,7 +395,7 @@ feat/12-interview-session
 
 ---
 
-## 8. 문서
+## 7. 문서
 
 | 문서 | 내용 |
 |---|---|

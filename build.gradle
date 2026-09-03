@@ -83,7 +83,8 @@ tasks.named('test') {
     systemProperty 'file.encoding', 'UTF-8'
 }
 
-// 루트 .env 를 bootRun 환경변수로 읽어들입니다. (README 3.3)
+// 루트 .env 를 bootRun 환경변수로 읽어들입니다.
+// IDE 의 Run 버튼으로 띄울 때는 EnvFile 플러그인이 필요합니다.
 tasks.named('bootRun') {
     def envFile = rootProject.file('.env')
     if (envFile.exists()) {

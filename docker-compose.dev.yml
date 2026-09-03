@@ -1,0 +1,80 @@
+# 개발 중 상시 사용. 인프라만 띄우고 Spring 은 IntelliJ 에서 실행합니다.
+#   docker compose -f docker-compose.dev.yml up -d
+name: cue-a-dev
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: cue-a-postgres
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cuea}
+      POSTGRES_USER: ${POSTGRES_USER:-cuea}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-cuea}
+      # 한글 카테고리명(협업·갈등 등)을 다루므로 UTF-8 로 초기화합니다.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cuea} -d ${POSTGRES_DB:-cuea}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: cue-a-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  minio:
+    image: minio/minio:latest
+    container_name: cue-a-minio
+    command: server /data --console-address ":9001"
+    environment:
+      MINIO_ROOT_USER: ${APP_STORAGE_ACCESS_KEY:-minioadmin}
+      MINIO_ROOT_PASSWORD: ${APP_STORAGE_SECRET_KEY:-minioadmin}
+    ports:
+      - "9000:9000"   # API
+      - "9001:9001"   # 콘솔
+    volumes:
+      - minio-data:/data
+    healthcheck:
+      test: ["CMD", "mc", "ready", "local"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  # 버킷 생성 + CORS. 한 번 돌고 종료되는 일회성 작업입니다.
+  createbuckets:
+    image: minio/mc:latest
+    container_name: cue-a-createbuckets
+    depends_on:
+      minio:
+        condition: service_healthy
+    environment:
+      BUCKET: ${APP_STORAGE_BUCKET:-cue-a-media}
+      ACCESS_KEY: ${APP_STORAGE_ACCESS_KEY:-minioadmin}
+      SECRET_KEY: ${APP_STORAGE_SECRET_KEY:-minioadmin}
+      # docs/20-storage.md — 전 세계 공개 대신 프론트 도메인만 허용
+      CORS_ORIGIN: ${APP_CORS_ALLOWED_ORIGINS:-http://localhost:5173}
+    entrypoint: >
+      /bin/sh -c "
+      mc alias set local http://minio:9000 $$ACCESS_KEY $$SECRET_KEY &&
+      mc mb --ignore-existing local/$$BUCKET &&
+      mc admin config set local api cors_allow_origin=\"$$CORS_ORIGIN\" &&
+      echo '[createbuckets] '$$BUCKET' ready';
+      "
+
+volumes:
+  postgres-data:
+  redis-data:
+  minio-data:

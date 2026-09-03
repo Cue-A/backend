@@ -304,18 +304,30 @@ controller  →  service  →  repository
 
 ## 7. 개발 흐름
 
-모든 작업은 이슈에서 시작합니다.
+모든 작업은 이슈에서 시작합니다. **작업 브랜치는 `dev` 에서 따고 `dev` 로 되돌립니다.**
+
+```
+main   배포 가능한 상태만
+ ↑
+dev    통합 브랜치 ← 여기로 PR 을 올립니다
+ ↑
+feat/12-interview-session
+```
 
 ```
 1. GitHub → New issue → 기능 개발 / 버그 선택
-2. 브랜치 생성       feat/12-interview-session   (12 = 이슈 번호)
-3. 작업 + 커밋       feat: 면접 세션 생성 API 추가
-4. PR 생성           템플릿이 자동으로 채워짐
-5. 본문에 Closes #12
-6. 리뷰 1명 이상 승인 → Squash merge
+2. dev 최신화        git switch dev && git pull
+3. 브랜치 생성       git switch -c feat/12-interview-session   (12 = 이슈 번호)
+4. 작업 + 커밋       feat(interview): 면접 세션 생성 API 추가
+5. PR 생성           base 를 dev 로. 템플릿이 자동으로 채워짐
+6. 본문에 Closes #12
+7. 리뷰 1명 이상 승인 → Squash merge
 ```
 
-`main` 직접 푸시는 막혀 있습니다.
+커밋은 `{타입}({스코프}): {요약}` 형식입니다. 스코프는 건드린 도메인이나 계층
+이름을 씁니다. (`interview` `ai` `storage` …)
+
+`main` 과 `dev` 직접 푸시는 막혀 있습니다.
 상세 규칙은 [`docs/01-conventions.md`](./docs/01-conventions.md) 의 작업 흐름 항목.
 
 ---

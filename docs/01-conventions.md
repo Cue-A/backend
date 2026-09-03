@@ -165,13 +165,29 @@ void 재연습_세션은_항상_최초_세션을_참조한다() { ... }
 
 ```
 1. 이슈 생성            GitHub → New issue → 기능 개발 / 버그 선택
-2. 브랜치 생성          feat/12-interview-session   (12 = 이슈 번호)
-3. 작업 + 커밋
-4. PR 생성              템플릿이 자동으로 채워짐
-5. 본문에 Closes #12    머지 시 이슈 자동 종료
-6. 리뷰 1명 이상 승인
-7. Squash merge → 브랜치 삭제
+2. dev 최신화           git switch dev && git pull
+3. 브랜치 생성          git switch -c feat/12-interview-session   (12 = 이슈 번호)
+4. 작업 + 커밋
+5. PR 생성              base 를 dev 로  ← 기본값이 main 이면 바꿔주세요
+6. 본문에 Closes #12    머지 시 이슈 자동 종료
+7. 리뷰 1명 이상 승인
+8. Squash merge → 브랜치 삭제
 ```
+
+### 브랜치 구조
+
+```
+main   배포 가능한 상태만. dev 에서만 넘어옵니다
+ ↑
+dev    통합 브랜치. 팀원 작업이 모이는 곳
+ ↑
+feat/12-interview-session   각자 파서 쓰는 작업 브랜치
+```
+
+**작업 브랜치는 dev 에서 따고 dev 로 되돌립니다.** main 으로 PR 을 올리지 마세요.
+
+main 을 따로 두는 이유는, 데모나 발표 중에 dev 가 깨져 있어도 보여줄 수 있는
+상태를 하나 남겨두기 위해서입니다. dev → main 은 배포 시점에만 합칩니다.
 
 ### 왜 이슈부터 만드나
 
@@ -191,11 +207,13 @@ docs/45-report-contract
 ```
 
 이슈 번호를 넣으면 브랜치만 보고도 맥락을 찾아갈 수 있습니다.
+**dev 에서 따세요.** main 에서 따면 dev 에 이미 들어간 남의 작업 위에서
+작업하지 못해 나중에 충돌이 몰립니다.
 
 ### 커밋 메시지
 
 ```
-{타입}: {요약}
+{타입}({스코프}): {요약}
 
 feat:     기능 추가
 fix:      버그 수정
@@ -205,7 +223,26 @@ test:     테스트
 chore:    빌드·설정
 ```
 
-예: `feat: 면접 세션 생성 API 추가`
+예: `feat(interview): 면접 세션 생성 API 추가`
+
+**스코프는 어디를 건드렸는지입니다.** 도메인 이름이나 계층 이름을 씁니다.
+
+```
+도메인   auth  user  document  interview  report  growth  company
+계층     common  ai  websocket  storage  redis  security  config
+기타     build  docker  github  domain  guide
+```
+
+```
+feat(interview): 재연습 세션 생성 API 추가
+fix(ai): 세션 시작 타임아웃을 90초로 분리
+refactor(replay): 루트 세션 추적을 ReplayService 로 이동
+docs(guide): 브랜치 전략을 dev 통합으로 변경
+test(interview): 되묻기가 문항 수에 포함되지 않는지 검증
+```
+
+여러 곳을 건드려 스코프를 하나로 못 고르겠으면 **PR 을 쪼개라는 신호**입니다.
+저장소 전체에 걸치는 변경(빌드 설정 등)만 스코프를 생략할 수 있습니다.
 
 한 줄로 부족하면 본문에 이유를 적습니다. **무엇을 했는지보다 왜 했는지**를 씁니다.
 무엇을 했는지는 diff를 보면 됩니다.
@@ -213,10 +250,11 @@ chore:    빌드·설정
 ### PR 규칙
 
 - 제목: `[feat] 면접 세션 생성 API 구현`
+- **base 브랜치는 `dev`** 입니다. GitHub 이 기본값을 main 으로 잡아주면 바꿔주세요
 - 본문은 `.github/PULL_REQUEST_TEMPLATE.md` 가 자동으로 채웁니다
-- **`main` 직접 푸시 금지.** 브랜치 보호 규칙으로 막아둡니다
+- **`main` · `dev` 직접 푸시 금지.** 브랜치 보호 규칙으로 막아둡니다
 - 리뷰 1명 이상 승인 후 머지
-- **Squash merge** 를 씁니다. 작업 중 커밋이 `main` 히스토리를 어지럽히지 않게
+- **Squash merge** 를 씁니다. 작업 중 커밋이 `dev` 히스토리를 어지럽히지 않게
 
 ### PR 크기
 
@@ -241,9 +279,18 @@ chore:    빌드·설정
 
 ## GitHub 저장소 설정
 
-한 번만 해두면 됩니다. (Settings → Branches → Add rule, `main`)
+한 번만 해두면 됩니다.
+
+**기본 브랜치를 `dev` 로** 바꿉니다. (Settings → General → Default branch)
+PR 을 열 때 base 가 자동으로 dev 가 되어 실수로 main 에 올리는 일이 줄어듭니다.
+
+**보호 규칙은 `dev` 와 `main` 둘 다** 겁니다.
+(Settings → Branches → Add rule)
 
 - ☑ Require a pull request before merging
 - ☑ Require approvals — 1
 - ☑ Automatically delete head branches (Settings → General)
 - Allow squash merging만 켜고 나머지 두 개는 끄기
+
+main 에 규칙을 안 걸면 dev 를 지켜봐야 소용이 없습니다. 급할 때 main 으로
+바로 밀어버리게 됩니다.

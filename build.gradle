@@ -1,0 +1,100 @@
+plugins {
+    id 'java'
+    id 'org.springframework.boot' version '3.5.16'
+    id 'io.spring.dependency-management' version '1.1.7'
+}
+
+group = 'com.cuea'
+version = '0.0.1-SNAPSHOT'
+description = 'Cue&A backend'
+
+java {
+    toolchain {
+        languageVersion = JavaLanguageVersion.of(21)
+    }
+}
+
+configurations {
+    compileOnly {
+        extendsFrom annotationProcessor
+    }
+}
+
+repositories {
+    mavenCentral()
+}
+
+ext {
+    mapstructVersion = '1.6.3'
+    springdocVersion = '2.8.17'
+    jjwtVersion = '0.12.7'
+    awsSdkVersion = '2.54.11'
+}
+
+dependencies {
+    implementation 'org.springframework.boot:spring-boot-starter-web'
+    implementation 'org.springframework.boot:spring-boot-starter-websocket'
+    implementation 'org.springframework.boot:spring-boot-starter-data-jpa'
+    implementation 'org.springframework.boot:spring-boot-starter-data-redis'
+    implementation 'org.springframework.boot:spring-boot-starter-validation'
+    implementation 'org.springframework.boot:spring-boot-starter-aop'
+
+    // BCrypt 만 씁니다. 인증은 직접 만든 JwtAuthFilter 가 담당하므로
+    // spring-boot-starter-security 는 넣지 않습니다.
+    implementation 'org.springframework.security:spring-security-crypto'
+
+    implementation "io.jsonwebtoken:jjwt-api:${jjwtVersion}"
+    runtimeOnly "io.jsonwebtoken:jjwt-impl:${jjwtVersion}"
+    runtimeOnly "io.jsonwebtoken:jjwt-jackson:${jjwtVersion}"
+
+    implementation platform("software.amazon.awssdk:bom:${awsSdkVersion}")
+    implementation 'software.amazon.awssdk:s3'
+    implementation 'software.amazon.awssdk:auth'
+
+    implementation "org.springdoc:springdoc-openapi-starter-webmvc-ui:${springdocVersion}"
+
+    implementation "org.mapstruct:mapstruct:${mapstructVersion}"
+    annotationProcessor "org.mapstruct:mapstruct-processor:${mapstructVersion}"
+    annotationProcessor 'org.projectlombok:lombok-mapstruct-binding:0.2.0'
+
+    compileOnly 'org.projectlombok:lombok'
+    annotationProcessor 'org.projectlombok:lombok'
+
+    runtimeOnly 'org.postgresql:postgresql'
+
+    testImplementation 'org.springframework.boot:spring-boot-starter-test'
+    testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+tasks.named('compileJava') {
+    options.encoding = 'UTF-8'
+    options.compilerArgs += [
+            '-Amapstruct.defaultComponentModel=spring',
+            '-Amapstruct.unmappedTargetPolicy=ERROR',
+    ]
+}
+
+tasks.withType(JavaCompile).configureEach {
+    options.encoding = 'UTF-8'
+}
+
+tasks.named('test') {
+    useJUnitPlatform()
+    systemProperty 'file.encoding', 'UTF-8'
+}
+
+// 루트 .env 를 bootRun 환경변수로 읽어들입니다. (README 3.3)
+tasks.named('bootRun') {
+    def envFile = rootProject.file('.env')
+    if (envFile.exists()) {
+        envFile.readLines('UTF-8').each { line ->
+            def trimmed = line.trim()
+            if (trimmed.isEmpty() || trimmed.startsWith('#') || !trimmed.contains('=')) {
+                return
+            }
+            def idx = trimmed.indexOf('=')
+            environment trimmed.substring(0, idx).trim(),
+                    trimmed.substring(idx + 1).trim().replaceAll(/^["']|["']$/, '')
+        }
+    }
+}

@@ -4,6 +4,7 @@ import com.cuea.common.annotation.RateLimit;
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.common.security.JwtAuthFilter;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.aspectj.lang.ProceedingJoinPoint;
@@ -54,6 +55,24 @@ public class RateLimitAspect {
         if (userId != null) {
             return userId.toString();
         }
-        return servlet.getRequest().getRemoteAddr();
+        return clientIp(servlet.getRequest());
+    }
+
+    /**
+     * 로드밸런서 뒤에서는 {@code getRemoteAddr()} 이 LB 주소를 돌려줍니다.
+     *
+     * <p>그대로 두면 <b>로그인하지 않은 사용자 전원이 한 IP 로 뭉쳐</b> 한 명이
+     * 한도를 채우면 나머지가 전부 막힙니다. 로그인·회원가입처럼 미인증 상태에서
+     * 제한을 거는 곳에서 특히 문제가 됩니다.
+     *
+     * <p>{@code X-Forwarded-For} 는 클라이언트가 위조할 수 있습니다. 신뢰할 수
+     * 있는 프록시가 앞에 있을 때만 의미가 있습니다.
+     */
+    private String clientIp(HttpServletRequest request) {
+        String forwarded = request.getHeader("X-Forwarded-For");
+        if (forwarded == null || forwarded.isBlank()) {
+            return request.getRemoteAddr();
+        }
+        return forwarded.split(",")[0].trim();
     }
 }

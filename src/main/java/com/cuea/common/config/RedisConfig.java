@@ -31,6 +31,15 @@ public class RedisConfig {
         return template;
     }
 
+    /** refresh token 회전. resources/scripts/refresh_rotate.lua */
+    @Bean
+    RedisScript<Long> refreshRotateScript() {
+        DefaultRedisScript<Long> script = new DefaultRedisScript<>();
+        script.setLocation(new ClassPathResource("scripts/refresh_rotate.lua"));
+        script.setResultType(Long.class);
+        return script;
+    }
+
     /** @RateLimit 이 쓰는 고정 윈도 카운터. resources/scripts/rate_limit.lua */
     @Bean
     RedisScript<Long> rateLimitScript() {

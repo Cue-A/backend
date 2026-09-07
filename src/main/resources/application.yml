@@ -40,6 +40,9 @@ spring:
 
 server:
   port: 8080
+  # 로드밸런서 뒤에서 클라이언트 IP·프로토콜을 제대로 보기 위한 설정입니다.
+  # 호출 제한이 IP 로 세는데, 없으면 미인증 사용자 전원이 한 IP 로 뭉칩니다.
+  forward-headers-strategy: framework
   servlet:
     encoding:
       charset: UTF-8
@@ -60,7 +63,10 @@ app:
 
   jwt:
     secret: ${APP_JWT_SECRET:local-dev-only-secret-change-me-at-least-32-bytes}
-    access-token-validity: 12h
+    # 로그아웃이 access token 을 즉시 무효화하지 못합니다(무상태). 그 창을 좁히려고
+    # 짧게 잡았습니다. 늘리려면 그만큼 탈취 후 사용 가능 시간이 늘어납니다.
+    access-token-validity: 30m
+    refresh-token-validity: 14d
 
   ai:
     base-url: ${APP_AI_BASE_URL:http://localhost:8000}

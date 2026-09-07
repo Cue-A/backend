@@ -1,0 +1,90 @@
+spring:
+  application:
+    name: cue-a
+
+  profiles:
+    default: local
+
+  # AI 폴링(최대 90초)과 WebSocket 이 스레드를 오래 점유합니다.
+  # docs/00-architecture.md 참고. 끄지 마세요.
+  threads:
+    virtual:
+      enabled: true
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/cuea}
+    username: ${SPRING_DATASOURCE_USERNAME:cuea}
+    password: ${SPRING_DATASOURCE_PASSWORD:cuea}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      # create 를 쓰지 마세요. 재시작마다 데이터가 사라집니다.
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: Asia/Seoul
+
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+
+  # null 을 빼지 않습니다. docs/01-conventions.md 의 Result 예시가 errorCode·message 를
+  # null 로 명시하고 있고, audio_url·company_id 처럼 "null 이라는 사실" 자체가 의미인
+  # 필드들이 있습니다. 키가 통째로 사라지면 프론트가 구분하지 못합니다.
+  jackson:
+    default-property-inclusion: always
+
+server:
+  port: 8080
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: alpha
+
+logging:
+  level:
+    com.cuea: DEBUG
+
+app:
+  cors:
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+
+  jwt:
+    secret: ${APP_JWT_SECRET:local-dev-only-secret-change-me-at-least-32-bytes}
+    access-token-validity: 12h
+
+  ai:
+    base-url: ${APP_AI_BASE_URL:http://localhost:8000}
+    secret: ${APP_AI_SECRET:local-dev-only-ai-secret}
+    # docs/10-ai-client.md — 단일 타임아웃으로 합치지 마세요.
+    session-start-timeout: 90s
+    answer-timeout: 60s
+    poll-interval: 1s
+    connect-timeout: 5s
+    read-timeout: 10s
+    company-cache-ttl: 1h
+    mock:
+      enabled: ${APP_AI_MOCK_ENABLED:true}
+
+  storage:
+    endpoint: ${APP_STORAGE_ENDPOINT:http://localhost:9000}
+    bucket: ${APP_STORAGE_BUCKET:cue-a-media}
+    access-key: ${APP_STORAGE_ACCESS_KEY:minioadmin}
+    secret-key: ${APP_STORAGE_SECRET_KEY:minioadmin}
+    region: ${APP_STORAGE_REGION:us-east-1}
+    # MinIO 는 필수. S3 로 가면 false
+    path-style-access: ${APP_STORAGE_PATH_STYLE_ACCESS:true}
+    presign:
+      # Celery 큐 지연 대비. docs/20-storage.md 참고. 줄이지 마세요.
+      resume-get: 15m
+      upload-put: 10m
+      recording-get: 1h

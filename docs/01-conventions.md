@@ -108,6 +108,45 @@ session.complete();
 
 ---
 
+## 인증
+
+컨트롤러가 로그인한 사용자를 받을 때는 `@CurrentUser String userId` 를 씁니다.
+`JwtAuthFilter` 가 토큰 없는 요청을 통과시키므로, **`@CurrentUser` 를 빠뜨리면 그 API 는
+조용히 열립니다.**
+
+그래서 모든 핸들러는 둘 중 하나를 명시해야 합니다.
+
+```java
+// 로그인 필요
+public Result<UserResponse> me(@CurrentUser String userId) { ... }
+
+// 열어둘 것 — 이유를 반드시 적습니다
+@PublicApi("재발급은 정의상 만료된 access token 을 달고 들어옵니다")
+public Result<TokenResponse> refresh(@Valid @RequestBody RefreshRequest request) { ... }
+```
+
+아무것도 고르지 않으면 `EndpointAuthGuardTest` 에서 빌드가 깨집니다.
+화이트리스트를 필터가 아니라 테스트에 두는 이유는, 필터에 경로 목록을 두면
+엔드포인트가 늘 때마다 필터를 고쳐야 하기 때문입니다.
+
+`@CurrentUser` 가 있다고 안전한 것은 아닙니다. **남의 리소스인지는 서비스에서 확인합니다.**
+가드 테스트는 이것까지 잡지 못합니다.
+
+### spring-security 를 언제 도입하나
+
+지금은 `JwtAuthFilter` + `@CurrentUser` 로 직접 구현합니다. `spring-security-crypto`(BCrypt)만
+쓰고 `spring-boot-starter-security` 는 넣지 않습니다.
+
+**도입 기준은 "역할(role)이 늘어날 때" 가 아닙니다.** 역할 구분은 토큰에 `role` 클레임을
+넣고 `@CurrentUser` 와 같은 방식으로 검사하면 끝이라, starter 를 들이고 `SecurityFilterChain`
+으로 기존 필터 두 개를 옮기고 `Result` 포맷 유지를 위해 `AuthenticationEntryPoint` 와
+`AccessDeniedHandler` 를 다시 만드는 값을 치를 이유가 없습니다.
+
+실제 기준은 **리소스 소유자 검사가 컨트롤러 3곳 이상에서 반복될 때** 입니다. 세션·문서·리포트가
+전부 "내 것만" 접근이라 이 패턴이 곧 반복됩니다. 그때 `@PreAuthorize` 가 값을 하기 시작합니다.
+
+---
+
 ## 트랜잭션
 
 - `@Transactional` 은 서비스 레이어에 붙입니다.

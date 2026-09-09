@@ -129,21 +129,51 @@ public Result<TokenResponse> refresh(@Valid @RequestBody RefreshRequest request)
 화이트리스트를 필터가 아니라 테스트에 두는 이유는, 필터에 경로 목록을 두면
 엔드포인트가 늘 때마다 필터를 고쳐야 하기 때문입니다.
 
-`@CurrentUser` 가 있다고 안전한 것은 아닙니다. **남의 리소스인지는 서비스에서 확인합니다.**
-가드 테스트는 이것까지 잡지 못합니다.
+`@CurrentUser` 가 있다고 안전한 것은 아닙니다. 그건 "로그인했나" 까지만 봅니다.
+**"이게 네 것인가" 는 리포지토리에서 봅니다.**
+
+### 남의 리소스를 막는 방법
+
+조회 자체를 소유자로 좁힙니다. 확인하는 줄을 하나 더 쓰는 게 아니라, **남의 것이
+애초에 안 나오게** 합니다.
+
+```java
+// 나쁨 — 아래 한 줄을 빠뜨리면 남의 문서가 그대로 열립니다
+documentRepository.findById(id)
+        .filter(document -> document.getUserId().equals(userId))
+
+// 좋음 — 빠뜨릴 줄이 없습니다
+documentRepository.findByIdAndUserId(id, userId)
+        .orElseThrow(() -> new BusinessException(ErrorCode.DOCUMENT_NOT_FOUND));
+```
+
+소유자가 있는 엔티티는 **리포지토리에 스코프 없는 조회를 두지 않습니다.**
+`findById` 가 없으면 남의 것을 꺼낼 방법 자체가 없습니다.
+
+`FORBIDDEN` 이 아니라 `NOT_FOUND` 를 내는 것도 의도입니다. 남의 ID 를 넣었을 때
+"그 ID 가 존재하긴 한다" 는 사실이 새지 않습니다.
+
+`EndpointAuthGuardTest` 는 여기까지 검사하지 못합니다. 이건 리뷰에서 봅니다.
 
 ### spring-security 를 언제 도입하나
 
 지금은 `JwtAuthFilter` + `@CurrentUser` 로 직접 구현합니다. `spring-security-crypto`(BCrypt)만
 쓰고 `spring-boot-starter-security` 는 넣지 않습니다.
 
-**도입 기준은 "역할(role)이 늘어날 때" 가 아닙니다.** 역할 구분은 토큰에 `role` 클레임을
-넣고 `@CurrentUser` 와 같은 방식으로 검사하면 끝이라, starter 를 들이고 `SecurityFilterChain`
-으로 기존 필터 두 개를 옮기고 `Result` 포맷 유지를 위해 `AuthenticationEntryPoint` 와
-`AccessDeniedHandler` 를 다시 만드는 값을 치를 이유가 없습니다.
+**현재 계획에는 도입할 이유가 없습니다.**
 
-실제 기준은 **리소스 소유자 검사가 컨트롤러 3곳 이상에서 반복될 때** 입니다. 세션·문서·리포트가
-전부 "내 것만" 접근이라 이 패턴이 곧 반복됩니다. 그때 `@PreAuthorize` 가 값을 하기 시작합니다.
+- 역할(role) 이 늘어나는 것은 이유가 되지 않습니다. 토큰에 `role` 클레임을 넣고
+  `@RateLimit` 과 같은 패턴으로 `@RequireRole` 을 만들면 됩니다. AOP 는 이미 붙어 있습니다
+- 소유자 검사도 이유가 되지 않습니다. 위의 스코프 쿼리로 끝납니다. `@PreAuthorize` 로
+  하면 가드가 한 번, 서비스가 한 번 조회해 쿼리만 두 번 나갑니다
+
+반대로 도입 비용은 작지 않습니다. `SecurityFilterChain` 구성, `JwtAuthFilter` 와
+`AiSecretFilter` 이관, 그리고 401·403 을 `Result` 포맷으로 유지하기 위한
+`AuthenticationEntryPoint` · `AccessDeniedHandler` 커스텀이 따라옵니다.
+
+**진짜 필요해지는 때는 인증 방식 자체가 바뀔 때입니다.** 세션·쿠키 인증이 필요해지거나,
+CSRF 를 다뤄야 하거나, 한 요청에 여러 인증 수단이 섞이는 경우입니다. 이 서비스는 무상태
+JWT 라 지금으로선 해당 사항이 없습니다. 그런 요구가 실제로 생기면 그때 다시 봅니다.
 
 ---
 

@@ -147,13 +147,46 @@ documentRepository.findByIdAndUserId(id, userId)
         .orElseThrow(() -> new BusinessException(ErrorCode.DOCUMENT_NOT_FOUND));
 ```
 
-소유자가 있는 엔티티는 **리포지토리에 스코프 없는 조회를 두지 않습니다.**
-`findById` 가 없으면 남의 것을 꺼낼 방법 자체가 없습니다.
+조회뿐 아니라 **목록·수정·삭제도 같습니다.**
+
+```java
+documentRepository.findAllByUserId(userId)
+documentRepository.deleteByIdAndUserId(id, userId)
+```
 
 `FORBIDDEN` 이 아니라 `NOT_FOUND` 를 내는 것도 의도입니다. 남의 ID 를 넣었을 때
 "그 ID 가 존재하긴 한다" 는 사실이 새지 않습니다.
 
-`EndpointAuthGuardTest` 는 여기까지 검사하지 못합니다. 이건 리뷰에서 봅니다.
+### 소유자 있는 엔티티는 Repository 를 상속합니다
+
+규칙만으로는 부족합니다. **`JpaRepository` 를 상속하면 `findById` · `findAll` ·
+`deleteById` 가 자동으로 딸려옵니다.** 스코프 쿼리를 만들어 둬도 옆에 있는
+`findById` 를 그냥 쓰면 그대로 뚫립니다.
+
+소유자가 있는 엔티티는 `Repository` 를 상속해 **필요한 메서드만 열어둡니다.**
+
+```java
+// findById 가 없습니다. 쓰려고 해도 컴파일이 안 됩니다
+public interface DocumentRepository extends Repository<Document, String> {
+
+    Optional<Document> findByIdAndUserId(String id, String userId);
+
+    List<Document> findAllByUserId(String userId);
+
+    Document save(Document document);
+}
+```
+
+`User` · `Company` 처럼 **소유자 개념이 없는 엔티티는 `JpaRepository` 를 그대로 씁니다.**
+회사 정보에는 "남의 것" 이 없습니다.
+
+### 예외 — 내부 경로
+
+AI 서버가 부르는 `/api/internal/**` 에는 `userId` 가 없습니다. `AiSecretFilter` 의
+공유 시크릿이 대신 지키는 구간입니다. 여기서 쓸 조회는 이름을 구분해
+(`findByIdForInternal` 등) 내부 경로 밖에서 쓰지 않도록 합니다.
+
+`EndpointAuthGuardTest` 는 여기까지 검사하지 못합니다. 소유자 검사는 리뷰에서 봅니다.
 
 ### spring-security 를 언제 도입하나
 

@@ -40,6 +40,16 @@ spring:
 
 server:
   port: 8080
+  # 프록시(nginx/ALB) 뒤에 놓을 때만 framework 로 켜세요.
+  #
+  # 켜면 ForwardedHeaderFilter 가 X-Forwarded-For 를 보고 getRemoteAddr() 을
+  # 실제 클라이언트 IP 로 바꿔줍니다. 호출 제한이 IP 로 세기 때문에, 프록시 뒤에서
+  # 이걸 안 켜면 미인증 사용자 전원이 한 IP 로 뭉쳐 한 명이 나머지를 막습니다.
+  #
+  # 반대로 프록시가 없는데 켜면 아무나 X-Forwarded-For 를 위조해 매 요청 다른 IP 인
+  # 척할 수 있어 호출 제한이 통째로 무력화됩니다. AI 비용이 걸린 엔드포인트라
+  # 기본값은 none 입니다. 프록시를 붙이는 배포 환경에서만 framework 로 주세요.
+  forward-headers-strategy: ${SERVER_FORWARD_HEADERS_STRATEGY:none}
   servlet:
     encoding:
       charset: UTF-8
@@ -60,7 +70,10 @@ app:
 
   jwt:
     secret: ${APP_JWT_SECRET:local-dev-only-secret-change-me-at-least-32-bytes}
-    access-token-validity: 12h
+    # 로그아웃이 access token 을 즉시 무효화하지 못합니다(무상태). 그 창을 좁히려고
+    # 짧게 잡았습니다. 늘리려면 그만큼 탈취 후 사용 가능 시간이 늘어납니다.
+    access-token-validity: 30m
+    refresh-token-validity: 14d
 
   ai:
     base-url: ${APP_AI_BASE_URL:http://localhost:8000}

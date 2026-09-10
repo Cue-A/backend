@@ -51,6 +51,7 @@ STT, LLM, TTS, 시선 분석은 전부 별도 Python AI 서버에서 처리하�
 | 전체 구조 파악 | `docs/00-architecture.md` |
 | 코드 작성 (항상) | `docs/01-conventions.md` |
 | 엔티티·리포지토리 | `docs/02-database.md` |
+| 로그인, 토큰, 프론트 401 처리 | `docs/03-auth.md` |
 | AI 서버 호출, 폴링, 에러 처리 | `docs/10-ai-client.md` |
 | 면접 세션, 질문·답변 | `docs/11-interview.md` |
 | 재연습 | `docs/12-replay.md` |

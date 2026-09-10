@@ -2,6 +2,7 @@ package com.cuea.domain.auth.controller;
 
 import com.cuea.common.annotation.RateLimit;
 import com.cuea.common.result.Result;
+import com.cuea.common.security.PublicApi;
 import com.cuea.domain.auth.dto.request.RefreshRequest;
 import com.cuea.domain.auth.dto.response.TokenResponse;
 import com.cuea.domain.auth.service.TokenService;
@@ -25,6 +26,8 @@ import org.springframework.web.bind.annotation.RestController;
  * 만료된 access token 을 달고 오기 때문입니다.
  */
 @Tag(name = "인증")
+@PublicApi("재발급·로그아웃은 정의상 만료된 access token 을 달고 들어옵니다. "
+        + "refresh token 자체가 자격증명이라 본문에서 검증합니다.")
 @RestController
 @RequestMapping("/api/auth")
 @RequiredArgsConstructor

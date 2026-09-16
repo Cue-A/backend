@@ -53,6 +53,9 @@ public enum ErrorCode {
     TTS_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "음성 합성에 실패했습니다"),
     INVALID_QUESTION_ID(HttpStatus.BAD_REQUEST, "존재하지 않는 질문 ID 입니다"),
     RESUME_PARSE_FAILED(HttpStatus.UNPROCESSABLE_ENTITY, "이력서를 읽지 못했습니다. 다른 파일로 시도해 주세요"),
+    // AI 서버 errorCode 가 아니라, AI 응답이 계약과 다를 때 Backend 가 내는 코드입니다.
+    // 예: 첫 질문 자리에 session_end / 알 수 없는 type 이 온 경우.
+    UNEXPECTED_AI_RESPONSE(HttpStatus.BAD_GATEWAY, "AI 응답을 해석할 수 없습니다"),
 
     // ── 리포트 ──────────────────────────────────────────────
     // 계약 도착 전이라 아직 채우지 않았습니다. docs/13-report.md 참고.

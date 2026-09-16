@@ -36,9 +36,13 @@ Base URL은 프로파일 설정값(`app.ai.base-url`)을 씁니다.
 POST /ai/sessions          →  202  { session_id, task_id, question_total }
 GET  /ai/tasks/{task_id}   →  { status: "processing", stage: "stt" }
 GET  /ai/tasks/{task_id}   →  { status: "done", result: { ... } }
+GET  /ai/tasks/{task_id}   →  { status: "error", error_code: "STT_FAILED", message: "..." }
 ```
 
-폴링 간격은 **1초**입니다.
+폴링 간격은 **1초**입니다. 상태는 `processing` | `done` | `error` 세 가지이며,
+실패는 `error`(+`error_code`)로 옵니다. `AiTaskStatusResponse.isFailed()` 는 최신
+계약의 `error` 와 레거시/mock 의 `failed` 를 모두 실패로 인식하고, `error_code` 를
+`AiErrorTranslator` 로 옮겨 타임아웃으로 오인하지 않게 합니다.
 
 ## 세션 시작 요청
 

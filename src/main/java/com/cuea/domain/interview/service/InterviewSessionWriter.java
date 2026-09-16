@@ -82,12 +82,18 @@ public class InterviewSessionWriter {
     }
 
     private QuestionType toQuestionType(String aiType) {
+        if (AiQuestionResult.TYPE_QUESTION.equals(aiType)) {
+            return QuestionType.QUESTION;
+        }
         if (AiQuestionResult.TYPE_FOLLOWUP.equals(aiType)) {
             return QuestionType.FOLLOWUP;
         }
         if (AiQuestionResult.TYPE_REASK.equals(aiType)) {
             return QuestionType.REASK;
         }
-        return QuestionType.QUESTION;
+        // session_end / null / 알 수 없는 type 은 질문으로 저장할 수 없습니다.
+        // 첫 질문 자리에 이런 값이 오면 계약 위반이므로 UNEXPECTED_AI_RESPONSE 로 막습니다.
+        throw new BusinessException(ErrorCode.UNEXPECTED_AI_RESPONSE,
+                "질문 타입이 아닌 AI 응답입니다: type=" + aiType);
     }
 }

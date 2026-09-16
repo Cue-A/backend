@@ -247,4 +247,76 @@ class InterviewStartServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.DOCUMENT_NOT_FOUND);
     }
+
+    @Test
+    void questionCount_가_null_이면_기본값_6_으로_AI_에_보낸다() {
+        AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_q", "task_q", 6);
+        when(aiClient.startSession(any())).thenReturn(aiResponse);
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6)))
+                .thenReturn(fakeSession("sess_q"));
+
+        service.start(USER_ID, new InterviewStartRequest(
+                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, null));
+
+        ArgumentCaptor<AiSessionStartRequest> captor = ArgumentCaptor.forClass(AiSessionStartRequest.class);
+        verify(aiClient).startSession(captor.capture());
+        assertThat(captor.getValue().questionCount()).isEqualTo(6);
+    }
+
+    @Test
+    void questionCount_가_3_6_9_외의_값이면_AI_호출_전에_거부한다() {
+        assertThatThrownBy(() -> service.start(USER_ID, new InterviewStartRequest(
+                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, 4)))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.INVALID_QUESTION_COUNT);
+
+        // 0 도 마찬가지로 거부(mock 이 session_end 를 첫 결과로 주는 값).
+        assertThatThrownBy(() -> service.start(USER_ID, new InterviewStartRequest(
+                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, 0)))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.INVALID_QUESTION_COUNT);
+
+        verify(aiClient, never()).startSession(any());
+        verify(firstQuestionPoller, never()).pollAndDeliver(anyString(), anyString(), any());
+    }
+
+    @Test
+    void MARKDOWN_문서는_presigned_URL_을_만들_수_없어_AI_호출_전에_거부한다() {
+        Document markdown = Document.builder()
+                .docId(2L)
+                .publicId(DOCUMENT_PUBLIC_ID)
+                .user(user)
+                .docTitle("대본")
+                .docType(DocType.SCRIPT)
+                .sourceType(SourceType.MARKDOWN)   // objectKey 없음
+                .docText("직접 입력한 본문")
+                .status(DocumentStatus.READY)
+                .build();
+        when(documentRepository.findByPublicIdAndUser_UserId(DOCUMENT_PUBLIC_ID, USER_ID))
+                .thenReturn(Optional.of(markdown));
+
+        assertThatThrownBy(() -> service.start(USER_ID, request(null)))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.UNSUPPORTED_FILE_TYPE);
+
+        verify(aiClient, never()).startSession(any());
+        verify(firstQuestionPoller, never()).pollAndDeliver(anyString(), anyString(), any());
+    }
+
+    @Test
+    void 로컬_세션_저장이_실패하면_AI_세션을_abort_하고_원본_예외를_던진다() {
+        AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_x", "task_x", 6);
+        when(aiClient.startSession(any())).thenReturn(aiResponse);
+        BusinessException writeError = new BusinessException(ErrorCode.INTERNAL_ERROR, "DB 저장 실패");
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6))).thenThrow(writeError);
+
+        assertThatThrownBy(() -> service.start(USER_ID, request(null)))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.INTERNAL_ERROR);
+
+        // AI 세션은 이미 만들어졌으므로 보상 abort 를 시도해야 한다.
+        verify(aiClient).abortSession("sess_x");
+        // 저장이 실패했으니 폴러는 시작하지 않는다.
+        verify(firstQuestionPoller, never()).pollAndDeliver(anyString(), anyString(), any());
+    }
 }

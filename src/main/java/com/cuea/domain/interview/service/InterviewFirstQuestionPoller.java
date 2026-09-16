@@ -67,15 +67,38 @@ public class InterviewFirstQuestionPoller {
             return;
         }
 
-        if (taskStatus.result() == null) {
-            log.warn("AI 가 첫 질문 없이 완료를 반환했습니다 sessionId={}", sessionId);
-            BusinessException e = new BusinessException(ErrorCode.AI_UNAVAILABLE, "AI 로부터 첫 질문을 받지 못했습니다");
+        // 첫 질문 자리에 결과가 없거나 session_end 가 오면 정상 질문이 아닙니다.
+        // AI 계약상 첫 task 는 question/followup 을 돌려줘야 하므로 실패로 처리합니다.
+        if (taskStatus.result() == null || taskStatus.result().isSessionEnd()) {
+            log.warn("AI 가 첫 질문을 주지 않았습니다 sessionId={} type={}",
+                    sessionId, taskStatus.result() == null ? "null" : taskStatus.result().type());
+            BusinessException e = new BusinessException(
+                    ErrorCode.UNEXPECTED_AI_RESPONSE, "AI 로부터 첫 질문을 받지 못했습니다");
             cleanupFailedSession(sessionId, e);
             pushError(sessionId, e);
             return;
         }
 
-        Question firstQuestion = sessionWriter.saveFirstQuestion(sessionId, taskStatus.result());
+        // 저장·전달 단계의 실패도 폴링 실패와 같은 정리·통지 경로로 보냅니다.
+        // 여기서 예외가 새면 @Async void 라 세션이 IN_PROGRESS 로 영구 잔류합니다.
+        Question firstQuestion;
+        try {
+            firstQuestion = sessionWriter.saveFirstQuestion(sessionId, taskStatus.result());
+        } catch (BusinessException e) {
+            log.warn("첫 질문 저장 실패 sessionId={} errorCode={}", sessionId, e.getErrorCode());
+            cleanupFailedSession(sessionId, e);
+            pushError(sessionId, e);
+            return;
+        } catch (RuntimeException e) {
+            log.warn("첫 질문 저장 중 예기치 못한 오류 sessionId={}", sessionId, e);
+            BusinessException wrapped = new BusinessException(
+                    ErrorCode.UNEXPECTED_AI_RESPONSE, "첫 질문 저장에 실패했습니다");
+            wrapped.addSuppressed(e);
+            cleanupFailedSession(sessionId, wrapped);
+            pushError(sessionId, wrapped);
+            return;
+        }
+
         pushFirstQuestion(sessionId, firstQuestion, questionTotal);
     }
 

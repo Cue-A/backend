@@ -142,4 +142,67 @@ class InterviewFirstQuestionPollerTest {
         ErrorPushMessage payload = (ErrorPushMessage) captor.getValue().payload();
         assertThat(payload.errorCode()).isEqualTo("AI_TIMEOUT");
     }
+
+    @Test
+    void 첫결과가_session_end_이면_질문으로_저장하지_않고_세션을_정리한다() {
+        // 첫 task 자리에 session_end 가 오면 계약 위반. 질문으로 저장하면 null 필드로
+        // DB 오류가 나므로, UNEXPECTED_AI_RESPONSE 로 막고 세션을 정리한다.
+        AiQuestionResult sessionEnd = new AiQuestionResult(
+                AiQuestionResult.TYPE_SESSION_END, null, null, null, null, null, null,
+                null, 9, null, null, false, false, 9);
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenReturn(new AiTaskStatusResponse(AiTaskStatusResponse.STATUS_DONE, null, sessionEnd, null, null));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        verify(sessionWriter, org.mockito.Mockito.never()).saveFirstQuestion(anyString(), any());
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+
+        ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
+        verify(socketHandler).push(eq(SESSION_ID), captor.capture());
+        assertThat(captor.getValue().type()).isEqualTo("error");
+        ErrorPushMessage payload = (ErrorPushMessage) captor.getValue().payload();
+        assertThat(payload.errorCode()).isEqualTo("UNEXPECTED_AI_RESPONSE");
+    }
+
+    @Test
+    void 첫질문_저장이_실패하면_세션을_정리하고_error_를_push_한다() {
+        // saveFirstQuestion 실패도 폴링 실패와 같은 cleanup/error 경로를 타야 한다.
+        // 그러지 않으면 세션이 IN_PROGRESS 로 영구 잔류한다.
+        AiQuestionResult result = firstQuestion();
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenReturn(new AiTaskStatusResponse(AiTaskStatusResponse.STATUS_DONE, null, result, null, null));
+        when(sessionWriter.saveFirstQuestion(eq(SESSION_ID), eq(result)))
+                .thenThrow(new BusinessException(ErrorCode.UNEXPECTED_AI_RESPONSE, "질문 타입이 아닌 AI 응답입니다"));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+
+        ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
+        verify(socketHandler).push(eq(SESSION_ID), captor.capture());
+        assertThat(captor.getValue().type()).isEqualTo("error");
+        ErrorPushMessage payload = (ErrorPushMessage) captor.getValue().payload();
+        assertThat(payload.errorCode()).isEqualTo("UNEXPECTED_AI_RESPONSE");
+    }
+
+    @Test
+    void status_error_는_await_에서_실패로_인식되어_error_code_가_보존된다() {
+        // 최신 계약의 실패 상태 error. AiPoller 가 실패로 인식해 실제 errorCode 를
+        // 담은 BusinessException 을 던지면, 여기서 그 코드로 error push 해야 한다.
+        // (timeout 으로 오인되지 않아야 한다.)
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.STT_FAILED, "음성을 인식하지 못했습니다"));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
+        verify(socketHandler).push(eq(SESSION_ID), captor.capture());
+        assertThat(captor.getValue().type()).isEqualTo("error");
+        ErrorPushMessage payload = (ErrorPushMessage) captor.getValue().payload();
+        assertThat(payload.errorCode()).isEqualTo("STT_FAILED");
+        assertThat(payload.errorCode()).isNotEqualTo("AI_TIMEOUT");
+    }
 }

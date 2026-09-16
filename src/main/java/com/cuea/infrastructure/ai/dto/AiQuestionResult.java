@@ -4,7 +4,8 @@ package com.cuea.infrastructure.ai.dto;
  * 작업 완료 시 돌아오는 결과.
  *
  * <p>{@code type} 은 question | followup | reask | session_end 네 가지입니다.
- * reask 는 category·difficulty 만 null 이고 나머지는 채워집니다.
+ * reask 는 category·difficulty 만 null 이고 나머지는 채워지며, {@code reask_of} 로
+ * 원 질문의 questionId 를 알려줍니다. 그 외 타입은 reaskOf 가 null 입니다.
  * audioUrl 은 TTS_FAILED 시 null 입니다.
  * isSpareTopic·isReplay 는 항상 포함되므로 nullable 처리가 필요 없습니다.
  */
@@ -12,6 +13,7 @@ package com.cuea.infrastructure.ai.dto;
 public record AiQuestionResult(
         String type,
         String questionId,
+        String reaskOf,
         String text,
         String audioUrl,
         String category,

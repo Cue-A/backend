@@ -61,9 +61,15 @@ public class Company extends BaseCreatedEntity {
     private ValuesFormat valuesFormat;
 
     /**
-     * 핵심 가치 3~6개. {@code [{"name": ..., "behaviors": [...]}]} 형태입니다.
+     * 핵심 가치 3~6개. {@code [{"name": ..., "indicator": "..."}]} 형태입니다.
      *
-     * <p>기업마다 항목 수와 깊이가 달라 컬럼으로 펴지 않고 jsonb 로 둡니다.
+     * <p>{@code indicator} 는 배열이 아니라 문장 하나입니다. AI 계약의
+     * {@code company_profile_override} 조립 형식("가치 이름 — 행동지표")과
+     * AI 팀이 제공한 {@code companies.json} 실 데이터를 기준으로 정했습니다.
+     * 기업마다 항목 수가 달라 컬럼으로 펴지 않고 jsonb 로 둡니다.
+     *
+     * <p>파싱은 직접 하지 말고 {@link com.cuea.domain.company.service.CompanyProfileFormatter}
+     * 를 쓰세요.
      */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "core_values", nullable = false, columnDefinition = "jsonb")

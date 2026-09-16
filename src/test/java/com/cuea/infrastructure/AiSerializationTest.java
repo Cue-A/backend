@@ -20,11 +20,16 @@ class AiSerializationTest {
     void AI_방향_JSON_은_snake_case_다() throws Exception {
         String json = objectMapper.writeValueAsString(new AiSessionStartRequest(
                 "https://example.com/resume.pdf", "백엔드 개발", "pressure",
-                "hyundai_enc", 6, "sess_1st", List.of()));
+                "17", "현대건설(주) (종합건설 · 플랜트)\n핵심 가치\n  도전 — 새로운 시도를 두려워하지 않는다",
+                6, "sess_1st", List.of(), null));
 
         assertThat(json).contains("\"resume_file_url\"", "\"job_role\"",
-                "\"question_count\"", "\"retry_of_session_id\"", "\"replay_log\"");
-        assertThat(json).doesNotContain("resumeFileUrl");
+                "\"question_count\"", "\"retry_of_session_id\"", "\"replay_log\"",
+                "\"company_profile_override\"");
+        // company_id 는 Backend company PK 의 문자열 표현이라 값이 있으면 그대로 실려 나갑니다.
+        assertThat(json).contains("\"company_id\":\"17\"");
+        // doc_id 는 예약 필드라 항상 null 이며, NON_NULL 정책으로 직렬화에서 빠집니다.
+        assertThat(json).doesNotContain("resumeFileUrl", "\"doc_id\"");
     }
 
     @Test

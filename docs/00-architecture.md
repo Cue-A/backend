@@ -152,8 +152,7 @@ cue-a/
     │   │   │   │   ├── PresignedUrlIssuer.java
     │   │   │   │   └── FileValidator.java
     │   │   │   ├── redis/
-    │   │   │   │   ├── RedisService.java
-    │   │   │   │   └── CompanyCache.java
+    │   │   │   │   └── RedisService.java
     │   │   │   └── mapper/                         MapStruct
     │   │   │
     │   │   └── domain/                     ── 비즈니스 도메인

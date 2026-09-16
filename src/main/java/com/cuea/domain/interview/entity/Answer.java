@@ -31,7 +31,7 @@ import java.util.Map;
  * 답변하지 않고 끝난 질문에는 이 행이 없습니다. 문항 수를 셀 때 {@code question}
  * 기준인지 {@code answer} 기준인지 구분하세요.
  *
- * <p>녹음 파일 위치는 여기가 아니라 {@link Question#getAnswerAudioUrl()} 입니다.
+ * <p>녹음 파일 위치는 여기가 아니라 {@link Question#getAnswerAudioObjectKey()} 입니다.
  * 업로드 완료 시점에는 아직 분석 전이라 이 행이 없기 때문입니다.
  *
  * <p>{@link Question} 이 복합키라 FK 도 {@code (session_id, question_id)} 두

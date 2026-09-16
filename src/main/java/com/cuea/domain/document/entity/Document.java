@@ -105,15 +105,6 @@ public class Document extends BaseTimeEntity {
     @Column(name = "file_format", length = 10)
     private FileFormat fileFormat;
 
-    /**
-     * AI 서버의 RAG 인덱스 참조값.
-     *
-     * <p>AI 파트가 발급한 문자열을 그대로 보관만 합니다. Spring 은 벡터 저장소를
-     * 읽지도 쓰지도 않습니다. docs/90-open-questions.md 3번 참고.
-     */
-    @Column(name = "ai_doc_ref", length = 100)
-    private String aiDocRef;
-
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private DocumentStatus status;
@@ -122,10 +113,9 @@ public class Document extends BaseTimeEntity {
         this.status = DocumentStatus.PARSING;
     }
 
-    /** 파싱 완료. AI 가 준 인덱스 참조를 같이 받습니다. */
-    public void markReady(String aiDocRef) {
+    /** 파싱 완료. */
+    public void markReady() {
         this.status = DocumentStatus.READY;
-        this.aiDocRef = aiDocRef;
     }
 
     public void markFailed() {

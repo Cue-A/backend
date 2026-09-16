@@ -36,6 +36,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -318,5 +319,23 @@ class InterviewStartServiceTest {
         verify(aiClient).abortSession("sess_x");
         // 저장이 실패했으니 폴러는 시작하지 않는다.
         verify(firstQuestionPoller, never()).pollAndDeliver(anyString(), anyString(), any());
+    }
+
+    @Test
+    void 폴러_제출이_실패하면_세션을_ABORTED로_정리하고_AI세션도_중단한다() {
+        // @Async 태스크 제출 자체가 실패하는(예: 종료 중 거부) 경우. 세션은 이미
+        // IN_PROGRESS 로 저장됐으므로 정리하지 않으면 영구 잔류한다.
+        AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_p", "task_p", 6);
+        when(aiClient.startSession(any())).thenReturn(aiResponse);
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6)))
+                .thenReturn(fakeSession("sess_p"));
+        doThrow(new org.springframework.core.task.TaskRejectedException("executor shutting down"))
+                .when(firstQuestionPoller).pollAndDeliver("sess_p", "task_p", 6);
+
+        assertThatThrownBy(() -> service.start(USER_ID, request(null)))
+                .isInstanceOf(RuntimeException.class);
+
+        verify(aiClient).abortSession("sess_p");
+        verify(sessionWriter).markAborted("sess_p");
     }
 }

@@ -204,5 +204,26 @@ class InterviewFirstQuestionPollerTest {
         ErrorPushMessage payload = (ErrorPushMessage) captor.getValue().payload();
         assertThat(payload.errorCode()).isEqualTo("STT_FAILED");
         assertThat(payload.errorCode()).isNotEqualTo("AI_TIMEOUT");
+        // STT 실패는 재시도 가능하고 재녹음 안내가 필요하다.
+        assertThat(payload.retryable()).isTrue();
+        assertThat(payload.needsRerecord()).isTrue();
+    }
+
+    @Test
+    void timeout_은_재시도_불가로_내려간다() {
+        // AI_TIMEOUT 은 Backend 자체 코드다. 이름이 AI 원본 코드가 아니므로 retryable 은
+        // false 여야 한다(예전엔 문자열 기준이라 항상 false 로 우연히 맞았지만, 이제는
+        // ErrorCode 기준으로 명시적으로 판정한다).
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.AI_TIMEOUT));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
+        verify(socketHandler).push(eq(SESSION_ID), captor.capture());
+        ErrorPushMessage payload = (ErrorPushMessage) captor.getValue().payload();
+        assertThat(payload.errorCode()).isEqualTo("AI_TIMEOUT");
+        assertThat(payload.retryable()).isFalse();
+        assertThat(payload.needsRerecord()).isFalse();
     }
 }

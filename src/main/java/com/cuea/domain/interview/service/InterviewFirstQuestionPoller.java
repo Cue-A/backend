@@ -139,12 +139,12 @@ public class InterviewFirstQuestionPoller {
     }
 
     private void pushError(String sessionId, BusinessException e) {
-        String aiErrorCode = e.getErrorCode().name();
+        ErrorCode errorCode = e.getErrorCode();
         socketHandler.push(sessionId, ErrorPushMessage.of(new ErrorPushMessage(
-                aiErrorCode,
+                errorCode.name(),
                 e.getMessage(),
-                errorTranslator.isRetryable(aiErrorCode),
-                "STT_FAILED".equals(aiErrorCode)
+                errorTranslator.isRetryable(errorCode),
+                errorTranslator.needsRerecord(errorCode)
         )));
     }
 }

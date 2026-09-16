@@ -103,20 +103,46 @@ public class InterviewStartService {
             sessionWriter.createSession(user, document, company, request, aiResponse, questionCount);
         } catch (RuntimeException e) {
             log.warn("로컬 세션 저장 실패로 AI 세션을 중단합니다 sessionId={}", aiResponse.sessionId());
-            try {
-                aiClient.abortSession(aiResponse.sessionId());
-            } catch (RuntimeException cleanupError) {
-                e.addSuppressed(cleanupError);
-                log.warn("AI 세션 중단도 실패 sessionId={}", aiResponse.sessionId(), cleanupError);
-            }
+            // 세션 저장이 실패했으니 우리 DB 에는 세션 행이 없습니다. AI 세션만 정리합니다.
+            abortAiSessionQuietly(aiResponse.sessionId(), e);
             throw e;
         }
 
         // 폴링(최대 90초)은 HTTP 요청 스레드에서 기다리지 않고 백그라운드로 넘깁니다.
-        firstQuestionPoller.pollAndDeliver(
-                aiResponse.sessionId(), aiResponse.taskId(), aiResponse.questionTotal());
+        // @Async 태스크 제출 자체가 실패하면(예: 종료 중 TaskRejectedException) 세션이
+        // 이미 IN_PROGRESS 로 저장돼 있으므로, 폴링이 시작조차 못 해 영구 잔류합니다.
+        // 그 경우 세션을 ABORTED 로 정리하고 AI 세션도 중단합니다.
+        try {
+            firstQuestionPoller.pollAndDeliver(
+                    aiResponse.sessionId(), aiResponse.taskId(), aiResponse.questionTotal());
+        } catch (RuntimeException e) {
+            log.warn("첫 질문 폴링 시작에 실패해 세션을 정리합니다 sessionId={}", aiResponse.sessionId(), e);
+            abortAiSessionQuietly(aiResponse.sessionId(), e);
+            markSessionAbortedQuietly(aiResponse.sessionId(), e);
+            throw e;
+        }
 
         return new InterviewStartResponse(aiResponse.sessionId(), aiResponse.questionTotal());
+    }
+
+    /** AI 세션 중단을 시도하되, 실패해도 원인 예외({@code cause})를 덮지 않습니다. */
+    private void abortAiSessionQuietly(String sessionId, RuntimeException cause) {
+        try {
+            aiClient.abortSession(sessionId);
+        } catch (RuntimeException cleanupError) {
+            cause.addSuppressed(cleanupError);
+            log.warn("AI 세션 중단 실패 sessionId={}", sessionId, cleanupError);
+        }
+    }
+
+    /** 우리 세션을 ABORTED 로 정리하되, 실패해도 원인 예외({@code cause})를 덮지 않습니다. */
+    private void markSessionAbortedQuietly(String sessionId, RuntimeException cause) {
+        try {
+            sessionWriter.markAborted(sessionId);
+        } catch (RuntimeException cleanupError) {
+            cause.addSuppressed(cleanupError);
+            log.warn("세션 ABORTED 처리 실패 sessionId={}", sessionId, cleanupError);
+        }
     }
 
     /**

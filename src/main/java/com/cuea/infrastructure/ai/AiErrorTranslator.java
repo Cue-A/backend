@@ -33,11 +33,28 @@ public class AiErrorTranslator {
     }
 
     /**
+     * 우리 {@link ErrorCode} 기준 재시도 가능 여부.
+     *
+     * <p>AI 원본 errorCode 는 {@code AiPoller} 가 {@link BusinessException} 으로 옮기면서
+     * 문자열을 잃습니다. 그 뒤 흐름(예: WebSocket error push)에서는 AI 문자열이 아니라
+     * 우리 {@code ErrorCode} 만 남으므로, enum 이름이 아니라 enum 자체로 판정합니다.
+     * {@code LLM_FAILED}·{@code STT_FAILED} 는 이름이 AI 코드와 1:1 이라 같은 값을 가리킵니다.
+     */
+    public boolean isRetryable(ErrorCode errorCode) {
+        return errorCode == ErrorCode.LLM_FAILED || errorCode == ErrorCode.STT_FAILED;
+    }
+
+    /**
      * TTS 실패는 질문 텍스트가 이미 만들어진 상태일 수 있습니다.
      * 음성 없이 텍스트로 계속 진행해야 하며 프론트에도 알려야 합니다.
      */
     public boolean isAudioOnlyFailure(String aiErrorCode) {
         return "TTS_FAILED".equals(aiErrorCode);
+    }
+
+    /** {@link ErrorCode} 기준. STT 실패는 같은 오디오로는 결과가 같아 재녹음 안내가 필요합니다. */
+    public boolean needsRerecord(ErrorCode errorCode) {
+        return errorCode == ErrorCode.STT_FAILED;
     }
 
     /** 복구 불가라 세션을 aborted 로 내려야 하는 경우. */

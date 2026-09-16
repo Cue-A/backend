@@ -72,9 +72,16 @@ public class InterviewSession extends BaseTimeEntity {
     @JoinColumn(name = "company_id")
     private Company company;
 
-    /** 문서 없이 직무만으로 보는 세션이면 null. */
-    @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "document_id")
+    /**
+     * 면접의 근거가 되는 문서. Issue #23 부터 필수입니다.
+     *
+     * <p>ERD 초안과 기존 구현은 nullable("문서 없이 직무만으로 보는 세션")이었지만,
+     * AI 세션 시작 요청에 {@code resume_file_url} 이 필수이므로 문서 없는 세션은
+     * 성립하지 않습니다. 기존에 NULL 인 행이 있다면 배포 전 데이터 정리가
+     * 필요합니다. PR 본문의 DB migration 절 참고.
+     */
+    @ManyToOne(fetch = FetchType.LAZY, optional = false)
+    @JoinColumn(name = "document_id", nullable = false)
     private Document document;
 
     /** 폴더에 넣지 않은 세션이면 null. 폴더가 지워져도 null 이 됩니다. */
@@ -103,7 +110,7 @@ public class InterviewSession extends BaseTimeEntity {
     @Column(nullable = false, length = 20)
     private String mode;
 
-    @Column(name = "job_role", nullable = false, length = 50)
+    @Column(name = "job_role", nullable = false, length = 100)
     private String jobRole;
 
     /** 회사를 고르지 않고 인재상을 직접 적은 경우의 원문. */
@@ -119,9 +126,18 @@ public class InterviewSession extends BaseTimeEntity {
     @Column(name = "question_count", nullable = false)
     private int questionCount;
 
-    /** 압박 강도. 값 목록 미확정이라 문자열로 둡니다. */
-    @Column(name = "pressure_level", nullable = false, length = 10)
-    private String pressureLevel;
+    /**
+     * 면접관의 압박 강도. AI 계약의 {@code persona} 필드({@code friendly|pressure})에
+     * 대응합니다.
+     *
+     * <p>기존 {@code pressure_level VARCHAR(10)} 컬럼을 이 필드로 교체했습니다.
+     * {@code ddl-auto: update} 는 컬럼명 변경을 인식하지 못해 새 컬럼
+     * {@code persona} 를 추가만 하고 기존 {@code pressure_level} 컬럼은 그대로
+     * 남습니다. 배포 시 수동 조치가 필요합니다. PR 본문의 DB migration 절 참고.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private Persona persona;
 
     /** 질문 텍스트를 숨기고 음성만 들려주는 실전 모드인지. */
     @Column(name = "hide_question_text", nullable = false)

@@ -113,7 +113,6 @@ mime_type     VARCHAR(100)  NULL       -- FILE 만
 file_size     BIGINT        NULL       -- FILE 만
 file_format   VARCHAR(10)   NULL       -- PDF | DOCX | TXT | PPTX. FILE 만
 doc_text      TEXT          NULL       -- MARKDOWN 만
-ai_doc_ref    VARCHAR(100)  NULL       -- AI RAG 인덱스 참조
 status        VARCHAR(20)   NOT NULL   -- UPLOADED | PARSING | READY | FAILED
 created_at    TIMESTAMPTZ   NOT NULL
 updated_at    TIMESTAMPTZ   NOT NULL
@@ -128,8 +127,18 @@ updated_at    TIMESTAMPTZ   NOT NULL
 `status` 가 `READY` 가 되기 전에는 세션을 시작할 수 없습니다. AI 서버가 문서를
 읽을 수 없는 상태입니다.
 
-`ai_doc_ref` 는 AI 가 준 문자열을 보관만 합니다. **벡터 저장소는 AI 파트 소유이며
-Spring 은 읽지도 쓰지도 않습니다.** JPA 엔티티를 만들지 마세요.
+면접 자료는 기존 `PORTFOLIO` 타입을 그대로 씁니다. 별도 `RESUME` 타입은
+추가하지 않습니다.
+
+### ★ ai_doc_ref 를 제거했습니다 (Issue #23)
+
+AI 계약이 확정되면서 `doc_id`(AI 쪽 이력서 파싱 캐시 키)가 지금은 항상 `null`이고
+Spring이 값을 받아 보관할 일이 없다는 것이 명확해졌습니다. 기존
+`ai_doc_ref VARCHAR(100)` 컬럼과 `Document.markReady(String)` 을 제거했습니다.
+
+**`ddl-auto: update` 는 컬럼 삭제를 하지 않습니다.** 배포 환경에 기존
+`ai_doc_ref` 컬럼이 남아 있다면 필요 시 수동으로 `DROP COLUMN` 하세요. 이 PR은
+DROP 스크립트를 포함하지 않습니다. 자세한 내용은 PR 본문의 DB migration 절 참고.
 
 ---
 
@@ -159,14 +168,14 @@ session
 session_id           VARCHAR(50)   PK        -- ★ AI가 발급
 user_id              VARCHAR(50)   NOT NULL FK -> users(user_id)
 company_id           BIGINT        NULL FK   -- 회사 미선택 연습 모드
-document_id          BIGINT        NULL FK   -- 문서 없이 직무만으로 보는 세션
+document_id          BIGINT        NOT NULL FK -- ★ Issue #23 부터 필수
 folder_id            BIGINT        NULL FK   -- 폴더에 넣지 않은 세션
 retry_of_session_id  VARCHAR(50)   NULL FK   -- ★ 항상 최초 세션 ID
 mode                 VARCHAR(20)   NOT NULL
-job_role             VARCHAR(50)   NOT NULL
+job_role             VARCHAR(100)  NOT NULL
 custom_talent        TEXT          NULL      -- 인재상 직접 입력
 question_count       INT           NOT NULL  -- 3 | 6 | 9. 기본 6
-pressure_level       VARCHAR(10)   NOT NULL
+persona              VARCHAR(20)   NOT NULL  -- FRIENDLY | PRESSURE
 hide_question_text   BOOLEAN       NOT NULL  -- 음성만 듣는 실전 모드
 duration_limit       INT           NULL      -- 답변 제한 시간(초)
 status               VARCHAR(20)   NOT NULL  -- IN_PROGRESS | COMPLETED | ABORTED
@@ -184,18 +193,38 @@ completed_at         TIMESTAMPTZ   NULL
 잡으면 AI 가 준 세션 ID 를 둘 컬럼이 없어집니다. 이 값 자체가 연속되지 않는
 외부 노출 식별자이므로 `public_id` 도 따로 두지 않습니다.
 
+### ★ document_id 가 NOT NULL 입니다 (Issue #23)
+
+AI 세션 시작 요청(`POST /ai/sessions`)의 `resume_file_url` 이 필수라, 문서 없는
+세션은 성립하지 않습니다. 기존에는 "문서 없이 직무만으로 보는 세션"을 허용해
+nullable 이었지만 이번 이슈부터 NOT NULL 로 바꿨습니다.
+
+**기존 DB에 `document_id` 가 NULL 인 세션 행이 있다면 NOT NULL 제약을 추가하기
+전에 데이터 정리가 필요합니다.** 자세한 절차는 PR 본문의 DB migration 절 참고.
+
 ### 나머지
 
 `company_id` 가 NULL 허용인 것이 중요합니다. 회사를 고르지 않고 연습만 하는
-사용자가 있습니다. `document_id`, `folder_id` 도 같은 이유로 NULL 허용입니다.
+사용자가 있습니다. `folder_id` 도 같은 이유로 NULL 허용입니다.
 
 `retry_of_session_id` 는 **직전 회차가 아니라 항상 최초 세션**을 가리킵니다.
 3회차에서 이 값은 2회차가 아니라 1회차입니다. 회차 목록은 "같은 루트를 가진
 세션 전부"로 뽑으며 직전 회차로 채우면 목록 조회가 재귀 쿼리가 됩니다.
 자세한 내용은 [`12-replay.md`](./12-replay.md).
 
-`mode`, `pressure_level` 은 값 목록이 확정되지 않아 자바에서도 `String` 입니다.
-정해지면 enum 으로 올리세요.
+`mode` 는 값 목록이 확정되지 않아 자바에서도 `String` 입니다. 정해지면 enum 으로
+올리세요.
+
+### ★ persona (Issue #23 — pressure_level 대체)
+
+압박 강도는 기존 `pressure_level VARCHAR(10)` 자유 문자열 대신 `persona` enum 으로
+바꿨습니다. 값은 `FRIENDLY`(순한맛) · `PRESSURE`(매운맛) 이며, AI 요청 시
+소문자 `friendly` · `pressure` 로 직렬화합니다(`Persona.toAiValue()`).
+
+**`ddl-auto: update` 는 컬럼명 변경을 rename 으로 인식하지 못합니다.** 새 컬럼
+`persona` 를 추가만 하고 기존 `pressure_level` 컬럼은 그대로 남습니다. 배포 시
+데이터를 옮기고 옛 컬럼을 정리하는 수동 작업이 필요합니다. PR 본문의 DB
+migration 절 참고.
 
 `folder` 를 지우면 `folder_id` 가, 세션을 지우면 `retry_of_session_id` 가
 `SET NULL` 됩니다.
@@ -208,20 +237,23 @@ completed_at         TIMESTAMPTZ   NULL
 
 ```sql
 question
-session_id        VARCHAR(50)   -- PK (복합), FK -> session(session_id)
-question_id       VARCHAR(50)   -- PK (복합). AI 발급
-type              VARCHAR(20)   NOT NULL  -- QUESTION | FOLLOWUP | REASK
-text              TEXT          NOT NULL
-audio_url         TEXT          NULL      -- TTS_FAILED 시 null
-category          VARCHAR(20)   NULL      -- REASK는 null
-difficulty        VARCHAR(5)    NULL      -- REASK는 null
-is_spare_topic    BOOLEAN       NOT NULL
-is_replay         BOOLEAN       NOT NULL
-question_number   INT           NOT NULL  -- REASK 에서는 안 올라감
-topic_index       INT           NOT NULL
-answer_audio_url  TEXT          NULL      -- 사용자 녹음. 업로드 완료 시 채움
-is_bookmarked     BOOLEAN       NOT NULL
-created_at        TIMESTAMPTZ   NOT NULL
+session_id              VARCHAR(50)   -- PK (복합), FK -> session(session_id)
+question_id             VARCHAR(50)   -- PK (복합). AI 발급
+type                    VARCHAR(20)   NOT NULL  -- QUESTION | FOLLOWUP | REASK
+text                    TEXT          NOT NULL
+audio_url               TEXT          NULL      -- TTS_FAILED 시 null
+category                VARCHAR(20)   NULL      -- REASK는 null
+difficulty              VARCHAR(5)    NULL      -- REASK는 null
+reask_of                VARCHAR(50)   NULL      -- ★ REASK 일 때 원 질문의 question_id
+is_spare_topic          BOOLEAN       NOT NULL
+is_replay               BOOLEAN       NOT NULL
+question_number         INT           NOT NULL  -- REASK 에서는 안 올라감
+topic_index             INT           NOT NULL
+answer_audio_object_key TEXT          NULL      -- ★ 사용자 답변 오디오 S3 key. 업로드 완료 시 채움
+answer_video_object_key TEXT          NULL      -- ★ 사용자 답변 영상 S3 key. 카메라 미사용 시 null
+answer_is_timeout       BOOLEAN       NOT NULL  -- ★ 제한 시간 만료로 자동 제출됐는지
+is_bookmarked           BOOLEAN       NOT NULL
+created_at              TIMESTAMPTZ   NOT NULL
 ```
 
 ```sql
@@ -265,10 +297,35 @@ public class Question {
 
 ### ★ 녹음은 question, 분석 결과는 answer
 
-`answer_audio_url` 이 `answer` 가 아니라 `question` 에 있습니다. **업로드가 끝난
-시점에는 아직 AI 분석 전이라 `answer` 행이 없습니다.** 답변하지 않고 끝난
+`answer_audio_object_key` 가 `answer` 가 아니라 `question` 에 있습니다. **업로드가
+끝난 시점에는 아직 AI 분석 전이라 `answer` 행이 없습니다.** 답변하지 않고 끝난
 질문에도 `answer` 행이 없으므로, 문항 수를 셀 때 어느 테이블 기준인지
 구분하세요.
+
+URL 이 아니라 **S3 object key** 를 저장합니다. Presigned URL 은 만료되므로
+`document.object_key` 와 같은 규칙입니다. 재생이 필요하면
+`PresignedUrlIssuer.issueRecordingDownload` 로 그때 다시 URL 을 만듭니다.
+
+이번 이슈(#23)에서는 컬럼만 추가했습니다. `answer_audio_object_key` ·
+`answer_video_object_key` · `answer_is_timeout` 에 실제 값을 채우는 답변 제출
+로직은 다음 이슈 범위입니다.
+
+### ★ reask_of
+
+되묻기(`REASK`)일 때 원 질문의 `question_id` 를 담습니다. AI 계약의 `reask_of` 에
+대응합니다. FK 는 걸지 않습니다 — 복합키를 다시 참조하려면 조인 컬럼이 늘고,
+이 값은 표시·추적용입니다. `QUESTION`·`FOLLOWUP` 이면 null 입니다.
+
+### ★ answer_audio_url 을 answer_audio_object_key 로 교체했습니다 (Issue #23)
+
+기존 `answer_audio_url TEXT` 컬럼은 이름과 달리 실제로는 URL 이 아니라 저장
+위치를 담는 용도로 쓰였습니다. `document.object_key` 규칙과 맞추기 위해
+`answer_audio_object_key` 로 이름을 바꿨습니다.
+
+**`ddl-auto: update` 는 컬럼명 변경을 rename 으로 인식하지 못합니다.** 새 컬럼을
+추가만 하고 기존 `answer_audio_url` 컬럼은 그대로 남습니다. 배포 시 데이터를
+옮기고 옛 컬럼을 정리하는 수동 작업이 필요합니다. PR 본문의 DB migration 절
+참고.
 
 ### ★ category 는 enum으로 만들지 않습니다
 
@@ -358,7 +415,7 @@ company_id       BIGINT        PK
 company_name     VARCHAR(100)  UNIQUE NOT NULL
 industry         VARCHAR(100)  NOT NULL
 values_format    VARCHAR(20)   NOT NULL  -- WORD | PRINCIPLE | MIXED
-core_values      JSONB         NOT NULL  -- [{"name":..., "behaviors":[...]}]
+core_values      JSONB         NOT NULL  -- [{"name":..., "indicator":"..."}]
 job_requirements JSONB         NULL      -- 직무를 키로 하는 요구역량
 source_url       TEXT[]        NOT NULL  -- 출처. 복수 가능
 talent_profile   TEXT          NULL
@@ -383,6 +440,36 @@ UNIQUE (user_id, company_id)
 이름은 `updated_at` 인데 타입이 `DATE` 이고 의미는 "이 정보를 언제 긁어왔는가"
 입니다. 자동 갱신되면 안 되므로 자바 필드명은 `collectedOn` 으로 다릅니다.
 `getUpdatedAt()` 으로 두면 감사 컬럼으로 착각합니다.
+
+### ★ core_values 구조 — behaviors 배열이 아니라 indicator 문자열입니다 (Issue #23)
+
+ERD 초안 문서는 `[{"name": ..., "behaviors": [...]}]` 형태를 가정했지만, AI 팀이
+실제로 제공한 `companies.json` 은 `indicator` 를 배열이 아닌 문장 하나로 담습니다.
+
+```json
+[
+  {
+    "name": "Bar Raising",
+    "indicator": "이만하면 됐다 싶은 지점에서 한 번 더 고민한다."
+  }
+]
+```
+
+AI 계약(질문 생성 API 계약 6장)의 `company_profile_override` 형식도 이 구조를
+그대로 따릅니다.
+
+```
+기업명 (업종)
+핵심 가치
+  가치 이름 — 행동지표
+  가치 이름 — 행동지표
+```
+
+이 문자열 조립은 `CompanyProfileFormatter` 가 담당합니다. `core_values` JSON 을
+직접 파싱하는 코드를 다른 곳에 새로 만들지 마세요.
+
+**companies.json 의 시드·임포트 기능은 이번 이슈 범위가 아닙니다.** 이 PR 은
+스키마와 조립 로직만 반영하며, 실제 데이터 적재는 별도로 진행합니다.
 
 ### values_format 을 PostgreSQL enum 으로 만들지 않습니다
 

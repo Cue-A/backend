@@ -16,8 +16,12 @@ Base URL은 프로파일 설정값(`app.ai.base-url`)을 씁니다.
 | POST | `/ai/sessions` | 세션 시작 |
 | POST | `/ai/sessions/{sessionId}/answers` | 답변 제출 |
 | GET | `/ai/tasks/{taskId}` | 작업 상태 조회 (폴링) |
-| GET | `/ai/companies` | 회사 목록 |
 | POST | `/ai/sessions/{sessionId}/abort` | 세션 중단 |
+
+**`GET /ai/companies` 는 없습니다.** 기업 데이터의 Source of Truth 는 Backend
+`company` 테이블입니다. 면접 시작 시 선택된 기업의 인재상을
+`company_profile_override` 문자열로 조립해 보내며, AI 서버는 그 텍스트를 질문
+생성에 반영할 뿐 저장하지 않습니다. 아래 "회사 정보 전달" 절 참고.
 
 요청·응답 JSON은 **snake_case** 입니다. `infrastructure/ai/dto` 에만
 `@JsonNaming(SnakeCaseStrategy.class)` 를 붙이고 경계에서 변환합니다.
@@ -35,6 +39,39 @@ GET  /ai/tasks/{task_id}   →  { status: "done", result: { ... } }
 ```
 
 폴링 간격은 **1초**입니다.
+
+## 세션 시작 요청
+
+```json
+{
+  "resume_file_url": "https://s3.../resume_abc.pdf",
+  "job_role": "백엔드 개발",
+  "persona": "pressure",
+  "company_id": "17",
+  "company_profile_override": "현대건설(주) (종합건설 · 플랜트)\n핵심 가치\n  도전 — 새로운 시도를 두려워하지 않는다",
+  "question_count": 9,
+  "retry_of_session_id": null,
+  "doc_id": null
+}
+```
+
+```
+resume_file_url           필수. 백엔드가 발급한 presigned URL(만료 15분)
+job_role                  필수. 자유 문자열
+persona                   필수. "friendly" | "pressure" — Persona.toAiValue() 로 직렬화
+company_id                Backend company.company_id(BIGINT PK)를 문자열로 변환한 값.
+                           AI 는 조회 key 가 아니라 로그·추적용 opaque ID 로만 씁니다.
+                           회사 미선택이면 null (JSON 에서 빠짐)
+company_profile_override  기업을 선택했으면 반드시 채웁니다. CompanyProfileFormatter
+                           가 company.core_values 로 조립합니다. 미선택이면 null
+question_count            선택. 3 | 6 | 9. 기본값 6
+retry_of_session_id       선택. 재연습이면 최초 세션 ID
+doc_id                    예약 필드. 항상 null
+```
+
+**질문 생성용 기업 정보는 `company_id` 가 아니라 `company_profile_override` 로
+전달합니다.** Backend 의 `company` 테이블이 기업 데이터의 Source of Truth 이며,
+AI 서버는 기업 목록을 갖지 않습니다. `docs/02-database.md` 의 core_values 절 참고.
 
 ### 타임아웃 — 두 종류로 분리
 
@@ -54,6 +91,33 @@ GET  /ai/tasks/{task_id}   →  { status: "done", result: { ... } }
 [`01-conventions.md`](./01-conventions.md) 의 트랜잭션 항목 참고.
 
 가상 스레드가 켜져 있으므로 블로킹 폴링을 써도 됩니다.
+
+### HTTP 요청 스레드 밖에서 (비동기)
+
+AI 계약은 `task_id` 를 즉시 반환하는 비동기 모델입니다. 폴링(최대 90초)을 HTTP
+요청 스레드에서 기다리면 REST 응답이 그만큼 늦어집니다. 그래서 세션 시작은
+아래처럼 나눕니다.
+
+```
+Front  ──POST /api/interviews──▶  Spring
+                                    ├─ Document/Company 조회
+                                    ├─ POST /ai/sessions  (session_id, task_id 수신)
+                                    ├─ session 저장 (IN_PROGRESS)
+                                    └─ 202 응답 즉시 반환 { sessionId, questionTotal }
+                                        │
+                                        └─(background, 가상 스레드 @Async)
+                                            ├─ task_id 폴링
+                                            ├─ 첫 Question 저장
+                                            └─ WebSocket push
+```
+
+폴링·저장·전달은 `InterviewFirstQuestionPoller`(`@Async`, 가상 스레드 실행기)가
+맡습니다. `@Async` 는 프록시를 거쳐야 하므로 진입 서비스와 **다른 빈**으로
+분리합니다. 프론트는 REST 응답을 받는 즉시 `/ws/interviews/{sessionId}` 에
+연결해 첫 질문·진행 상황·오류 push 를 받습니다.
+
+백그라운드 폴링이 실패하면 REST 는 이미 반환된 뒤이므로, 세션을 `ABORTED` 로
+정리하고 오류를 WebSocket(`type: "error"`)으로 알립니다.
 
 ---
 
@@ -90,7 +154,8 @@ GET  /ai/tasks/{task_id}   →  { status: "done", result: { ... } }
 ```
 
 - `is_spare_topic`, `is_replay` 는 **항상 포함**됩니다. nullable 처리 불필요
-- `reask` 는 `category`, `difficulty` 만 null이고 나머지는 채워집니다
+- `reask` 는 `category`, `difficulty` 만 null이고 나머지는 채워지며, `reask_of` 로
+  원 질문의 `question_id` 를 알려줍니다. 그 외 타입은 `reask_of` 가 없습니다
 - `audio_url` 은 `TTS_FAILED` 시 null입니다
 
 ---
@@ -144,7 +209,7 @@ public enum ProgressStage {
 내부 통신이므로 JWT를 쓰지 않습니다. 공유 시크릿 헤더를 씁니다.
 
 ```
-X-CueA-Secret: ${APP_AI_SECRET}
+X-Cueanda-Secret: ${APP_AI_SECRET}
 ```
 
 AI 서버는 내부망에 두고 외부 노출을 막습니다.
@@ -164,20 +229,62 @@ AI 서버가 자체적으로 세션 상태(진행 중인 토픽, 꼬리질문 �
 
 ---
 
-## 회사 목록
+## 회사 정보 전달
 
-`GET /ai/companies` 를 그대로 프론트에 프록시합니다.
+**AI 서버는 기업 목록을 갖지 않습니다.** 기업 데이터의 Source of Truth 는
+Backend `company` 테이블이며, 면접 시작·리포트 요청 때 선택된 기업의 인재상을
+`company_profile_override` 문자열로만 전달합니다.
 
-**DB에 저장하지 않습니다.** 원본이 두 곳에 있으면 반드시 어긋납니다.
-거의 바뀌지 않으므로 Redis에 **1시간** 캐시합니다.
+### 조립 형식
 
-```json
-[
-  { "company_id": "hyundai_enc", "name": "현대건설(주)", "industry": "종합건설 · 플랜트" }
-]
+`CompanyProfileFormatter` 가 `company.core_values`(`[{name, indicator}]` 구조)를
+읽어 아래 형식의 문자열을 만듭니다.
+
+```
+기업명 (업종)
+핵심 가치
+  가치 이름 — 행동지표
+  가치 이름 — 행동지표
 ```
 
-미검증 회사는 AI 서버에서 걸러서 내보냅니다.
+실제 예시:
+
+```
+현대건설(주) (종합건설 · 플랜트)
+핵심 가치
+  도전 — 새로운 시도를 두려워하지 않는다
+  신뢰 — 약속한 품질과 일정을 지킨다
+```
+
+이 문자열을 `AiSessionStartRequest.companyProfileOverride` 에 담아 보냅니다.
+기업을 선택하지 않은 연습 모드면 `company_profile_override` 는 null 입니다.
+
+### verified 필터
+
+`verified=false` 인 기업은 서비스에 노출하지 않습니다. 조회 시점에
+`CompanyRepository.findByCompanyIdAndVerifiedTrue` 로 걸러, 미검증 기업 ID 로는
+세션을 시작할 수 없습니다. 공식 채용페이지에서 확인되지 않은 내용으로 질문을
+만들면 틀린 정보가 나갑니다.
+
+### company_id 필드 — 로그·추적용 opaque ID
+
+AI 는 `company_id` 로 기업 데이터를 **조회하지 않습니다.** AI 팀 확정 사항:
+`company_id` 는 AI 내부 기업 데이터 조회 key 가 아니라 로그·문제 추적용 식별자이며,
+값 형식은 Backend 가 정합니다.
+
+따라서 Backend 는 **`company.company_id`(BIGINT PK)를 문자열로 변환해** 보냅니다.
+
+```
+company.company_id = 17  →  "company_id": "17"
+```
+
+- AI 는 이 값을 기업 조회에 쓰지 않습니다. 로그·추적용 opaque ID 입니다.
+- 실제 질문 생성용 기업 정보는 `company_profile_override` 로 전달합니다.
+- `companies.json` 의 과거 문자열 ID(예: `"sk_hynix"`)는 AI 연동 ID 로 쓰지 않습니다.
+- 별도 `ai_company_id` 컬럼은 두지 않습니다.
+- 회사를 선택하지 않은 연습 모드면 `company_id` 는 null 이며, `@JsonInclude(NON_NULL)`
+  로 인해 전송 JSON 에서 키 자체가 빠집니다.
+- `GET /ai/companies` 는 사용하지 않습니다.
 
 ---
 

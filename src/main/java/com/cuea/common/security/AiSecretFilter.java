@@ -20,7 +20,7 @@ import java.security.MessageDigest;
 
 /**
  * AI 서버가 Spring 을 호출할 때 쓰는 내부 경로({@code /api/internal/**})를 지킵니다.
- * 내부 통신이라 JWT 대신 공유 시크릿 헤더({@code X-CueA-Secret})를 씁니다.
+ * 내부 통신이라 JWT 대신 공유 시크릿 헤더({@code X-Cueanda-Secret})를 씁니다.
  *
  * <p>현재 내부 엔드포인트는 없습니다. AI 파트가 콜백을 요구하면 이 경로 아래에
  * 만드세요. 나가는 방향 헤더는 {@code RealAiClient} 가 붙입니다.
@@ -30,7 +30,7 @@ import java.security.MessageDigest;
 @RequiredArgsConstructor
 public class AiSecretFilter extends OncePerRequestFilter {
 
-    public static final String HEADER = "X-CueA-Secret";
+    public static final String HEADER = "X-Cueanda-Secret";
     private static final String PROTECTED_PREFIX = "/api/internal/";
 
     private final AiProperties aiProperties;

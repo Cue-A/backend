@@ -32,6 +32,18 @@ spring:
       host: ${SPRING_DATA_REDIS_HOST:localhost}
       port: ${SPRING_DATA_REDIS_PORT:6379}
 
+  # 문서 업로드가 이 서버를 통과합니다(Issue #28). 기본값은 파일 1MB 라
+  # 그대로 두면 10MB 자소서가 전부 막힙니다.
+  #
+  # 우리 상한(10MB)보다 일부러 조금 크게 잡았습니다. 낮거나 같게 두면 톰캣이
+  # 먼저 잘라서 FileValidator 의 FILE_SIZE_EXCEEDED 메시지가 나갈 기회가 없고,
+  # 경계값에서 어느 쪽이 거절했는지에 따라 응답이 갈립니다. 이 값은 넘어오는
+  # 것 자체를 막는 backstop 이고, 실제 거절은 FileValidator 가 합니다.
+  servlet:
+    multipart:
+      max-file-size: 11MB
+      max-request-size: 12MB
+
   # null 을 빼지 않습니다. docs/01-conventions.md 의 Result 예시가 errorCode·message 를
   # null 로 명시하고 있고, audio_url·company_id 처럼 "null 이라는 사실" 자체가 의미인
   # 필드들이 있습니다. 키가 통째로 사라지면 프론트가 구분하지 못합니다.

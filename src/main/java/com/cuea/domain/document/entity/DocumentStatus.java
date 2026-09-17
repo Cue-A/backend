@@ -1,22 +1,29 @@
 package com.cuea.domain.document.entity;
 
 /**
- * 문서 파싱 진행 상태.
+ * 문서의 내부 처리 상태. DB 의 {@code status} 컬럼입니다.
  *
- * <p>{@code READY} 가 되기 전에는 면접 세션을 시작할 수 없습니다.
- * AI 서버가 문서를 읽을 수 없는 상태이기 때문입니다.
+ * <p>프론트로 그대로 나가지 않습니다. 경계에서 {@link IndexStatus} 로 좁혀
+ * 내보냅니다. 이유는 {@code IndexStatus} 주석 참고.
  */
 public enum DocumentStatus {
 
-    /** 업로드만 끝난 상태. 기본값. */
+    /** 저장은 끝났지만 아직 본문을 읽지 못한 상태. */
     UPLOADED,
 
-    /** AI 서버가 파싱 중. */
+    /** AI 인덱싱 진행 중. */
     PARSING,
 
-    /** 파싱 완료. 세션에 붙일 수 있습니다. */
+    /** 면접에 쓸 수 있는 상태. */
     READY,
 
-    /** 파싱 실패. 재업로드가 필요합니다. */
-    FAILED
+    FAILED;
+
+    public IndexStatus toIndexStatus() {
+        return switch (this) {
+            case UPLOADED, PARSING -> IndexStatus.PROCESSING;
+            case READY -> IndexStatus.COMPLETED;
+            case FAILED -> IndexStatus.FAILED;
+        };
+    }
 }

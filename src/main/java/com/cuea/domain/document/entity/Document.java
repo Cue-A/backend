@@ -24,7 +24,7 @@ import org.hibernate.annotations.OnDeleteAction;
 import java.util.UUID;
 
 /**
- * 면접의 근거가 되는 사용자 문서. 포트폴리오·발표자료·대본.
+ * 면접의 근거가 되는 사용자 문서. 자기소개서·포트폴리오.
  *
  * <p>{@code docId} 는 내부 조인용이고 <b>외부로 나가는 식별자는 {@code publicId}</b>
  * 입니다. 컨트롤러·DTO 에서 {@code docId} 를 노출하지 마세요. 연속된 정수라
@@ -117,6 +117,61 @@ public class Document extends BaseTimeEntity {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     private DocumentStatus status;
+
+    /**
+     * 파일로 등록된 문서.
+     *
+     * <p>{@code publicId} 를 <b>밖에서 받습니다.</b> 저장소 키에 이 값이 들어가므로
+     * 엔티티를 만들기 전에 이미 발급돼 있어야 합니다. 여기서 새로 만들면 파일이
+     * 올라간 위치와 문서가 가리키는 위치가 달라집니다.
+     */
+    public static Document ofFile(User user,
+                                  UUID publicId,
+                                  DocType docType,
+                                  String title,
+                                  String fileName,
+                                  String objectKey,
+                                  String mimeType,
+                                  long fileSize,
+                                  FileFormat fileFormat,
+                                  DocumentStatus status) {
+        return Document.builder()
+                .user(user)
+                .publicId(publicId)
+                .docType(docType)
+                .docTitle(title)
+                .sourceType(SourceType.FILE)
+                .fileName(fileName)
+                .objectKey(objectKey)
+                .mimeType(mimeType)
+                .fileSize(fileSize)
+                .fileFormat(fileFormat)
+                .status(status)
+                .build();
+    }
+
+    /** 사용자가 직접 작성한 문서. 올라간 파일이 없으므로 {@code objectKey} 계열은 전부 null 입니다. */
+    public static Document ofMarkdown(User user,
+                                      UUID publicId,
+                                      DocType docType,
+                                      String title,
+                                      String docText,
+                                      DocumentStatus status) {
+        return Document.builder()
+                .user(user)
+                .publicId(publicId)
+                .docType(docType)
+                .docTitle(title)
+                .sourceType(SourceType.MARKDOWN)
+                .docText(docText)
+                .status(status)
+                .build();
+    }
+
+    /** 프론트에 나가는 인덱싱 상태. 내부 단계를 그대로 노출하지 않습니다. */
+    public IndexStatus indexStatus() {
+        return status.toIndexStatus();
+    }
 
     public void markParsing() {
         this.status = DocumentStatus.PARSING;

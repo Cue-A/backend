@@ -1,6 +1,9 @@
 package com.cuea.domain.document.repository;
 
+import com.cuea.domain.document.entity.DocType;
 import com.cuea.domain.document.entity.Document;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.repository.Repository;
 
 import java.util.Optional;
@@ -29,4 +32,14 @@ public interface DocumentRepository extends Repository<Document, Long> {
     long countByUser_UserId(String userId);
 
     Document save(Document document);
+
+    /**
+     * 목록 조회도 소유자로 먼저 좁힙니다.
+     *
+     * <p>{@code findAll(pageable)} 로 가져와 걸러내는 방식은, 남의 문서가 페이지를
+     * 차지해 내 문서가 빈 페이지로 보입니다. 개수와 페이지 수도 전부 틀립니다.
+     */
+    Page<Document> findByUser_UserId(String userId, Pageable pageable);
+
+    Page<Document> findByUser_UserIdAndDocType(String userId, DocType docType, Pageable pageable);
 }

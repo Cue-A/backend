@@ -1,6 +1,7 @@
 package com.cuea.common.exception;
 
 import com.cuea.common.result.Result;
+import com.cuea.infrastructure.file.FileValidator;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.ResponseEntity;
 import org.springframework.validation.FieldError;
@@ -11,6 +12,7 @@ import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.ServletRequestBindingException;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
 import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.stream.Collectors;
@@ -92,6 +94,25 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Result<Void>> handleTypeMismatch(MethodArgumentTypeMismatchException e) {
         log.warn("파라미터 타입이 맞지 않습니다 name={}", e.getName());
         return respond(ErrorCode.INVALID_REQUEST, e.getName() + ": 형식이 올바르지 않습니다");
+    }
+
+    /**
+     * 톰캣이 multipart 상한에서 잘라낸 경우.
+     *
+     * <p>핸들러가 없으면 맨 아래 {@code handleUnexpected} 로 떨어져 <b>파일이
+     * 크다는 사용자 잘못이 500 + ERROR 로그</b>가 됩니다. 큰 파일을 올리는
+     * 사용자 몇 명이면 진짜 장애가 로그에 묻힙니다.
+     *
+     * <p>{@code FileValidator} 가 내는 것과 같은 코드·같은 메시지를 씁니다.
+     * 톰캣이 잘랐든 우리가 잘랐든 프론트가 할 일은 "파일을 줄이세요" 하나인데,
+     * 경계값 근처에서 어느 쪽이 걸렀는지에 따라 안내가 달라지면 사용자는 상한이
+     * 몇인지 알 수 없게 됩니다.
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<Result<Void>> handleUploadTooLarge(MaxUploadSizeExceededException e) {
+        log.warn("업로드 상한 초과 max={}", e.getMaxUploadSize());
+        return respond(ErrorCode.FILE_SIZE_EXCEEDED, "파일 크기가 %dMB를 초과했습니다"
+                .formatted(FileValidator.DOCUMENT_MAX_BYTES / 1024 / 1024));
     }
 
     @ExceptionHandler(Exception.class)

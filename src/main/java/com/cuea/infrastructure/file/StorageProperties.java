@@ -24,11 +24,13 @@ public record StorageProperties(
      * @param resumeGet    이력서 GET(AI 전달용). Celery 큐 지연 대비로 15분. 줄이지 마세요
      * @param uploadPut    업로드 PUT
      * @param recordingGet 녹음 다운로드 GET. 사용자가 리포트를 보며 재생합니다
+     * @param documentGet  사용자가 자기 문서를 다시 볼 때 쓰는 GET
      */
     public record Presign(
             Duration resumeGet,
             Duration uploadPut,
-            Duration recordingGet
+            Duration recordingGet,
+            Duration documentGet
     ) {
     }
 }

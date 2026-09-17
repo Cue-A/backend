@@ -50,6 +50,18 @@ public class PresignedUrlIssuer {
         return issueDownload(objectKey, properties.presign().resumeGet());
     }
 
+    /**
+     * 사용자가 자기 문서를 다시 볼 때 쓰는 GET.
+     *
+     * <p>{@link #issueResumeDownload} 와 나눈 이유는 <b>만료를 따로 잡아야 하기
+     * 때문</b>입니다. 그쪽 15분은 AI 의 Celery 큐 지연에 맞춘 값이고, 이쪽은
+     * 사람이 브라우저에서 열어보는 시간입니다. 하나로 합치면 한쪽 사정 때문에
+     * 다른 쪽이 끌려다닙니다.
+     */
+    public String issueDocumentDownload(String objectKey) {
+        return issueDownload(objectKey, properties.presign().documentGet());
+    }
+
     /** 사용자가 리포트를 보며 재생하는 녹음. */
     public String issueRecordingDownload(String objectKey) {
         return issueDownload(objectKey, properties.presign().recordingGet());

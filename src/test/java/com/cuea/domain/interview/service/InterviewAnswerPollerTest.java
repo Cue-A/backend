@@ -188,7 +188,7 @@ class InterviewAnswerPollerTest {
     // ── unknown type ───────────────────────────────────────────
 
     @Test
-    void 알_수_없는_result_type_은_Question_으로_저장하지_않고_error_를_push_한다() {
+    void 알_수_없는_result_type_은_Question_으로_저장하지_않고_세션을_정리하고_error_를_push_한다() {
         AiQuestionResult unknown = new AiQuestionResult(
                 "something_new", "q_x", null, "?", null, null, null,
                 null, 9, null, null, false, false, null);
@@ -198,6 +198,24 @@ class InterviewAnswerPollerTest {
 
         verify(sessionWriter, never()).saveNextQuestion(anyString(), any());
         verify(sessionWriter, never()).completeSession(anyString());
+        // Backend 판정 계약 위반(UNEXPECTED_AI_RESPONSE)은 상태 동기화 보장 불가라 세션 정리.
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("UNEXPECTED_AI_RESPONSE");
+    }
+
+    @Test
+    void 결과가_비어_있으면_세션을_정리하고_error_를_push_한다() {
+        // done 인데 result 가 null. 계약 위반이라 세션까지 정리한다.
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenReturn(new AiTaskStatusResponse(AiTaskStatusResponse.STATUS_DONE, null, null, null, null));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+
+        verify(sessionWriter, never()).saveNextQuestion(anyString(), any());
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
         ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
         assertThat(payload.errorCode()).isEqualTo("UNEXPECTED_AI_RESPONSE");
     }

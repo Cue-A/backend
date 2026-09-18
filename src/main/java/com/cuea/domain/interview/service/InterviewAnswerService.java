@@ -69,8 +69,8 @@ public class InterviewAnswerService {
     public AnswerUploadUrlResponse issueUploadUrls(String userId, String sessionId,
                                                    AnswerUploadUrlRequest request) {
         requireOwnedActiveSession(userId, sessionId);
-        // C2: 임의 questionId 로 PUT URL(→ orphan 50MB 객체)을 만들 수 없게, 발급 전에
-        // (sessionId, questionId) 질문이 실제 존재하는지 확인합니다. 다른 세션/임의 ID 거부.
+        // 임의 questionId 로 PUT URL(→ orphan 객체)을 만들 수 없게, 발급 전에 해당
+        // 질문이 이 세션에 실제 존재하는지 확인합니다. 다른 세션/임의 ID 는 거부됩니다.
         requireQuestionExists(sessionId, request.questionId());
 
         fileValidator.validateAnswerAudio(
@@ -108,7 +108,7 @@ public class InterviewAnswerService {
         String audioKey = requireValidAnswerAudioKey(sessionId, request.questionId(), request.audioObjectKey());
         String videoKey = requireValidAnswerVideoKey(sessionId, request.questionId(), request.videoObjectKey());
 
-        // C8: 실제 업로드가 끝나지 않은 key 로 답변을 진행하지 않습니다. AI 는 뒤늦게
+        // 실제 업로드가 끝나지 않은 key 로 답변을 진행하지 않습니다. AI 는 뒤늦게
         // 객체 없음을 발견하므로, AI 호출 전에 S3 에 객체가 있는지 확인해 거부합니다.
         requireUploaded(audioKey);
         if (videoKey != null) {
@@ -135,14 +135,20 @@ public class InterviewAnswerService {
 
         String taskId = aiClient.submitAnswer(sessionId, aiRequest);
         if (taskId == null || taskId.isBlank()) {
-            throw new BusinessException(ErrorCode.UNEXPECTED_AI_RESPONSE,
+            // 계약 위반: 답변은 접수됐을 수 있는데 폴링 handle 이 없습니다. AI 와 우리
+            // 상태가 어긋났을 수 있어, 폴러 제출 실패와 동일하게 세션을 정리합니다.
+            BusinessException e = new BusinessException(ErrorCode.UNEXPECTED_AI_RESPONSE,
                     "AI 가 답변 task_id 를 주지 않았습니다");
+            log.warn("AI 가 답변 task_id 를 주지 않아 세션을 정리합니다 sessionId={}", sessionId);
+            abortAiSessionQuietly(sessionId, e);
+            markSessionAbortedQuietly(sessionId, e);
+            throw e;
         }
 
-        // C4: 폴링(최대 60초)은 백그라운드로 넘깁니다. @Async 태스크 제출 자체가 실패
-        // 하면(예: 종료 중 TaskRejectedException) AI task 는 이미 수락됐고 폴러가 시작조차
-        // 못 해 영구 잔류합니다. 세션 시작(InterviewStartService)과 동일하게, AI 세션을
-        // abort 하고 우리 세션을 ABORTED 로 정리한 뒤 원본 예외를 다시 던집니다.
+        // 폴링(최대 60초)은 백그라운드로 넘깁니다. @Async 태스크 제출 자체가 실패하면
+        // (예: 종료 중 TaskRejectedException) AI task 는 이미 수락됐고 폴러가 시작조차 못
+        // 해 세션이 영구 잔류합니다. 세션 시작(InterviewStartService)과 동일하게, AI
+        // 세션을 abort 하고 우리 세션을 ABORTED 로 정리한 뒤 원본 예외를 다시 던집니다.
         try {
             answerPoller.pollAndDeliver(sessionId, taskId);
         } catch (RuntimeException e) {
@@ -176,7 +182,7 @@ public class InterviewAnswerService {
     /**
      * 세션을 소유자 기준으로 조회하고, 진행 중인지 확인합니다.
      *
-     * <p>C9: 정상 종료(COMPLETED)와 중단(ABORTED)을 구분해 각각 {@code SESSION_ENDED} ·
+     * <p>정상 종료(COMPLETED)와 중단(ABORTED)을 구분해 각각 {@code SESSION_ENDED} ·
      * {@code SESSION_ABORTED} 로 알립니다. 클라이언트가 두 상황을 다르게 안내할 수
      * 있어야 하기 때문입니다. error_code 별 재시도·중복 제출 정책은 Issue #25 범위이므로
      * 여기서는 상태 구분까지만 합니다.
@@ -197,9 +203,9 @@ public class InterviewAnswerService {
     }
 
     /**
-     * C2: {@code (sessionId, questionId)} 질문이 실제 존재하는지 확인합니다. 없으면
-     * {@code QUESTION_NOT_FOUND}. 소유권은 세션으로 이미 확인했으므로 여기서는 소속만
-     * 봅니다.
+     * {@code (sessionId, questionId)} 질문이 이 세션에 실제 존재하는지 확인합니다.
+     * 없으면 {@code QUESTION_NOT_FOUND}. 소유권은 세션으로 이미 확인했으므로 여기서는
+     * 소속만 봅니다.
      */
     private void requireQuestionExists(String sessionId, String questionId) {
         if (questionRepository.findBySessionIdAndQuestionId(sessionId, questionId).isEmpty()) {
@@ -207,7 +213,7 @@ public class InterviewAnswerService {
         }
     }
 
-    /** C8: object 가 실제 업로드됐는지 확인합니다. 없으면 업로드 미완료로 거부합니다. */
+    /** object 가 실제 업로드됐는지 확인합니다. 없으면 업로드 미완료로 거부합니다. */
     private void requireUploaded(String objectKey) {
         if (!storageService.exists(objectKey)) {
             throw new BusinessException(ErrorCode.UPLOAD_NOT_COMPLETED,

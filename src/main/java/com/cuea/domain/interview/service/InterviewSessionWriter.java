@@ -19,11 +19,12 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * {@link InterviewStartService} 가 쓰는 짧은 트랜잭션 전용 컴포넌트.
+ * 면접 세션의 짧은 트랜잭션 전용 공용 writer.
  *
- * <p>AI 호출(세션 시작 폴링 최대 90초)을 트랜잭션 밖에 두기 위해 DB 읽기·쓰기를
- * 여기 모았습니다. 각 메서드가 독립된 트랜잭션이며, 호출 순서는
- * {@code InterviewStartService.start()} 가 정합니다.
+ * <p>세션 시작({@link InterviewStartService})과 답변 진행({@link InterviewAnswerService})
+ * 양쪽이 함께 씁니다. AI 호출(폴링 최대 60~90초)을 트랜잭션 밖에 두기 위해 DB
+ * 읽기·쓰기를 여기 모았습니다. 각 메서드가 독립된 짧은 트랜잭션이며, 호출 순서는
+ * 각 진입 서비스가 정합니다.
  */
 @Component
 @RequiredArgsConstructor

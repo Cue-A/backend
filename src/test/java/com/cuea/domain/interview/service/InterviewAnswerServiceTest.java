@@ -276,7 +276,7 @@ class InterviewAnswerServiceTest {
     }
 
     @Test
-    void AI_가_task_id_를_주지_않으면_폴러에_위임하지_않고_실패한다() {
+    void AI_가_task_id_를_주지_않으면_세션을_정리하고_폴러에_위임하지_않는다() {
         when(presignedUrlIssuer.issueRecordingDownload(anyString())).thenReturn("https://s3/get");
         when(aiClient.submitAnswer(eq(SESSION_ID), any())).thenReturn(null);
 
@@ -285,6 +285,9 @@ class InterviewAnswerServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.UNEXPECTED_AI_RESPONSE);
 
+        // task_id 미수신은 계약 위반. AI/Backend 상태 동기화 보장 불가라 세션 정리.
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
         verify(answerPoller, never()).pollAndDeliver(anyString(), anyString());
     }
 

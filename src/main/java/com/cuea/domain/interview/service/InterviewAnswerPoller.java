@@ -46,17 +46,18 @@ import org.springframework.stereotype.Component;
  *
  * <h2>예외 처리 정책</h2>
  * <ul>
- *   <li><b>{@link BusinessException}</b> (AI 가 알려준 실패·타임아웃, 계약 위반 등) —
- *       원인 코드를 그대로 담아 {@link ErrorPushMessage} 로 알립니다. AI error_code 별
- *       재시도·세션 정리 정책은 Issue #25 범위이므로 여기서는 세션을 임의로 abort
- *       하지 않습니다.</li>
- *   <li><b>그 외 예상치 못한 {@link RuntimeException}</b> (응답 디코딩 실패 등) — Backend
- *       와 AI 의 세션 상태가 동기화됐다고 보장할 수 없으므로, AI 세션 abort 와 우리
- *       세션 {@code ABORTED} 정리를 시도하고 {@code UNEXPECTED_AI_RESPONSE} 로 알립니다.
- *       cleanup 실패가 원본 예외를 덮지 않도록 suppressed·로그로만 남깁니다.</li>
+ *   <li><b>AI 가 알려준 실패({@link BusinessException}, {@code UNEXPECTED_AI_RESPONSE}
+ *       이외)</b> — 원인 코드를 그대로 담아 {@link ErrorPushMessage} 로 알립니다.
+ *       AI error_code 별 재시도·세션 정리 정책은 Issue #25 범위이므로 여기서는 세션을
+ *       임의로 abort 하지 않습니다.</li>
+ *   <li><b>계약 위반·예상치 못한 실패</b> — 빈 결과, 알 수 없는 type, 응답 디코딩
+ *       실패, 저장 중 오류 등 Backend 가 {@code UNEXPECTED_AI_RESPONSE} 로 판정하는
+ *       경우입니다. 이때는 Backend 와 AI 의 세션 상태가 동기화됐다고 보장할 수 없으므로
+ *       AI 세션 abort 와 우리 세션 {@code ABORTED} 정리를 시도한 뒤 error push 합니다.
+ *       cleanup 실패가 원본 원인을 덮지 않도록 suppressed·로그로만 남깁니다.</li>
  * </ul>
- * 이렇게 해야 {@code @Async void} 밖으로 예외가 유실돼 프론트 통지 없이 세션이
- * {@code IN_PROGRESS} 로 잔류하는 것을 막습니다.
+ * 이렇게 해야 {@code @Async void} 밖으로 예외가 유실되거나 계약 위반 응답에서 세션이
+ * 프론트 통지만 받고 {@code IN_PROGRESS} 로 잔류하는 것을 막습니다.
  */
 @Slf4j
 @Component
@@ -93,54 +94,66 @@ public class InterviewAnswerPoller {
             return;
         } catch (RuntimeException e) {
             // 예상치 못한 예외(예: 응답 디코딩 실패). 상태 동기화를 보장할 수 없어 정리한다.
-            handleUnexpected(sessionId, "답변 폴링 중 예기치 못한 오류", e);
+            cleanupAndPushError(sessionId, "답변 폴링 중 예기치 못한 오류", unexpectedResponse(e));
             return;
         }
 
         AiQuestionResult result = taskStatus.result();
         if (result == null || result.type() == null) {
-            log.warn("답변 처리 결과가 비어 있습니다 sessionId={}", sessionId);
-            pushError(sessionId, new BusinessException(
-                    ErrorCode.UNEXPECTED_AI_RESPONSE, "AI 응답에 결과가 없습니다"));
+            // 계약 위반: 결과가 비어 있다. AI 상태와 어긋났을 수 있어 세션까지 정리한다.
+            cleanupAndPushError(sessionId, "답변 결과가 비어 있습니다",
+                    new BusinessException(ErrorCode.UNEXPECTED_AI_RESPONSE, "AI 응답에 결과가 없습니다"));
             return;
         }
 
         try {
             dispatch(sessionId, result);
         } catch (BusinessException e) {
-            // 계약 위반(알 수 없는 type 등). 통지만 한다.
-            log.warn("답변 결과 처리 실패 sessionId={} type={} errorCode={}",
-                    sessionId, result.type(), e.getErrorCode());
-            pushError(sessionId, e);
+            // Backend 가 판정한 계약 위반(알 수 없는 type 등)은 상태 동기화를 보장할 수
+            // 없어 세션까지 정리한다. AI 가 알려준 실패(그 외 코드)는 통지만 한다(#25).
+            if (e.getErrorCode() == ErrorCode.UNEXPECTED_AI_RESPONSE) {
+                cleanupAndPushError(sessionId, "답변 결과 계약 위반 type=" + result.type(), e);
+            } else {
+                log.warn("답변 결과 처리 실패 sessionId={} type={} errorCode={}",
+                        sessionId, result.type(), e.getErrorCode());
+                pushError(sessionId, e);
+            }
         } catch (RuntimeException e) {
             // 저장 중 예기치 못한 예외(예: DB 오류). 상태 동기화를 보장할 수 없어 정리한다.
-            handleUnexpected(sessionId, "답변 결과 처리 중 예기치 못한 오류 type=" + result.type(), e);
+            cleanupAndPushError(sessionId,
+                    "답변 결과 처리 중 예기치 못한 오류 type=" + result.type(), unexpectedResponse(e));
         }
     }
 
+    /** 예상치 못한 원인 예외를 계약 위반({@code UNEXPECTED_AI_RESPONSE})으로 감쌉니다. */
+    private BusinessException unexpectedResponse(RuntimeException cause) {
+        BusinessException wrapped = new BusinessException(
+                ErrorCode.UNEXPECTED_AI_RESPONSE, "답변 처리에 실패했습니다");
+        wrapped.addSuppressed(cause);
+        return wrapped;
+    }
+
     /**
-     * 예상치 못한 예외 처리: 원본 보존 → AI 세션 abort 시도 → 우리 세션 ABORTED 정리
-     * 시도 → {@code UNEXPECTED_AI_RESPONSE} error push. cleanup 예외는 원본을 덮지
+     * 계약 위반·예상치 못한 실패 정리: AI 세션 abort 시도 → 우리 세션 ABORTED 정리
+     * 시도 → error push. Backend 와 AI 상태 동기화를 보장할 수 없을 때 세션이
+     * {@code IN_PROGRESS} 로 잔류하지 않도록 합니다. cleanup 예외는 원본 원인을 덮지
      * 않도록 suppressed 로 붙이고 삼킵니다.
      */
-    private void handleUnexpected(String sessionId, String context, RuntimeException original) {
-        log.warn("{} sessionId={}", context, sessionId, original);
+    private void cleanupAndPushError(String sessionId, String context, BusinessException error) {
+        log.warn("{} sessionId={} errorCode={}", context, sessionId, error.getErrorCode());
         try {
             aiClient.abortSession(sessionId);
         } catch (RuntimeException cleanupError) {
-            original.addSuppressed(cleanupError);
+            error.addSuppressed(cleanupError);
             log.warn("AI 세션 중단 실패 sessionId={}", sessionId, cleanupError);
         }
         try {
             sessionWriter.markAborted(sessionId);
         } catch (RuntimeException cleanupError) {
-            original.addSuppressed(cleanupError);
+            error.addSuppressed(cleanupError);
             log.warn("세션 ABORTED 처리 실패 sessionId={}", sessionId, cleanupError);
         }
-        BusinessException wrapped = new BusinessException(
-                ErrorCode.UNEXPECTED_AI_RESPONSE, "답변 처리에 실패했습니다");
-        wrapped.addSuppressed(original);
-        pushError(sessionId, wrapped);
+        pushError(sessionId, error);
     }
 
     /** 결과 타입을 명시적으로 분기합니다. 알 수 없는 type 은 질문으로 저장하지 않습니다. */

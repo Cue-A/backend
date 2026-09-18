@@ -11,8 +11,9 @@ package com.cuea.infrastructure.file;
  * </pre>
  *
  * <p>답변 오디오·영상은 같은 {@code sessions/{sessionId}/answers/{questionId}} 계층을
- * 쓰되 확장자로 구분합니다. 포맷은 계약에서 고정하지 않아(webm·mp4 허용,
- * docs/20-storage.md) 실제 업로드 확장자를 그대로 씁니다. content-type 과
+ * 쓰되 영상에 {@code _video} 접미사를 붙여 구분합니다(오디오·영상 확장자가 같을 수
+ * 있어 확장자만으로는 key 가 겹치기 때문). 포맷은 계약에서 고정하지 않아(webm·mp4
+ * 허용, docs/20-storage.md) 실제 업로드 확장자를 그대로 씁니다. content-type 과
  * 확장자가 어긋나지 않도록 발급 시 {@code FileValidator} 로 함께 검증합니다.
  */
 public final class ObjectKeys {

@@ -4,6 +4,7 @@ import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.entity.Question;
 import com.cuea.domain.interview.entity.QuestionType;
+import com.cuea.infrastructure.ai.AiClient;
 import com.cuea.infrastructure.ai.AiErrorTranslator;
 import com.cuea.infrastructure.ai.AiPoller;
 import com.cuea.infrastructure.ai.AiProperties;
@@ -24,6 +25,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -41,6 +43,7 @@ class InterviewAnswerPollerTest {
     private static final String SESSION_ID = "sess_1";
     private static final String TASK_ID = "task_ans_1";
 
+    private AiClient aiClient;
     private AiPoller aiPoller;
     private AiProperties aiProperties;
     private SessionSocketHandler socketHandler;
@@ -49,6 +52,7 @@ class InterviewAnswerPollerTest {
 
     @BeforeEach
     void setUp() {
+        aiClient = mock(AiClient.class);
         aiPoller = mock(AiPoller.class);
         socketHandler = mock(SessionSocketHandler.class);
         sessionWriter = mock(InterviewSessionWriter.class);
@@ -60,7 +64,7 @@ class InterviewAnswerPollerTest {
                 new AiProperties.Mock(false));
 
         poller = new InterviewAnswerPoller(
-                aiPoller, aiProperties, new AiErrorTranslator(), socketHandler, sessionWriter);
+                aiClient, aiPoller, aiProperties, new AiErrorTranslator(), socketHandler, sessionWriter);
     }
 
     private AiTaskStatusResponse done(AiQuestionResult result) {
@@ -223,7 +227,9 @@ class InterviewAnswerPollerTest {
     // ── 폴링 실패 ───────────────────────────────────────────────
 
     @Test
-    void 폴링이_실패하면_error_를_push_한다() {
+    void 폴링이_BusinessException_으로_실패하면_error_를_push_하되_세션은_abort_하지_않는다() {
+        // AI 가 알려준 실패(STT_FAILED 등). 재시도·세션 정리 정책은 #25 범위이므로
+        // 여기서는 통지만 하고 세션을 임의로 abort 하지 않는다.
         when(aiPoller.await(eq(TASK_ID), any(), any()))
                 .thenThrow(new BusinessException(ErrorCode.STT_FAILED, "음성을 인식하지 못했습니다"));
 
@@ -233,9 +239,59 @@ class InterviewAnswerPollerTest {
         assertThat(payload.errorCode()).isEqualTo("STT_FAILED");
         // STT 실패는 재녹음 안내가 필요하다.
         assertThat(payload.needsRerecord()).isTrue();
-        // 결과 처리 로직은 타지 않는다.
+        // 결과 처리 로직은 타지 않고, 세션도 정리하지 않는다(#25 정책).
         verify(sessionWriter, never()).saveNextQuestion(anyString(), any());
         verify(sessionWriter, never()).completeSession(anyString());
+        verify(aiClient, never()).abortSession(anyString());
+        verify(sessionWriter, never()).markAborted(anyString());
+    }
+
+    // ── C1: 예상치 못한(non-Business) 예외 ──────────────────────
+
+    @Test
+    void await_에서_예상치_못한_RuntimeException_이_나면_세션을_정리하고_UNEXPECTED_AI_RESPONSE_를_push_한다() {
+        // 예: 응답 디코딩 실패 등 BusinessException 이 아닌 예외. Backend/AI 상태 동기화를
+        // 보장할 수 없으므로 AI abort + 세션 ABORTED 정리 + error push 해야 한다.
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new IllegalStateException("decode failed"));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("UNEXPECTED_AI_RESPONSE");
+    }
+
+    @Test
+    void 저장_중_예상치_못한_RuntimeException_이_나도_세션을_정리하고_error_를_push_한다() {
+        AiQuestionResult result = new AiQuestionResult(
+                AiQuestionResult.TYPE_QUESTION, "q_2", null, "다음 질문", "https://s3/q.mp3",
+                "직무역량", "L2", 2, 9, 1, 4, false, false, null);
+        when(aiPoller.await(eq(TASK_ID), any(), any())).thenReturn(done(result));
+        when(sessionWriter.saveNextQuestion(eq(SESSION_ID), eq(result)))
+                .thenThrow(new RuntimeException("DB down"));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("UNEXPECTED_AI_RESPONSE");
+    }
+
+    @Test
+    void 정리중_예외가_나도_원본_실패로_error_를_push_한다() {
+        // cleanup(markAborted)이 실패해도 error push 는 나가야 하고, 예외가 @Async 밖으로
+        // 새지 않아야 한다.
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new IllegalStateException("decode failed"));
+        doThrow(new RuntimeException("cleanup down")).when(sessionWriter).markAborted(SESSION_ID);
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("UNEXPECTED_AI_RESPONSE");
     }
 
     @SuppressWarnings("unchecked")

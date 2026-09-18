@@ -4,6 +4,7 @@ import com.cuea.common.config.AsyncConfig;
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.entity.Question;
+import com.cuea.infrastructure.ai.AiClient;
 import com.cuea.infrastructure.ai.AiErrorTranslator;
 import com.cuea.infrastructure.ai.AiPoller;
 import com.cuea.infrastructure.ai.AiProperties;
@@ -43,14 +44,26 @@ import org.springframework.stereotype.Component;
  * 알 수 없는 type 은 {@code question} 으로 fallback 하지 않고
  * {@code UNEXPECTED_AI_RESPONSE} 로 처리합니다.
  *
- * <p><b>error_code 별 재시도 정책은 Issue #25 범위입니다.</b> 이 폴러는 정상 흐름
- * 완성에 집중하며, 실패 시 세션을 임의로 abort 하지 않고 오류만 push 합니다.
+ * <h2>예외 처리 정책</h2>
+ * <ul>
+ *   <li><b>{@link BusinessException}</b> (AI 가 알려준 실패·타임아웃, 계약 위반 등) —
+ *       원인 코드를 그대로 담아 {@link ErrorPushMessage} 로 알립니다. AI error_code 별
+ *       재시도·세션 정리 정책은 Issue #25 범위이므로 여기서는 세션을 임의로 abort
+ *       하지 않습니다.</li>
+ *   <li><b>그 외 예상치 못한 {@link RuntimeException}</b> (응답 디코딩 실패 등) — Backend
+ *       와 AI 의 세션 상태가 동기화됐다고 보장할 수 없으므로, AI 세션 abort 와 우리
+ *       세션 {@code ABORTED} 정리를 시도하고 {@code UNEXPECTED_AI_RESPONSE} 로 알립니다.
+ *       cleanup 실패가 원본 예외를 덮지 않도록 suppressed·로그로만 남깁니다.</li>
+ * </ul>
+ * 이렇게 해야 {@code @Async void} 밖으로 예외가 유실돼 프론트 통지 없이 세션이
+ * {@code IN_PROGRESS} 로 잔류하는 것을 막습니다.
  */
 @Slf4j
 @Component
 @RequiredArgsConstructor
 public class InterviewAnswerPoller {
 
+    private final AiClient aiClient;
     private final AiPoller aiPoller;
     private final AiProperties aiProperties;
     private final AiErrorTranslator errorTranslator;
@@ -60,8 +73,9 @@ public class InterviewAnswerPoller {
     /**
      * 답변 처리 task 를 폴링해 결과 타입별로 저장·전달합니다.
      *
-     * <p>백그라운드 실행이라 여기서 던진 예외는 호출자에게 전달되지 않습니다. 실패는
-     * {@link ErrorPushMessage} 로 프론트에 알립니다.
+     * <p>백그라운드 실행이라 여기서 던진 예외는 호출자에게 전달되지 않습니다. 모든
+     * 실패는 {@link ErrorPushMessage} 로 프론트에 알리며, 예상치 못한 예외는 세션까지
+     * 정리합니다.
      */
     @Async(AsyncConfig.INTERVIEW_EXECUTOR)
     public void pollAndDeliver(String sessionId, String taskId) {
@@ -73,8 +87,13 @@ public class InterviewAnswerPoller {
                     stage -> socketHandler.push(sessionId,
                             ProgressPushMessage.of(ProgressStage.from(stage))));
         } catch (BusinessException e) {
+            // AI 가 알려준 실패·타임아웃. 재시도 정책은 #25. 여기서는 통지만 한다.
             log.warn("답변 폴링 실패 sessionId={} errorCode={}", sessionId, e.getErrorCode());
             pushError(sessionId, e);
+            return;
+        } catch (RuntimeException e) {
+            // 예상치 못한 예외(예: 응답 디코딩 실패). 상태 동기화를 보장할 수 없어 정리한다.
+            handleUnexpected(sessionId, "답변 폴링 중 예기치 못한 오류", e);
             return;
         }
 
@@ -89,17 +108,39 @@ public class InterviewAnswerPoller {
         try {
             dispatch(sessionId, result);
         } catch (BusinessException e) {
+            // 계약 위반(알 수 없는 type 등). 통지만 한다.
             log.warn("답변 결과 처리 실패 sessionId={} type={} errorCode={}",
                     sessionId, result.type(), e.getErrorCode());
             pushError(sessionId, e);
         } catch (RuntimeException e) {
-            log.warn("답변 결과 처리 중 예기치 못한 오류 sessionId={} type={}",
-                    sessionId, result.type(), e);
-            BusinessException wrapped = new BusinessException(
-                    ErrorCode.UNEXPECTED_AI_RESPONSE, "답변 결과 처리에 실패했습니다");
-            wrapped.addSuppressed(e);
-            pushError(sessionId, wrapped);
+            // 저장 중 예기치 못한 예외(예: DB 오류). 상태 동기화를 보장할 수 없어 정리한다.
+            handleUnexpected(sessionId, "답변 결과 처리 중 예기치 못한 오류 type=" + result.type(), e);
         }
+    }
+
+    /**
+     * 예상치 못한 예외 처리: 원본 보존 → AI 세션 abort 시도 → 우리 세션 ABORTED 정리
+     * 시도 → {@code UNEXPECTED_AI_RESPONSE} error push. cleanup 예외는 원본을 덮지
+     * 않도록 suppressed 로 붙이고 삼킵니다.
+     */
+    private void handleUnexpected(String sessionId, String context, RuntimeException original) {
+        log.warn("{} sessionId={}", context, sessionId, original);
+        try {
+            aiClient.abortSession(sessionId);
+        } catch (RuntimeException cleanupError) {
+            original.addSuppressed(cleanupError);
+            log.warn("AI 세션 중단 실패 sessionId={}", sessionId, cleanupError);
+        }
+        try {
+            sessionWriter.markAborted(sessionId);
+        } catch (RuntimeException cleanupError) {
+            original.addSuppressed(cleanupError);
+            log.warn("세션 ABORTED 처리 실패 sessionId={}", sessionId, cleanupError);
+        }
+        BusinessException wrapped = new BusinessException(
+                ErrorCode.UNEXPECTED_AI_RESPONSE, "답변 처리에 실패했습니다");
+        wrapped.addSuppressed(original);
+        pushError(sessionId, wrapped);
     }
 
     /** 결과 타입을 명시적으로 분기합니다. 알 수 없는 type 은 질문으로 저장하지 않습니다. */

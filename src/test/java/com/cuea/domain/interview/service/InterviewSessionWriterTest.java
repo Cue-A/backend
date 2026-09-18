@@ -80,12 +80,26 @@ class InterviewSessionWriterTest {
     }
 
     @Test
-    void session_end_나_알_수_없는_type_은_질문으로_저장하지_않고_거부한다() {
+    void session_end_는_질문으로_저장하지_않고_거부한다() {
         AiQuestionResult sessionEnd = new AiQuestionResult(
                 AiQuestionResult.TYPE_SESSION_END, null, null, null, null, null, null,
                 null, 9, null, null, false, false, 9);
 
         assertThatThrownBy(() -> writer.saveNextQuestion(SESSION_ID, sessionEnd))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.UNEXPECTED_AI_RESPONSE);
+
+        verify(questionRepository, never()).save(any());
+    }
+
+    @Test
+    void 알_수_없는_type_은_QUESTION_으로_fallback_하지_않고_거부한다() {
+        // C10: unknown → QUESTION fallback 회귀 방지. Writer 레벨에서도 직접 검증한다.
+        AiQuestionResult unknown = new AiQuestionResult(
+                "something_new", "q_x", null, "?", null, null, null,
+                null, 9, null, null, false, false, null);
+
+        assertThatThrownBy(() -> writer.saveNextQuestion(SESSION_ID, unknown))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.UNEXPECTED_AI_RESPONSE);
 

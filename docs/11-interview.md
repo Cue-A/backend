@@ -32,8 +32,14 @@
 > 작업으로 분리합니다. WebSocket 핸드셰이크 인증·소유권 검증도 이번 범위가 아니라
 > 기존 Issue #3 에서 처리합니다.
 
-**5~9 단계(답변 제출 이후 반복 흐름)는 아직 구현되지 않았습니다.** 2~4 단계
-(세션 시작·첫 질문 수신)만 Issue #23 에서 구현했습니다.
+**5~9 단계(답변 제출 이후 반복 흐름)는 Issue #24 에서 구현했습니다.** 답변 업로드
+URL 발급 → 답변 제출 → AI 폴링(최대 60초) → 다음 질문·꼬리질문·되묻기·세션 종료
+처리 → DB 반영 → WebSocket push 가 동작합니다. 2~4 단계(세션 시작·첫 질문 수신)는
+Issue #23 에서 구현했습니다.
+
+> 아직 구현하지 않은 것(후속): 동일 질문 중복 제출 방지·in-flight idempotency,
+> AI error_code 별 재시도 정책, 사용자 세션 abort API 는 Issue #25 범위입니다.
+> WebSocket 핸드셰이크 인증·연결 전 push 유실은 Issue #3 범위입니다.
 
 ---
 
@@ -162,7 +168,7 @@ Java enum으로 만들지 않습니다. 이유는 [`02-database.md`](./02-databa
 | 이벤트 | 저장할 것 |
 |---|---|
 | 질문 수신 (`question`/`followup`/`reask`) | 질문 로그 전체 |
-| 답변 업로드 완료 | `answer_audio_object_key`(답변 제출 로직은 다음 이슈 범위) |
+| 답변 업로드 완료 | `answer_audio_object_key`·`answer_video_object_key`(카메라 미사용 시 null)·`answer_is_timeout`. 답변 제출 시점에 저장 (Issue #24) |
 | `session_end` 수신 | `status = completed` |
 
 **질문은 수신 즉시 저장합니다.** 프론트에 push한 뒤에 저장하면, 사용자가 그 사이에

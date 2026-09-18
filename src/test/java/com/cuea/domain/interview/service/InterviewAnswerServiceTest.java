@@ -8,13 +8,17 @@ import com.cuea.domain.interview.dto.request.AnswerUploadUrlRequest;
 import com.cuea.domain.interview.dto.response.AnswerUploadUrlResponse;
 import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.interview.entity.Persona;
+import com.cuea.domain.interview.entity.Question;
+import com.cuea.domain.interview.entity.QuestionType;
 import com.cuea.domain.interview.entity.SessionStatus;
 import com.cuea.domain.interview.repository.InterviewSessionRepository;
+import com.cuea.domain.interview.repository.QuestionRepository;
 import com.cuea.domain.user.entity.User;
 import com.cuea.infrastructure.ai.AiClient;
 import com.cuea.infrastructure.ai.dto.AiAnswerSubmitRequest;
 import com.cuea.infrastructure.file.FileValidator;
 import com.cuea.infrastructure.file.PresignedUrlIssuer;
+import com.cuea.infrastructure.file.S3StorageService;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -28,6 +32,7 @@ import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyBoolean;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.inOrder;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
@@ -37,10 +42,11 @@ import static org.mockito.Mockito.when;
 /**
  * 답변 제출 REST 동기 구간을 검증합니다.
  *
- * <p>여기서 검증: 소유권 확인 → object key 저장 → AI 접근용 presigned GET URL 생성 →
- * AI 제출 → 백그라운드 폴러 위임 → 즉시 반환. <b>폴링·다음 질문 저장·push 는 이
- * 서비스가 하지 않고</b> {@link InterviewAnswerPoller} 에 위임하므로, 그 위임 호출만
- * 확인하고 폴링 자체는 {@code InterviewAnswerPollerTest} 에서 검증합니다.
+ * <p>여기서 검증: 소유권·상태 확인 → questionId 소속 확인 → object key namespace 검증
+ * → S3 존재 확인 → object key 저장 → AI 접근용 presigned GET URL 생성 → AI 제출 →
+ * 백그라운드 폴러 위임 → 즉시 반환. <b>폴링·다음 질문 저장·push 는 이 서비스가 하지
+ * 않고</b> {@link InterviewAnswerPoller} 에 위임하므로, 그 위임 호출만 확인하고 폴링
+ * 자체는 {@code InterviewAnswerPollerTest} 에서 검증합니다.
  */
 class InterviewAnswerServiceTest {
 
@@ -49,9 +55,11 @@ class InterviewAnswerServiceTest {
     private static final String QUESTION_ID = "q_1";
 
     private InterviewSessionRepository sessionRepository;
+    private QuestionRepository questionRepository;
     private InterviewSessionWriter sessionWriter;
     private FileValidator fileValidator;
     private PresignedUrlIssuer presignedUrlIssuer;
+    private S3StorageService storageService;
     private AiClient aiClient;
     private InterviewAnswerPoller answerPoller;
     private InterviewAnswerService service;
@@ -61,9 +69,11 @@ class InterviewAnswerServiceTest {
     @BeforeEach
     void setUp() {
         sessionRepository = mock(InterviewSessionRepository.class);
+        questionRepository = mock(QuestionRepository.class);
         sessionWriter = mock(InterviewSessionWriter.class);
         fileValidator = new FileValidator();   // 순수 검증 로직이라 실제 객체를 씁니다.
         presignedUrlIssuer = mock(PresignedUrlIssuer.class);
+        storageService = mock(S3StorageService.class);
         aiClient = mock(AiClient.class);
         answerPoller = mock(InterviewAnswerPoller.class);
 
@@ -71,10 +81,20 @@ class InterviewAnswerServiceTest {
 
         when(sessionRepository.findBySessionIdAndUser_UserId(SESSION_ID, USER_ID))
                 .thenReturn(Optional.of(inProgressSession()));
+        // 기본값: 질문이 존재하고(C2), S3 객체도 업로드돼 있다(C8). 개별 테스트에서 덮어씀.
+        when(questionRepository.findBySessionIdAndQuestionId(SESSION_ID, QUESTION_ID))
+                .thenReturn(Optional.of(existingQuestion()));
+        when(storageService.exists(anyString())).thenReturn(true);
 
         service = new InterviewAnswerService(
-                sessionRepository, sessionWriter, fileValidator,
-                presignedUrlIssuer, aiClient, answerPoller);
+                sessionRepository, questionRepository, sessionWriter, fileValidator,
+                presignedUrlIssuer, storageService, aiClient, answerPoller);
+    }
+
+    private Question existingQuestion() {
+        return Question.builder()
+                .sessionId(SESSION_ID).questionId(QUESTION_ID).type(QuestionType.QUESTION)
+                .text("질문").questionNumber(1).topicIndex(0).build();
     }
 
     private InterviewSession inProgressSession() {
@@ -364,5 +384,108 @@ class InterviewAnswerServiceTest {
                 QUESTION_ID, "sessions/sess_1/answers/q_1.webm", null, false));
 
         verify(answerPoller).pollAndDeliver(SESSION_ID, "task_ans_1");
+    }
+
+    // ── C2: upload-urls questionId 소속 검증 ─────────────────────
+
+    @Test
+    void 존재하지_않는_questionId_로는_업로드_URL_을_발급하지_않는다() {
+        when(questionRepository.findBySessionIdAndQuestionId(SESSION_ID, "q_bogus"))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.issueUploadUrls(USER_ID, SESSION_ID,
+                new AnswerUploadUrlRequest("q_bogus", "ans.webm", "audio/webm", 1_000L, null, null, null)))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.QUESTION_NOT_FOUND);
+
+        // 질문이 없으면 PUT URL 을 만들지 않는다(orphan 객체 방지).
+        verify(presignedUrlIssuer, never()).issueUpload(anyString(), anyString());
+    }
+
+    // ── C8: S3 업로드 완료 확인 ─────────────────────────────────
+
+    @Test
+    void 업로드되지_않은_audio_key_는_AI_호출_전에_UPLOAD_NOT_COMPLETED_로_거부한다() {
+        when(storageService.exists("sessions/sess_1/answers/q_1.webm")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.submit(USER_ID, SESSION_ID, new AnswerSubmitRequest(
+                QUESTION_ID, "sessions/sess_1/answers/q_1.webm", null, false)))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.UPLOAD_NOT_COMPLETED);
+
+        verify(sessionWriter, never()).attachAnswerMedia(anyString(), anyString(), anyString(), any(), anyBoolean());
+        verify(aiClient, never()).submitAnswer(anyString(), any());
+    }
+
+    @Test
+    void 업로드되지_않은_video_key_도_거부한다() {
+        when(storageService.exists("sessions/sess_1/answers/q_1.webm")).thenReturn(true);
+        when(storageService.exists("sessions/sess_1/answers/q_1_video.mp4")).thenReturn(false);
+
+        assertThatThrownBy(() -> service.submit(USER_ID, SESSION_ID, new AnswerSubmitRequest(
+                QUESTION_ID, "sessions/sess_1/answers/q_1.webm",
+                "sessions/sess_1/answers/q_1_video.mp4", false)))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.UPLOAD_NOT_COMPLETED);
+
+        verify(aiClient, never()).submitAnswer(anyString(), any());
+    }
+
+    // ── C9: 세션 상태 구분 ───────────────────────────────────────
+
+    @Test
+    void ABORTED_세션에는_SESSION_ABORTED_로_거부한다() {
+        InterviewSession aborted = inProgressSession();
+        aborted.abort();
+        when(sessionRepository.findBySessionIdAndUser_UserId(SESSION_ID, USER_ID))
+                .thenReturn(Optional.of(aborted));
+
+        assertThatThrownBy(() -> service.submit(USER_ID, SESSION_ID, new AnswerSubmitRequest(
+                QUESTION_ID, "sessions/sess_1/answers/q_1.webm", null, false)))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.SESSION_ABORTED);
+    }
+
+    // ── C4: async poller 제출 실패 시 cleanup ────────────────────
+
+    @Test
+    void 폴러_제출이_실패하면_AI세션_abort_하고_세션을_ABORTED로_정리한다() {
+        when(presignedUrlIssuer.issueRecordingDownload(anyString())).thenReturn("https://s3/get");
+        when(aiClient.submitAnswer(eq(SESSION_ID), any())).thenReturn("task_ans_1");
+        // @Async 태스크 제출 자체가 거부되는(종료 중 등) 경우. AI task 는 이미 수락됐다.
+        doThrow(new org.springframework.core.task.TaskRejectedException("executor shutting down"))
+                .when(answerPoller).pollAndDeliver(SESSION_ID, "task_ans_1");
+
+        assertThatThrownBy(() -> service.submit(USER_ID, SESSION_ID, new AnswerSubmitRequest(
+                QUESTION_ID, "sessions/sess_1/answers/q_1.webm", null, false)))
+                .isInstanceOf(RuntimeException.class);
+
+        // AI task 가 방치되지 않도록 정리한다.
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+    }
+
+    // ── C7: isTimeout 필수 (bean validation) ─────────────────────
+
+    @Test
+    void isTimeout_이_null_이면_bean_validation_이_거부한다() {
+        // 컨트롤러의 @Valid 가 적용하는 것과 동일한 검증. JSON 에서 is_timeout 누락 시
+        // isTimeout=null 이 되고, @NotNull 이 이를 거부해야 한다(false 로 조용히 통과 금지).
+        try (jakarta.validation.ValidatorFactory factory =
+                     jakarta.validation.Validation.buildDefaultValidatorFactory()) {
+            jakarta.validation.Validator validator = factory.getValidator();
+
+            AnswerSubmitRequest missing = new AnswerSubmitRequest(
+                    QUESTION_ID, "sessions/sess_1/answers/q_1.webm", null, null);
+            var violations = validator.validate(missing);
+            assertThat(violations)
+                    .anyMatch(v -> v.getPropertyPath().toString().equals("isTimeout"));
+
+            // false / true 는 정상 값(위반 없음).
+            assertThat(validator.validate(new AnswerSubmitRequest(
+                    QUESTION_ID, "sessions/sess_1/answers/q_1.webm", null, false))).isEmpty();
+            assertThat(validator.validate(new AnswerSubmitRequest(
+                    QUESTION_ID, "sessions/sess_1/answers/q_1.webm", null, true))).isEmpty();
+        }
     }
 }

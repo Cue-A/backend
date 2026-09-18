@@ -13,20 +13,29 @@ import com.cuea.domain.user.dto.response.UserResponse;
  * HTTPS 가 붙기 전까지 로컬과 배포 동작이 갈립니다. 나중에 쿠키로 바꾸더라도
  * 이 형태는 그대로라 프론트 수정 범위는 인터셉터 한 곳입니다.
  *
- * @param expiresIn access token 남은 수명(초). 프론트가 선제 재발급에 씁니다
+ * @param expiresIn  access token 남은 수명(초). 프론트가 선제 재발급에 씁니다
+ * @param isNewUser  카카오 로그인이 신규 가입까지 처리했는지. 이메일 로그인·재발급에는
+ *                   의미가 없어 {@code null} 입니다
  */
 public record TokenResponse(
         String accessToken,
         String refreshToken,
         String tokenType,
         long expiresIn,
-        UserResponse user
+        UserResponse user,
+        Boolean isNewUser
 ) {
 
     private static final String BEARER = "Bearer";
 
     public static TokenResponse of(String accessToken, String refreshToken,
                                    long expiresIn, UserResponse user) {
-        return new TokenResponse(accessToken, refreshToken, BEARER, expiresIn, user);
+        return new TokenResponse(accessToken, refreshToken, BEARER, expiresIn, user, null);
+    }
+
+    /** 카카오 로그인 전용. 신규 가입인지를 함께 싣습니다. */
+    public static TokenResponse of(String accessToken, String refreshToken,
+                                   long expiresIn, UserResponse user, boolean isNewUser) {
+        return new TokenResponse(accessToken, refreshToken, BEARER, expiresIn, user, isNewUser);
     }
 }

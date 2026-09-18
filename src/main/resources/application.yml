@@ -75,6 +75,14 @@ app:
     access-token-validity: 30m
     refresh-token-validity: 14d
 
+  oauth:
+    kakao:
+      # 카카오 개발자 콘솔의 REST API 키. 인가 코드 방식이라 프론트가 아니라
+      # 여기서만 씁니다.
+      client-id: ${APP_OAUTH_KAKAO_CLIENT_ID:local-dev-only-kakao-client-id}
+      # 콘솔에서 Client Secret 을 껐다면 빈 값으로 둡니다.
+      client-secret: ${APP_OAUTH_KAKAO_CLIENT_SECRET:}
+
   ai:
     base-url: ${APP_AI_BASE_URL:http://localhost:8000}
     secret: ${APP_AI_SECRET:local-dev-only-ai-secret}

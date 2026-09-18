@@ -50,9 +50,9 @@ refresh:{userId}  →  Hash { jti_A: 발급시각, jti_B: 발급시각 }   TTL 1
 ## API
 
 ```
-POST /api/auth/signup          이메일 가입    → Result<TokenResponse>   (미구현)
-POST /api/auth/login           이메일 로그인  → Result<TokenResponse>   (미구현)
-POST /api/auth/oauth/kakao     카카오        → Result<TokenResponse>   (미구현)
+POST /api/auth/signup          이메일 가입    → Result<TokenResponse>
+POST /api/auth/login           이메일 로그인  → Result<TokenResponse>
+POST /api/auth/oauth/kakao     카카오        → Result<TokenResponse>   (isNewUser 추가)
 POST /api/auth/refresh         재발급        → Result<TokenResponse>
 POST /api/auth/logout          로그아웃      → Result<Void>
 GET  /api/users/me             내 정보       → Result<UserResponse>
@@ -71,7 +71,8 @@ GET  /api/users/me             내 정보       → Result<UserResponse>
     "user": {
       "userId": "...", "nickname": "김취준",
       "email": "kim@example.com", "providers": ["LOCAL", "KAKAO"]
-    }
+    },
+    "isNewUser": null
   },
   "errorCode": null, "message": null
 }
@@ -80,6 +81,10 @@ GET  /api/users/me             내 정보       → Result<UserResponse>
 `user` 를 같이 싣는 이유는 로그인 직후 `/api/users/me` 를 한 번 더 부르지 않게
 하려는 것입니다. `providers` 가 배열인 것은 계정 연동을 지원하기 때문입니다.
 `email` 은 카카오 이메일 미동의 시 `null` 입니다.
+
+`isNewUser` 는 카카오 로그인에서만 의미가 있습니다(신규 가입까지 처리했는지).
+이메일 회원가입·로그인·재발급은 항상 `null` 입니다 — 그 자리에서 이미 알고 있는
+사실이라 따로 알려줄 필요가 없습니다.
 
 `/api/auth/**` 는 `JwtAuthFilter` 를 타지 않습니다. 재발급 요청은 정의상 만료된
 access token 을 달고 오기 때문입니다.

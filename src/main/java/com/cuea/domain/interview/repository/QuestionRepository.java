@@ -5,6 +5,7 @@ import com.cuea.domain.interview.entity.QuestionId;
 import org.springframework.data.repository.Repository;
 
 import java.util.List;
+import java.util.Optional;
 
 /**
  * 소유자가 있는 엔티티라 {@code findById} 가 없습니다. 소유자 검사는 세션을 거쳐야
@@ -14,6 +15,12 @@ import java.util.List;
 public interface QuestionRepository extends Repository<Question, QuestionId> {
 
     List<Question> findAllBySessionId(String sessionId);
+
+    /**
+     * 세션 스코프 복합키로 질문 하나를 찾습니다. 답변 제출 시 대상 질문에 answer
+     * object key 를 붙이기 위해 씁니다. 소유권은 세션으로 먼저 확인한 뒤 호출하세요.
+     */
+    Optional<Question> findBySessionIdAndQuestionId(String sessionId, String questionId);
 
     Question save(Question question);
 }

@@ -8,10 +8,29 @@
 
 ```
 cue-a-media/
-  resumes/{userId}/{documentId}.{ext}          프론트가 Presigned PUT
-  sessions/{sessionId}/answers/{questionId}.webm   프론트가 Presigned PUT
-  sessions/{sessionId}/questions/{questionId}.mp3  ★ AI가 직접 PUT
+  resumes/{userId}/{documentId}.{ext}                    프론트가 Presigned PUT
+  sessions/{sessionId}/answers/{questionId}.{ext}        프론트가 Presigned PUT (답변 오디오)
+  sessions/{sessionId}/answers/{questionId}_video.{ext}  프론트가 Presigned PUT (답변 영상)
+  sessions/{sessionId}/questions/{questionId}.mp3        ★ AI가 직접 PUT
 ```
+
+### 답변 미디어 key 규칙
+
+답변 오디오·영상은 같은 `sessions/{sessionId}/answers/{questionId}` 계층에 놓입니다.
+
+- **오디오**(필수): `sessions/{sessionId}/answers/{questionId}.{ext}`
+- **영상**(선택, 카메라 미사용이면 없음): `sessions/{sessionId}/answers/{questionId}_video.{ext}`
+
+**영상 파일명에 `_video` 접미사를 붙여 오디오와 분리합니다.** 오디오·영상 컨테이너가
+같을 수 있어(둘 다 `webm` 가능) 확장자만으로는 key 가 겹치기 때문입니다.
+
+확장자는 실제 업로드 포맷을 그대로 씁니다(고정하지 않음). 허용 포맷과 MIME 은
+아래 "파일 검증" 을 따릅니다. **object key 는 `sessionId`·`questionId` 로 서버가
+만들며, 프론트가 임의 key 를 보내 다른 경로의 Presigned URL 을 얻을 수 없습니다.**
+답변 업로드 URL 발급(`POST /api/interviews/{sessionId}/answers/upload-urls`) 전에
+해당 `(sessionId, questionId)` 질문이 실제 존재하는지 확인하고, 답변 제출
+(`POST /api/interviews/{sessionId}/answers`) 시에는 제출된 key 가 그 질문의 정규
+namespace 에 속하는지 + S3 에 실제 업로드됐는지(`headObject`) 확인합니다.
 
 ---
 
@@ -112,12 +131,17 @@ mc admin config set local api cors_allow_origin="http://localhost:5173"
 
 ### 파일 검증
 
-| 항목 | 제한 |
-|---|---|
-| 이력서 | PDF, DOCX, DOC, TXT / 10MB |
-| 답변 오디오 | webm, mp4 / 50MB |
+| 항목 | 확장자 | MIME | 크기 |
+|---|---|---|---|
+| 이력서 | PDF, DOCX, DOC, TXT | 문서 MIME | 10MB |
+| 답변 오디오 | webm, mp4 | `audio/webm`, `audio/mp4` | 50MB |
+| 답변 영상 | webm, mp4 | `video/webm`, `video/mp4` | 50MB |
 
 MIME 타입은 클라이언트가 보낸 값을 믿지 않고 확장자와 함께 검증합니다.
+**답변 오디오와 영상은 같은 컨테이너(webm, mp4)를 쓰되 MIME 으로 역할을 구분합니다.**
+오디오 자리에는 `audio/*`, 영상 자리에는 `video/*` 만 허용해, 오디오 파일이 영상
+자리에 올라오는(또는 그 반대) 것을 막습니다. `FileValidator.validateAnswerAudio` /
+`validateAnswerVideo` 가 각각 담당합니다.
 
 ---
 

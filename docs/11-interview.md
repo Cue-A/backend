@@ -5,9 +5,14 @@
 ## 세션 흐름
 
 ```
-1. 사용자가 이력서·직무·페르소나·문항 수 선택
-2. Spring: 세션 레코드 생성 → AI에 POST /ai/sessions
-3. Spring: task_id 폴링 (최대 90초) → 첫 질문 수신
+1. 사용자가 문서·직무·페르소나·문항 수·(선택)기업 선택
+2. Spring: POST /api/interviews  (동기 구간)
+   → Document(READY)·Company(verified) 조회
+   → resume_file_url(presigned) 발급, company_profile_override 조립
+   → AI에 POST /ai/sessions → session_id·task_id 수신
+   → session 저장(IN_PROGRESS)
+   → REST 응답 즉시 반환 { sessionId, questionTotal }
+3. Spring(백그라운드, @Async): task_id 폴링 (최대 90초) → 첫 질문 수신
 4. Spring: 로그 저장 → WebSocket으로 프론트에 push
 5. 사용자 답변 녹음 → S3 Presigned 업로드
 6. Spring: AI에 POST /answers → 폴링 (최대 60초)
@@ -16,6 +21,20 @@
 9. session_end 수신 → status = completed → 리포트 작업 시작
 ```
 
+**2단계 REST 응답은 첫 질문을 기다리지 않고 즉시 반환됩니다.** 폴링(3)과 첫 질문
+전달(4)은 백그라운드에서 일어나므로, 프론트는 REST 응답을 받는 즉시
+`/ws/interviews/{sessionId}` 에 연결해야 첫 질문 push 를 놓치지 않습니다.
+
+> ⚠️ **알려진 제약 (후속 작업):** 백그라운드 폴링이 프론트의 WebSocket 핸드셰이크
+> 보다 먼저 끝나면(특히 AI 가 빠르게 `done` 을 줄 때) 첫 질문 push 가 수신자 없이
+> 드롭될 수 있습니다. 질문은 DB 에 저장되지만 프론트가 못 받는 상황입니다. pending
+> 이벤트 버퍼나 세션 상태 조회(catch-up) 엔드포인트는 이번 PR 범위가 아니며 후속
+> 작업으로 분리합니다. WebSocket 핸드셰이크 인증·소유권 검증도 이번 범위가 아니라
+> 기존 Issue #3 에서 처리합니다.
+
+**5~9 단계(답변 제출 이후 반복 흐름)는 아직 구현되지 않았습니다.** 2~4 단계
+(세션 시작·첫 질문 수신)만 Issue #23 에서 구현했습니다.
+
 ---
 
 ## 세션 시작 파라미터
@@ -23,12 +42,25 @@
 | 필드 | 필수 | 값 |
 |---|---|---|
 | `resume_file_url` | ✅ | Presigned GET URL (만료 15분) |
-| `job_role` | ✅ | 자유 문자열 |
-| `persona` | ✅ | `friendly` (순한맛) \| `pressure` (매운맛) |
-| `company_id` | ❌ | null 허용 (회사 미선택 연습 모드) |
+| `job_role` | ✅ | 자유 문자열. VARCHAR(100) |
+| `persona` | ✅ | `friendly` (순한맛) \| `pressure` (매운맛) — `Persona` enum |
+| `company_id` | — | Backend `company.company_id`(BIGINT PK)를 문자열로 변환한 값. AI 는 로그·추적용으로만 사용. 미선택이면 null |
+| `company_profile_override` | 기업 선택 시 필수 | 선택된 기업의 인재상. `CompanyProfileFormatter` 로 조립 |
 | `question_count` | ❌ | 3 \| 6 \| 9. 기본 6 |
 | `retry_of_session_id` | ❌ | 재연습이면 최초 세션 ID |
 | `replay_log` | ❌ | 재연습이면 필수. [`12-replay.md`](./12-replay.md) |
+
+**Front 는 AI 의 `company_id` 를 직접 넘기지 않고, Backend `company` 테이블의
+PK(문서 없이 연습 모드면 없음)를 넘깁니다.** Backend 는 그 PK 를 문자열로 변환해
+AI 에 로그·추적용 `company_id` 로 넘기고, 질문 생성용 인재상은
+`company_profile_override` 로 조립해 보냅니다. AI 는 `company_id` 로 기업 데이터를
+조회하지 않으며, AI 서버는 기업 목록을 갖지 않습니다(`GET /ai/companies` 없음).
+기업 데이터의 Source of Truth 는 Backend 이며 `verified=false` 기업은 조회
+자체에서 제외합니다.
+
+**`session.document_id` 는 NOT NULL 입니다.** AI 세션 시작에 `resume_file_url` 이
+필수라 문서 없는 세션은 성립하지 않습니다. 면접 자료는 기존 `PORTFOLIO` 문서
+타입을 그대로 쓰며, 별도 `RESUME` 타입은 추가하지 않습니다.
 
 토픽 수는 보내지 않습니다. `question_count` 에서 자동 결정됩니다.
 
@@ -130,7 +162,7 @@ Java enum으로 만들지 않습니다. 이유는 [`02-database.md`](./02-databa
 | 이벤트 | 저장할 것 |
 |---|---|
 | 질문 수신 (`question`/`followup`/`reask`) | 질문 로그 전체 |
-| 답변 업로드 완료 | `answer_audio_url` |
+| 답변 업로드 완료 | `answer_audio_object_key`(답변 제출 로직은 다음 이슈 범위) |
 | `session_end` 수신 | `status = completed` |
 
 **질문은 수신 즉시 저장합니다.** 프론트에 push한 뒤에 저장하면, 사용자가 그 사이에

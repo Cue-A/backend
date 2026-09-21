@@ -1,6 +1,7 @@
 package com.cuea.domain.interview.entity;
 
 import com.cuea.common.entity.BaseCreatedEntity;
+import com.cuea.domain.document.entity.Document;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
@@ -91,6 +92,16 @@ public class Question extends BaseCreatedEntity {
     private String difficulty;
 
     /**
+     * 되묻기({@code REASK})일 때 원 질문의 {@code questionId}. 일반 질문·꼬리질문이면 null.
+     *
+     * <p>AI 계약의 {@code reask_of} 에 대응합니다. 세션 스코프 ID(예: {@code "q_4"})가
+     * 그대로 들어오며, FK 는 걸지 않습니다({@code (session_id, question_id)} 복합키를
+     * 다시 참조하려면 조인 컬럼이 늘어나 번거롭고, 이 값은 표시·추적용입니다).
+     */
+    @Column(name = "reask_of", length = 50)
+    private String reaskOf;
+
+    /**
      * 계획된 토픽이 아니라 문항 수를 채우려고 투입된 토픽의 질문인지.
      *
      * <p>{@link #replay} 와 이름이 비슷하지만 축이 다릅니다. 이쪽은 세션 내부
@@ -127,13 +138,38 @@ public class Question extends BaseCreatedEntity {
     private int topicIndex;
 
     /**
-     * 사용자 답변 녹음 위치. 아직 답하지 않았으면 null.
+     * 사용자 답변 오디오의 S3 object key. 아직 답하지 않았으면 null.
      *
      * <p>답변 업로드가 끝난 시점에 채웁니다. 그 시점에는 아직 AI 분석 전이라
      * {@link Answer} 행이 없어서, 분석 결과가 아니라 여기에 둡니다.
+     *
+     * <p>기존 {@code answer_audio_url TEXT} 컬럼을 이 필드로 교체했습니다. URL 이
+     * 아니라 key 만 저장합니다({@code object_key} 규칙은 {@link Document} 참고).
+     * {@code ddl-auto: update} 는 컬럼명 변경을 인식하지 못해 새 컬럼
+     * {@code answer_audio_object_key} 를 추가만 하고 기존 {@code answer_audio_url}
+     * 컬럼은 그대로 남습니다. 배포 시 수동 조치가 필요합니다.
      */
-    @Column(name = "answer_audio_url", columnDefinition = "text")
-    private String answerAudioUrl;
+    @Column(name = "answer_audio_object_key", columnDefinition = "text")
+    private String answerAudioObjectKey;
+
+    /**
+     * 사용자 답변 영상의 S3 object key. 카메라를 쓰지 않았으면 null.
+     *
+     * <p>리포트의 시선 축에서만 쓰입니다. 질문 진행 자체에는 쓰이지 않습니다.
+     * 이번 PR 에서는 컬럼만 추가하며, 값을 채우는 답변 제출 로직은 다음 이슈
+     * 범위입니다.
+     */
+    @Column(name = "answer_video_object_key", columnDefinition = "text")
+    private String answerVideoObjectKey;
+
+    /**
+     * 제한 시간 만료로 자동 제출된 답변인지.
+     *
+     * <p>true 면 AI 가 되묻기를 하지 않습니다. 이번 PR 에서는 컬럼만 추가하며,
+     * 값을 채우는 답변 제출 로직은 다음 이슈 범위입니다.
+     */
+    @Column(name = "answer_is_timeout", nullable = false)
+    private boolean answerIsTimeout;
 
     /**
      * 사용자가 즐겨찾기 했는지.
@@ -144,9 +180,9 @@ public class Question extends BaseCreatedEntity {
     @Column(name = "is_bookmarked", nullable = false)
     private boolean bookmarked;
 
-    /** 답변 녹음 업로드 완료. */
-    public void attachAnswerAudio(String answerAudioUrl) {
-        this.answerAudioUrl = answerAudioUrl;
+    /** 답변 오디오 업로드 완료. */
+    public void attachAnswerAudio(String answerAudioObjectKey) {
+        this.answerAudioObjectKey = answerAudioObjectKey;
     }
 
     public void markBookmarked(boolean bookmarked) {

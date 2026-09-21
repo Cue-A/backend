@@ -19,7 +19,6 @@ public record AiProperties(
         Duration pollInterval,
         Duration connectTimeout,
         Duration readTimeout,
-        Duration companyCacheTtl,
         Mock mock
 ) {
     public record Mock(boolean enabled) {

@@ -4,7 +4,6 @@ import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.common.security.AiSecretFilter;
 import com.cuea.infrastructure.ai.dto.AiAnswerSubmitRequest;
-import com.cuea.infrastructure.ai.dto.AiCompany;
 import com.cuea.infrastructure.ai.dto.AiErrorResponse;
 import com.cuea.infrastructure.ai.dto.AiSessionStartRequest;
 import com.cuea.infrastructure.ai.dto.AiSessionStartResponse;
@@ -13,7 +12,6 @@ import com.cuea.infrastructure.ai.dto.AiTaskStatusResponse;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
-import org.springframework.core.ParameterizedTypeReference;
 import org.springframework.http.MediaType;
 import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
@@ -21,7 +19,6 @@ import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
 
 import java.io.InputStream;
-import java.util.List;
 import java.util.function.Supplier;
 
 /**
@@ -88,15 +85,6 @@ public class RealAiClient implements AiClient {
                 .uri("/ai/tasks/{taskId}", taskId)
                 .retrieve()
                 .body(AiTaskStatusResponse.class));
-    }
-
-    @Override
-    public List<AiCompany> listCompanies() {
-        return call(() -> restClient.get()
-                .uri("/ai/companies")
-                .retrieve()
-                .body(new ParameterizedTypeReference<List<AiCompany>>() {
-                }));
     }
 
     @Override

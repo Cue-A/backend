@@ -81,6 +81,8 @@ class InterviewFirstQuestionPollerTest {
                         .type(QuestionType.QUESTION).text("지원 동기를 말씀해 주세요.")
                         .audioUrl("https://s3.../q_1.mp3").category("지원동기").difficulty("L1")
                         .questionNumber(1).topicIndex(0).build());
+        // 수신자(WebSocket 연결) 1개가 붙어 정상 전송된 상황.
+        when(socketHandler.push(eq(SESSION_ID), any())).thenReturn(1);
 
         poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
 
@@ -207,6 +209,36 @@ class InterviewFirstQuestionPollerTest {
         // STT 실패는 재시도 가능하고 재녹음 안내가 필요하다.
         assertThat(payload.retryable()).isTrue();
         assertThat(payload.needsRerecord()).isTrue();
+    }
+
+    @Test
+    void 첫질문_push_수신자가_없어도_저장은_유지되고_흐름은_실패하지_않는다() {
+        // WebSocket 핸드셰이크가 폴링보다 늦으면 push 수신자가 0개다.
+        // 첫 질문은 이미 저장됐고(세션 유효), push 는 드롭되지만 세션을 ABORTED 로
+        // 정리하거나 error 를 push 하지 않는다. 유실 추적용 경고 로그만 남긴다.
+        // (catch-up 은 후속 이슈에서 처리)
+        AiQuestionResult result = firstQuestion();
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenReturn(new AiTaskStatusResponse(AiTaskStatusResponse.STATUS_DONE, null, result, null, null));
+        when(sessionWriter.saveFirstQuestion(eq(SESSION_ID), eq(result))).thenReturn(
+                Question.builder().sessionId(SESSION_ID).questionId("q_1")
+                        .type(QuestionType.QUESTION).text("지원 동기를 말씀해 주세요.")
+                        .audioUrl("https://s3.../q_1.mp3").category("지원동기").difficulty("L1")
+                        .questionNumber(1).topicIndex(0).build());
+        // 수신자 없음: push 가 0 건 전송을 반환.
+        when(socketHandler.push(eq(SESSION_ID), any())).thenReturn(0);
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        // 질문은 저장됐고, 세션 정리(abort/markAborted)는 일어나지 않는다.
+        verify(sessionWriter).saveFirstQuestion(SESSION_ID, result);
+        verify(aiClient, org.mockito.Mockito.never()).abortSession(anyString());
+        verify(sessionWriter, org.mockito.Mockito.never()).markAborted(anyString());
+
+        // question push 는 시도됐다(수신자가 없었을 뿐). error push 는 없다.
+        ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
+        verify(socketHandler).push(eq(SESSION_ID), captor.capture());
+        assertThat(captor.getValue().type()).isEqualTo("question");
     }
 
     @Test

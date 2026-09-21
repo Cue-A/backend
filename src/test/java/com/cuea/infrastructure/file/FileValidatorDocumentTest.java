@@ -38,7 +38,7 @@ class FileValidatorDocumentTest {
     void hwp_는_거절한다() {
         assertThatThrownBy(() -> validator.validateDocument("자소서.hwp", "application/x-hwp", 1_024))
                 .isInstanceOf(BusinessException.class)
-                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNSUPPORTED_FILE_FORMAT);
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNSUPPORTED_FILE_TYPE);
     }
 
     /**
@@ -49,14 +49,14 @@ class FileValidatorDocumentTest {
     void 확장자는_맞는데_MIME_이_다르면_거절한다() {
         assertThatThrownBy(() -> validator.validateDocument("resume.pdf", "application/x-hwp", 1_024))
                 .isInstanceOf(BusinessException.class)
-                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNSUPPORTED_FILE_FORMAT);
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNSUPPORTED_FILE_TYPE);
     }
 
     @Test
     void 확장자가_없으면_거절한다() {
         assertThatThrownBy(() -> validator.validateDocument("resume", PDF, 1_024))
                 .isInstanceOf(BusinessException.class)
-                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNSUPPORTED_FILE_FORMAT);
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNSUPPORTED_FILE_TYPE);
     }
 
     /**
@@ -75,7 +75,7 @@ class FileValidatorDocumentTest {
 
         assertThatThrownBy(() -> validator.validateDocument("resume.pdf", PDF, tooBig))
                 .isInstanceOf(BusinessException.class)
-                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.FILE_SIZE_EXCEEDED);
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.FILE_TOO_LARGE);
     }
 
     @Test
@@ -109,7 +109,7 @@ class FileValidatorDocumentTest {
 
         assertThatThrownBy(() -> validator.validateAnswerAudio("answer.pdf", PDF, 1_024))
                 .isInstanceOf(BusinessException.class)
-                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNSUPPORTED_FILE_FORMAT)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNSUPPORTED_FILE_TYPE)
                 .hasMessage("지원하지 않는 파일 형식입니다. webm, mp4만 업로드할 수 있습니다");
     }
 

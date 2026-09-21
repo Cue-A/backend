@@ -111,7 +111,7 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<Result<Void>> handleUploadTooLarge(MaxUploadSizeExceededException e) {
         log.warn("업로드 상한 초과 max={}", e.getMaxUploadSize());
-        return respond(ErrorCode.FILE_SIZE_EXCEEDED, "파일 크기가 %dMB를 초과했습니다"
+        return respond(ErrorCode.FILE_TOO_LARGE, "파일 크기가 %dMB를 초과했습니다"
                 .formatted(FileValidator.DOCUMENT_MAX_BYTES / 1024 / 1024));
     }
 

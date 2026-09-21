@@ -78,7 +78,7 @@ public class FileValidator {
     public String extensionOf(String fileName) {
         int dot = fileName.lastIndexOf('.');
         if (dot < 0 || dot == fileName.length() - 1) {
-            throw new BusinessException(ErrorCode.UNSUPPORTED_FILE_FORMAT, "확장자가 없는 파일입니다");
+            throw new BusinessException(ErrorCode.UNSUPPORTED_FILE_TYPE, "확장자가 없는 파일입니다");
         }
         return fileName.substring(dot + 1).toLowerCase(Locale.ROOT);
     }
@@ -87,22 +87,22 @@ public class FileValidator {
     private String validate(String fileName, String mimeType, long size,
                             Map<String, Set<String>> allowed, long maxBytes) {
         if (fileName == null || fileName.isBlank()) {
-            throw new BusinessException(ErrorCode.UNSUPPORTED_FILE_FORMAT, "파일명이 없습니다");
+            throw new BusinessException(ErrorCode.UNSUPPORTED_FILE_TYPE, "파일명이 없습니다");
         }
         if (size <= 0 || size > maxBytes) {
-            throw new BusinessException(ErrorCode.FILE_SIZE_EXCEEDED,
+            throw new BusinessException(ErrorCode.FILE_TOO_LARGE,
                     "파일 크기가 %dMB를 초과했습니다".formatted(maxBytes / 1024 / 1024));
         }
 
         String extension = extensionOf(fileName);
         Set<String> mimeTypes = allowed.get(extension);
         if (mimeTypes == null) {
-            throw new BusinessException(ErrorCode.UNSUPPORTED_FILE_FORMAT,
+            throw new BusinessException(ErrorCode.UNSUPPORTED_FILE_TYPE,
                     "지원하지 않는 파일 형식입니다. %s만 업로드할 수 있습니다"
                             .formatted(String.join(", ", allowed.keySet())));
         }
         if (mimeType == null || !mimeTypes.contains(baseMimeType(mimeType))) {
-            throw new BusinessException(ErrorCode.UNSUPPORTED_FILE_FORMAT,
+            throw new BusinessException(ErrorCode.UNSUPPORTED_FILE_TYPE,
                     "확장자와 MIME 타입이 맞지 않습니다");
         }
         return extension;

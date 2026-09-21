@@ -24,7 +24,7 @@ public enum FileFormat {
         try {
             return valueOf(extension.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
-            throw new BusinessException(ErrorCode.UNSUPPORTED_FILE_FORMAT);
+            throw new BusinessException(ErrorCode.UNSUPPORTED_FILE_TYPE);
         }
     }
 }

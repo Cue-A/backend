@@ -74,9 +74,20 @@ public class FileValidator {
             throw new BusinessException(ErrorCode.UNSUPPORTED_FILE_TYPE,
                     "허용되지 않은 확장자입니다: " + extension);
         }
-        if (mimeType == null || !mimeTypes.contains(mimeType.toLowerCase(Locale.ROOT))) {
+        if (mimeType == null || !mimeTypes.contains(baseMimeType(mimeType))) {
             throw new BusinessException(ErrorCode.UNSUPPORTED_FILE_TYPE,
                     "확장자와 MIME 타입이 맞지 않습니다");
         }
+    }
+
+    /**
+     * {@code text/plain; charset=UTF-8} 이나 {@code audio/webm;codecs=opus} 처럼
+     * 파라미터가 붙어 옵니다. 떼지 않으면 같은 파일이 브라우저에 따라 통과하기도
+     * 하고 막히기도 합니다.
+     */
+    private String baseMimeType(String mimeType) {
+        int semicolon = mimeType.indexOf(';');
+        String base = semicolon < 0 ? mimeType : mimeType.substring(0, semicolon);
+        return base.trim().toLowerCase(Locale.ROOT);
     }
 }

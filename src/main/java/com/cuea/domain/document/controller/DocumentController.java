@@ -46,6 +46,8 @@ public class DocumentController {
                     파일 업로드와 마크다운 직접 작성을 한 엔드포인트로 처리합니다.
 
                     sourceType=FILE 이면 file, MARKDOWN 이면 content 가 필요합니다.
+
+                    documentType 은 선택입니다. 안 보내면 RESUME 입니다.
                     파일은 pdf · docx · txt 만, 최대 10MB 입니다.""")
     @PostMapping(consumes = MediaType.MULTIPART_FORM_DATA_VALUE)
     @ResponseStatus(HttpStatus.CREATED)
@@ -53,7 +55,7 @@ public class DocumentController {
     public Result<DocumentResponse> create(
             @CurrentUser String userId,
             @RequestParam SourceType sourceType,
-            @RequestParam DocType documentType,
+            @RequestParam(required = false) DocType documentType,
             @RequestParam String title,
             @RequestParam(required = false) String content,
             @RequestParam(required = false) MultipartFile file) {

@@ -97,6 +97,15 @@ class DocumentRegisterServiceTest {
         assertThat(fileStorage.stored).isEmpty();
     }
 
+    /** documentType 은 목록 필터용이라 필수가 아닙니다. 안 보내면 RESUME 입니다. */
+    @Test
+    void documentType_을_안_보내면_RESUME_이_된다() {
+        DocumentCreateCommand command = new DocumentCreateCommand(
+                SourceType.MARKDOWN, null, "직접 쓴 자소서", "본문입니다", null);
+
+        assertThat(command.documentType()).isEqualTo(DocType.RESUME);
+    }
+
     @Test
     void FILE_인데_파일이_없으면_거절한다() {
         DocumentCreateCommand command = new DocumentCreateCommand(

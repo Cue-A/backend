@@ -4,7 +4,6 @@ import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.document.dto.request.DocumentCreateCommand;
 import com.cuea.domain.document.dto.response.DocumentResponse;
-import com.cuea.domain.document.entity.DocType;
 import com.cuea.domain.document.entity.Document;
 import com.cuea.domain.document.entity.DocumentStatus;
 import com.cuea.domain.document.entity.FileFormat;
@@ -60,7 +59,6 @@ public class DocumentRegisterService {
 
     public DocumentResponse register(String userId, DocumentCreateCommand command) {
         validateTitle(command.title());
-        validateDocumentType(command.documentType());
         validateNotOverLimit(userId);
 
         User user = userRepository.findById(userId)
@@ -148,12 +146,6 @@ public class DocumentRegisterService {
         if (title.trim().length() > MAX_TITLE_LENGTH) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST,
                     "제목은 %d자 이하여야 합니다".formatted(MAX_TITLE_LENGTH));
-        }
-    }
-
-    private void validateDocumentType(DocType documentType) {
-        if (documentType == null) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "documentType 이 필요합니다");
         }
     }
 

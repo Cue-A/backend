@@ -22,4 +22,19 @@ public record DocumentCreateCommand(
         String content,
         UploadedFile file
 ) {
+
+    /**
+     * {@code documentType} 을 안 보내면 {@link DocType#RESUME} 입니다.
+     *
+     * <p>이 값은 면접 동작에 쓰이지 않습니다. 목록을 종류별로 거르는 데만 쓰여서,
+     * 등록할 때 반드시 고르게 할 이유가 없습니다. 게다가 <b>지금은 수정·삭제
+     * API 가 없어</b> 잘못 고르면 되돌릴 수 없습니다. 애매하면 안 보내도 되게 두고,
+     * 화면에 종류 선택이 생기면 그때 값을 채워 보내면 됩니다.
+     *
+     * <p>기본값을 컨트롤러가 아니라 여기 둔 이유는, 서비스를 직접 부르는 테스트나
+     * 다른 진입점에서도 같은 값이 되게 하기 위해서입니다.
+     */
+    public DocumentCreateCommand {
+        documentType = documentType == null ? DocType.RESUME : documentType;
+    }
 }

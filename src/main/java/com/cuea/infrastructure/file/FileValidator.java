@@ -18,6 +18,7 @@ public class FileValidator {
 
     private static final long RESUME_MAX_BYTES = 10L * 1024 * 1024;   // 10MB
     private static final long AUDIO_MAX_BYTES = 50L * 1024 * 1024;    // 50MB
+    private static final long VIDEO_MAX_BYTES = 50L * 1024 * 1024;    // 50MB
 
     private static final Map<String, Set<String>> RESUME_TYPES = Map.of(
             "pdf", Set.of("application/pdf"),
@@ -25,9 +26,17 @@ public class FileValidator {
             "doc", Set.of("application/msword"),
             "txt", Set.of("text/plain"));
 
+    // docs/20-storage.md: 답변 오디오는 webm, mp4. 오디오 MIME 만 허용합니다.
     private static final Map<String, Set<String>> AUDIO_TYPES = Map.of(
-            "webm", Set.of("audio/webm", "video/webm"),
-            "mp4", Set.of("audio/mp4", "video/mp4"));
+            "webm", Set.of("audio/webm"),
+            "mp4", Set.of("audio/mp4"));
+
+    // 답변 영상도 같은 컨테이너(webm, mp4)를 쓰되 영상 MIME 만 허용합니다.
+    // docs/20-storage.md 의 답변 미디어 허용 포맷(webm, mp4) 안에서 audio↔video 를
+    // MIME 로 구분할 뿐, 새 포맷을 추가하지 않습니다.
+    private static final Map<String, Set<String>> VIDEO_TYPES = Map.of(
+            "webm", Set.of("video/webm"),
+            "mp4", Set.of("video/mp4"));
 
     public void validateResume(String fileName, String mimeType, long size) {
         validate(fileName, mimeType, size, RESUME_TYPES, RESUME_MAX_BYTES);
@@ -35,6 +44,14 @@ public class FileValidator {
 
     public void validateAnswerAudio(String fileName, String mimeType, long size) {
         validate(fileName, mimeType, size, AUDIO_TYPES, AUDIO_MAX_BYTES);
+    }
+
+    /**
+     * 답변 영상 검증. 확장자는 오디오와 같은 webm·mp4 이지만 MIME 은 {@code video/*} 만
+     * 허용해, 오디오 파일이 영상 자리에 올라오는 것을 막습니다. docs/20-storage.md 기준.
+     */
+    public void validateAnswerVideo(String fileName, String mimeType, long size) {
+        validate(fileName, mimeType, size, VIDEO_TYPES, VIDEO_MAX_BYTES);
     }
 
     public String extensionOf(String fileName) {
@@ -57,9 +74,20 @@ public class FileValidator {
             throw new BusinessException(ErrorCode.UNSUPPORTED_FILE_TYPE,
                     "허용되지 않은 확장자입니다: " + extension);
         }
-        if (mimeType == null || !mimeTypes.contains(mimeType.toLowerCase(Locale.ROOT))) {
+        if (mimeType == null || !mimeTypes.contains(baseMimeType(mimeType))) {
             throw new BusinessException(ErrorCode.UNSUPPORTED_FILE_TYPE,
                     "확장자와 MIME 타입이 맞지 않습니다");
         }
+    }
+
+    /**
+     * {@code text/plain; charset=UTF-8} 이나 {@code audio/webm;codecs=opus} 처럼
+     * 파라미터가 붙어 옵니다. 떼지 않으면 같은 파일이 브라우저에 따라 통과하기도
+     * 하고 막히기도 합니다.
+     */
+    private String baseMimeType(String mimeType) {
+        int semicolon = mimeType.indexOf(';');
+        String base = semicolon < 0 ? mimeType : mimeType.substring(0, semicolon);
+        return base.trim().toLowerCase(Locale.ROOT);
     }
 }

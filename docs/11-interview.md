@@ -18,7 +18,7 @@
 6. Spring: AI에 POST /answers → 폴링 (최대 60초)
 7. 다음 질문 / 되묻기 / 세션 종료 중 하나 수신
 8. 4~7 반복
-9. session_end 수신 → status = completed → 리포트 작업 시작
+9. session_end 수신 → status = completed
 ```
 
 **2단계 REST 응답은 첫 질문을 기다리지 않고 즉시 반환됩니다.** 폴링(3)과 첫 질문
@@ -32,8 +32,14 @@
 > 작업으로 분리합니다. WebSocket 핸드셰이크 인증·소유권 검증도 이번 범위가 아니라
 > 기존 Issue #3 에서 처리합니다.
 
-**5~9 단계(답변 제출 이후 반복 흐름)는 아직 구현되지 않았습니다.** 2~4 단계
-(세션 시작·첫 질문 수신)만 Issue #23 에서 구현했습니다.
+**5~9 단계(답변 제출 이후 반복 흐름)는 Issue #24 에서 구현했습니다.** 답변 업로드
+URL 발급 → 답변 제출 → AI 폴링(최대 60초) → 다음 질문·꼬리질문·되묻기·세션 종료
+처리 → DB 반영 → WebSocket push 가 동작합니다. 2~4 단계(세션 시작·첫 질문 수신)는
+Issue #23 에서 구현했습니다.
+
+> 아직 구현하지 않은 것(후속): 동일 질문 중복 제출 방지·in-flight idempotency,
+> AI error_code 별 재시도 정책, 사용자 세션 abort API 는 Issue #25 범위입니다.
+> WebSocket 핸드셰이크 인증·연결 전 push 유실은 Issue #3 범위입니다.
 
 ---
 
@@ -51,12 +57,12 @@
 | `replay_log` | ❌ | 재연습이면 필수. [`12-replay.md`](./12-replay.md) |
 
 **Front 는 AI 의 `company_id` 를 직접 넘기지 않고, Backend `company` 테이블의
-PK(문서 없이 연습 모드면 없음)를 넘깁니다.** Backend 는 그 PK 를 문자열로 변환해
-AI 에 로그·추적용 `company_id` 로 넘기고, 질문 생성용 인재상은
-`company_profile_override` 로 조립해 보냅니다. AI 는 `company_id` 로 기업 데이터를
-조회하지 않으며, AI 서버는 기업 목록을 갖지 않습니다(`GET /ai/companies` 없음).
-기업 데이터의 Source of Truth 는 Backend 이며 `verified=false` 기업은 조회
-자체에서 제외합니다.
+`company_id`(PK)를 넘깁니다.** Backend 는 그 값을 문자열로 변환해 AI 에 로그·추적용
+`company_id` 로 전달하며, AI 는 이 ID 를 기업 조회 key 로 사용하지 않습니다. 실제
+질문 생성용 기업 정보는 `company_profile_override` 로 전달합니다. `company_id` 는
+optional 이며(값이 없으면 null 로 전송, JSON 에서는 키가 빠짐), AI 서버는 기업
+목록을 갖지 않습니다(`GET /ai/companies` 없음). 기업 데이터의 Source of Truth 는
+Backend 이며 `verified=false` 기업은 조회 자체에서 제외합니다.
 
 **`session.document_id` 는 NOT NULL 입니다.** AI 세션 시작에 `resume_file_url` 이
 필수라 문서 없는 세션은 성립하지 않습니다. 면접 자료는 기존 `PORTFOLIO` 문서
@@ -152,8 +158,9 @@ Java enum으로 만들지 않습니다. 이유는 [`02-database.md`](./02-databa
 
 `aborted` 세션은 리포트를 생성하지 않습니다.
 
-사용자가 중간에 나가면 `POST /ai/sessions/{id}/abort` 를 호출해 AI 쪽 상태도
-정리합니다.
+사용자가 중간에 나가 세션을 정리하는 abort API(`POST /ai/sessions/{id}/abort` 를 호출해
+AI 쪽 상태도 정리)는 Issue #25 에서 구현할 예정입니다. 현재는 폴링 타임아웃·복구 불가
+오류 등 Backend 내부 정리 경로에서만 `aborted` 로 전이합니다.
 
 ---
 
@@ -162,7 +169,7 @@ Java enum으로 만들지 않습니다. 이유는 [`02-database.md`](./02-databa
 | 이벤트 | 저장할 것 |
 |---|---|
 | 질문 수신 (`question`/`followup`/`reask`) | 질문 로그 전체 |
-| 답변 업로드 완료 | `answer_audio_object_key`(답변 제출 로직은 다음 이슈 범위) |
+| 답변 업로드 완료 | `answer_audio_object_key`·`answer_video_object_key`(카메라 미사용 시 null)·`answer_is_timeout`. 답변 제출 시점에 저장 (Issue #24) |
 | `session_end` 수신 | `status = completed` |
 
 **질문은 수신 즉시 저장합니다.** 프론트에 push한 뒤에 저장하면, 사용자가 그 사이에

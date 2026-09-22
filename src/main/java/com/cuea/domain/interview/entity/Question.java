@@ -185,6 +185,22 @@ public class Question extends BaseCreatedEntity {
         this.answerAudioObjectKey = answerAudioObjectKey;
     }
 
+    /**
+     * 답변 미디어 업로드 완료를 기록합니다. object key 만 저장하고 presigned URL 은
+     * 저장하지 않습니다(만료되기 때문). 영상은 카메라 미사용 시 null 입니다.
+     *
+     * @param answerAudioObjectKey 답변 오디오 S3 key. 필수
+     * @param answerVideoObjectKey 답변 영상 S3 key. 카메라 미사용이면 null
+     * @param answerIsTimeout      제한 시간 만료로 자동 제출됐는지
+     */
+    public void attachAnswerMedia(String answerAudioObjectKey,
+                                  String answerVideoObjectKey,
+                                  boolean answerIsTimeout) {
+        this.answerAudioObjectKey = answerAudioObjectKey;
+        this.answerVideoObjectKey = answerVideoObjectKey;
+        this.answerIsTimeout = answerIsTimeout;
+    }
+
     public void markBookmarked(boolean bookmarked) {
         this.bookmarked = bookmarked;
     }

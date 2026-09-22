@@ -1,8 +1,6 @@
 package com.cuea.domain.document.controller;
 
 import com.cuea.common.annotation.RateLimit;
-import com.cuea.common.exception.BusinessException;
-import com.cuea.common.exception.ErrorCode;
 import com.cuea.common.result.Result;
 import com.cuea.common.security.CurrentUser;
 import com.cuea.domain.document.dto.request.DocumentCreateCommand;
@@ -23,7 +21,6 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.multipart.MultipartFile;
 
-import java.io.IOException;
 
 /**
  * 문서 API.
@@ -69,21 +66,19 @@ public class DocumentController {
     /**
      * 웹 계층 타입을 저장소가 아는 형태로 옮깁니다.
      *
-     * <p>스트림은 여기서 열기만 하고 읽지 않습니다. 실제 소비는 저장소 구현이
-     * 합니다. 여기서 바이트로 다 읽어버리면 10MB 가 그대로 힙에 올라갑니다.
+     * <p><b>스트림을 여기서 열지 않습니다.</b> {@code MultipartFile} 이
+     * {@code InputStreamSource} 를 구현하므로 파일 자체를 넘기고, 여는 것은 실제로
+     * 소비하는 저장소 구현이 합니다. 여기서 열면 검증에서 거부된 파일의 스트림이
+     * 읽히지도 닫히지도 않은 채 버려집니다.
      */
     private UploadedFile toUploadedFile(MultipartFile file) {
         if (file == null || file.isEmpty()) {
             return null;
         }
-        try {
-            return new UploadedFile(
-                    file.getOriginalFilename(),
-                    file.getContentType(),
-                    file.getSize(),
-                    file.getInputStream());
-        } catch (IOException e) {
-            throw new BusinessException(ErrorCode.STORAGE_ERROR, "업로드된 파일을 읽지 못했습니다");
-        }
+        return new UploadedFile(
+                file.getOriginalFilename(),
+                file.getContentType(),
+                file.getSize(),
+                file);
     }
 }

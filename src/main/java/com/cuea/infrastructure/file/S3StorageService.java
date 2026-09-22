@@ -40,6 +40,10 @@ public class S3StorageService {
      * 업로드가 몰릴 때 힙이 그만큼 배로 늘어납니다. S3 는 스트림 길이를 미리
      * 알아야 하므로 {@code size} 를 함께 받습니다.
      */
+    /**
+     * <b>{@code content} 를 닫지 않습니다.</b> AWS SDK 도 닫아주지 않으므로 여는 쪽이
+     * try-with-resources 로 책임집니다. 여기서 닫으면 재시도 같은 상위 제어가 막힙니다.
+     */
     public void put(String objectKey, InputStream content, long size, String contentType) {
         try {
             s3Client.putObject(PutObjectRequest.builder()

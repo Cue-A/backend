@@ -18,6 +18,7 @@ import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
 import java.util.Optional;
+import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
@@ -210,9 +211,47 @@ class DocumentRegisterServiceTest {
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.USER_NOT_FOUND);
     }
 
+    /**
+     * 스트림을 컨트롤러에서 미리 열면, 검증에서 거부된 파일의 스트림이 읽히지도
+     * 닫히지도 않은 채 버려집니다. {@code .hwp} 를 올릴 때마다 파일 디스크립터가
+     * 하나씩 새는 셈이라, 거부 경로에서는 아예 열리지 않아야 합니다.
+     */
+    @Test
+    void 검증에서_거부되면_파일_스트림을_열지_않는다() {
+        AtomicInteger opened = new AtomicInteger();
+        UploadedFile file = new UploadedFile("이력서.hwp", "application/haansofthwp", 1_024,
+                () -> {
+                    opened.incrementAndGet();
+                    return new ByteArrayInputStream(new byte[]{1, 2, 3});
+                });
+
+        assertThatThrownBy(() -> service.register(user.getUserId(), new DocumentCreateCommand(
+                SourceType.FILE, DocType.RESUME, "제목", null, file)))
+                .isInstanceOf(BusinessException.class)
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNSUPPORTED_FILE_TYPE);
+
+        assertThat(opened).hasValue(0);
+    }
+
+    /** 정상 경로에서는 저장소가 한 번만 열어야 합니다. 두 번 열면 스트림이 하나 샙니다. */
+    @Test
+    void 정상_등록이면_스트림을_한_번만_연다() {
+        AtomicInteger opened = new AtomicInteger();
+        UploadedFile file = new UploadedFile("이력서.pdf", PDF, 1_024,
+                () -> {
+                    opened.incrementAndGet();
+                    return new ByteArrayInputStream(new byte[]{1, 2, 3});
+                });
+
+        service.register(user.getUserId(), new DocumentCreateCommand(
+                SourceType.FILE, DocType.RESUME, "제목", null, file));
+
+        assertThat(opened).hasValue(1);
+    }
+
     private DocumentCreateCommand fileCommand(String fileName, String contentType, long size) {
         UploadedFile file = new UploadedFile(
-                fileName, contentType, size, new ByteArrayInputStream(new byte[]{1, 2, 3}));
+                fileName, contentType, size, () -> new ByteArrayInputStream(new byte[]{1, 2, 3}));
         return new DocumentCreateCommand(
                 SourceType.FILE, DocType.RESUME, "2026 상반기 백엔드 자소서", null, file);
     }

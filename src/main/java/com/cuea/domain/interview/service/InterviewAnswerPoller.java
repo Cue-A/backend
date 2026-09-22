@@ -88,9 +88,8 @@ public class InterviewAnswerPoller {
                     stage -> socketHandler.push(sessionId,
                             ProgressPushMessage.of(ProgressStage.from(stage))));
         } catch (BusinessException e) {
-            // AI 가 알려준 실패·타임아웃. 재시도 정책은 #25. 여기서는 통지만 한다.
-            log.warn("답변 폴링 실패 sessionId={} errorCode={}", sessionId, e.getErrorCode());
-            pushError(sessionId, e);
+            // AI 가 알려준 실패·타임아웃. error_code 별로 세션 정리 여부가 갈린다(#25).
+            handlePollingFailure(sessionId, e);
             return;
         } catch (RuntimeException e) {
             // 예상치 못한 예외(예: 응답 디코딩 실패). 상태 동기화를 보장할 수 없어 정리한다.
@@ -123,6 +122,41 @@ public class InterviewAnswerPoller {
             cleanupAndPushError(sessionId,
                     "답변 결과 처리 중 예기치 못한 오류 type=" + result.type(), unexpectedResponse(e));
         }
+    }
+
+    /**
+     * AI 폴링 실패({@link BusinessException})를 error_code 별 정책으로 처리합니다. (#25)
+     *
+     * <ul>
+     *   <li>{@code SESSION_ENDED} — 중복 제출. 세션 정리·error push 없이 로그만 남기고 무시.</li>
+     *   <li>{@code SESSION_NOT_FOUND}·{@code RESUME_PARSE_FAILED}·{@code AI_TIMEOUT}·
+     *       {@code AI_UNAVAILABLE}·{@code UNEXPECTED_AI_RESPONSE} — 복구 불가/상태 불명.
+     *       세션을 정리(abort+ABORTED)하고 error push.</li>
+     *   <li>{@code INVALID_QUESTION_ID}·{@code INVALID_CATEGORY} — 클라이언트·조립 버그.
+     *       세션을 유지하고 경고 로그 + error push.</li>
+     *   <li>그 외({@code LLM_FAILED}·{@code STT_FAILED}·{@code TTS_FAILED} 등) — 재시도·
+     *       재녹음 대상이라 세션을 유지하고 error push 만. (자동 재시도는 별도 확인 후.)</li>
+     * </ul>
+     */
+    private void handlePollingFailure(String sessionId, BusinessException e) {
+        ErrorCode code = e.getErrorCode();
+
+        if (errorTranslator.isDuplicateSubmit(code)) {
+            log.info("답변이 이미 종료된 세션에 도착해 무시합니다(중복 제출) sessionId={}", sessionId);
+            return;
+        }
+        if (errorTranslator.requiresSessionAbort(code)) {
+            cleanupAndPushError(sessionId, "답변 폴링 실패로 세션을 정리합니다", e);
+            return;
+        }
+        if (errorTranslator.isClientContractError(code)) {
+            log.warn("답변 폴링에서 클라이언트/조립 계약 오류 sessionId={} errorCode={}", sessionId, code);
+            pushError(sessionId, e);
+            return;
+        }
+        // 재시도·재녹음 대상(LLM/STT)·TTS 등: 세션 유지하고 통지만.
+        log.warn("답변 폴링 실패(세션 유지) sessionId={} errorCode={}", sessionId, code);
+        pushError(sessionId, e);
     }
 
     /** 예상치 못한 원인 예외를 계약 위반({@code UNEXPECTED_AI_RESPONSE})으로 감쌉니다. */

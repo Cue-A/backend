@@ -264,6 +264,90 @@ class InterviewAnswerPollerTest {
         verify(sessionWriter, never()).markAborted(anyString());
     }
 
+    // ── error_code 별 cleanup 정책 (Issue #25) ───────────────────
+
+    @Test
+    void SESSION_NOT_FOUND_은_세션을_정리하고_error_를_push_한다() {
+        // AI 쪽 세션이 사라짐(재배포 등). 복구 불가라 세션을 ABORTED 로 정리한다.
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.SESSION_NOT_FOUND));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("SESSION_NOT_FOUND");
+    }
+
+    @Test
+    void AI_TIMEOUT_은_답변_흐름에서도_세션을_정리한다() {
+        // 답변 폴링 타임아웃도 세션 시작과 동일하게 세션을 정리해야 일관적이다.
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.AI_TIMEOUT));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("AI_TIMEOUT");
+    }
+
+    @Test
+    void AI_UNAVAILABLE_도_세션을_정리한다() {
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.AI_UNAVAILABLE));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("AI_UNAVAILABLE");
+    }
+
+    @Test
+    void SESSION_ENDED_는_중복_제출로_무시한다_abort도_error_push도_없다() {
+        // 이미 종료된 세션에 답변이 또 들어온 상황. 계약대로 무시(로그만).
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.SESSION_ENDED));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+
+        verify(aiClient, never()).abortSession(anyString());
+        verify(sessionWriter, never()).markAborted(anyString());
+        // error push 도 하지 않는다.
+        verify(socketHandler, never()).push(eq(SESSION_ID), any());
+    }
+
+    @Test
+    void INVALID_QUESTION_ID_는_abort_없이_error_만_push_한다() {
+        // 클라이언트 버그. 세션을 정리하지 않고 오류만 전달한다.
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.INVALID_QUESTION_ID));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+
+        verify(aiClient, never()).abortSession(anyString());
+        verify(sessionWriter, never()).markAborted(anyString());
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("INVALID_QUESTION_ID");
+    }
+
+    @Test
+    void INVALID_CATEGORY_는_abort_없이_error_만_push_한다() {
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.INVALID_CATEGORY));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+
+        verify(aiClient, never()).abortSession(anyString());
+        verify(sessionWriter, never()).markAborted(anyString());
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("INVALID_CATEGORY");
+    }
+
     // ── C1: 예상치 못한(non-Business) 예외 ──────────────────────
 
     @Test

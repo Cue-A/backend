@@ -396,6 +396,43 @@ class InterviewAnswerPollerTest {
         assertThat(payload.errorCode()).isEqualTo("UNEXPECTED_AI_RESPONSE");
     }
 
+    // ── TTS text-only 정상 경로 회귀 (Issue #25) ─────────────────
+
+    @Test
+    void TTS_실패로_audio_url_이_null_이어도_질문을_저장하고_텍스트로_push_한다() {
+        // 계약: status=done + result.text 있음 + audio_url=null (TTS_FAILED 시 음성만 없음).
+        // 이 경우는 오류가 아니라 정상 진행이다. 질문을 저장하고 audioAvailable=false 로
+        // push 하며, error push 나 세션 정리를 하지 않는다.
+        // (새 TTS_FAILED error 처리 로직을 추가하지 않는다 — 기존 handleQuestion 경로 그대로.)
+        AiQuestionResult result = new AiQuestionResult(
+                AiQuestionResult.TYPE_QUESTION, "q_2", null, "다음 질문 텍스트", null,
+                "직무역량", "L2", 2, 9, 1, 4, false, false, null);
+        when(aiPoller.await(eq(TASK_ID), any(), any())).thenReturn(done(result));
+        // 저장된 Question 도 audioUrl=null 이다(TTS 없음).
+        Question savedWithoutAudio = Question.builder()
+                .sessionId(SESSION_ID).questionId("q_2").type(QuestionType.QUESTION)
+                .text("다음 질문 텍스트").audioUrl(null)
+                .category("직무역량").difficulty("L2")
+                .questionNumber(2).topicIndex(1).build();
+        when(sessionWriter.saveNextQuestion(eq(SESSION_ID), eq(result))).thenReturn(savedWithoutAudio);
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+
+        // 질문은 정상 저장된다.
+        verify(sessionWriter).saveNextQuestion(SESSION_ID, result);
+        // 세션은 유지된다(정리하지 않음).
+        verify(aiClient, never()).abortSession(anyString());
+        verify(sessionWriter, never()).markAborted(anyString());
+        verify(sessionWriter, never()).completeSession(anyString());
+
+        // question 으로 push 하되 audio_url 은 null, audioAvailable=false.
+        QuestionPushMessage payload = capturePush("question", QuestionPushMessage.class);
+        assertThat(payload.questionId()).isEqualTo("q_2");
+        assertThat(payload.text()).isEqualTo("다음 질문 텍스트");
+        assertThat(payload.audioUrl()).isNull();
+        assertThat(payload.audioAvailable()).isFalse();
+    }
+
     @SuppressWarnings("unchecked")
     private <T> T capturePush(String expectedType, Class<T> payloadType) {
         ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);

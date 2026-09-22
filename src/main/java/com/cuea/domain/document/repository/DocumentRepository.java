@@ -13,6 +13,8 @@ import java.util.UUID;
  * 소유자 스코프 쿼리를 만들어 둬도 옆에 있는 {@code findById} 를 그냥 쓰면 그대로
  * 뚫립니다. 필요한 메서드만 열어두면 쓰려고 해도 컴파일이 안 됩니다.
  * {@code docs/01-conventions.md} 의 "소유자 있는 엔티티는 Repository 를 상속합니다" 참고.
+ *
+ * <p>내부 PK({@code docId})가 아니라 외부 노출용 {@code publicId} 로 조회합니다.
  */
 public interface DocumentRepository extends Repository<Document, Long> {
 

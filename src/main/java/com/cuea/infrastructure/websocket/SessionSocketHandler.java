@@ -40,12 +40,18 @@ public class SessionSocketHandler extends TextWebSocketHandler {
         log.debug("WebSocket 종료 sessionId={} status={}", sessionId, status.getCode());
     }
 
-    /** 면접 세션에 붙은 모든 연결에 보냅니다. 끊긴 연결은 조용히 건너뜁니다. */
-    public void push(String interviewSessionId, SocketMessage<?> message) {
+    /**
+     * 면접 세션에 붙은 모든 연결에 보냅니다. 끊긴 연결은 조용히 건너뜁니다.
+     *
+     * @return 실제로 메시지를 전송한(열려 있고 전송에 성공한) 연결 수.
+     *         직렬화 실패나 수신자가 없으면 0.
+     */
+    public int push(String interviewSessionId, SocketMessage<?> message) {
         String payload = serialize(message);
         if (payload == null) {
-            return;
+            return 0;
         }
+        int delivered = 0;
         for (WebSocketSession socket : registry.find(interviewSessionId)) {
             if (!socket.isOpen()) {
                 continue;
@@ -54,11 +60,13 @@ public class SessionSocketHandler extends TextWebSocketHandler {
                 synchronized (socket) {
                     socket.sendMessage(new TextMessage(payload));
                 }
+                delivered++;
             } catch (IOException e) {
                 log.warn("WebSocket push 실패 sessionId={} socketId={}",
                         interviewSessionId, socket.getId(), e);
             }
         }
+        return delivered;
     }
 
     private String serialize(SocketMessage<?> message) {

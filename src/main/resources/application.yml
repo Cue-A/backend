@@ -96,7 +96,6 @@ app:
     poll-interval: 1s
     connect-timeout: 5s
     read-timeout: 10s
-    company-cache-ttl: 1h
     mock:
       enabled: ${APP_AI_MOCK_ENABLED:true}
 

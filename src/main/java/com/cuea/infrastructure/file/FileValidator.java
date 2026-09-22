@@ -18,7 +18,7 @@ import java.util.Set;
  * 클라이언트가 보낸 값이라 그대로 믿을 수 없고, 확장자는 사용자가 바꿔 붙일 수
  * 있습니다. 한쪽만 보는 검사는 둘 다 뚫립니다.
  *
- * <p>허용 목록만 다르고 규칙은 같아서 {@link #validate} 하나를 셋이 나눠 씁니다.
+ * <p>허용 목록만 다르고 규칙은 같아서 {@link #validate} 하나를 넷이 나눠 씁니다.
  * 메시지도 목록에서 뽑아내므로, 형식을 늘릴 때 목록만 고치면 사용자에게 나가는
  * 안내까지 같이 바뀝니다.
  */
@@ -28,6 +28,7 @@ public class FileValidator {
     public static final long DOCUMENT_MAX_BYTES = 10L * 1024 * 1024;  // 10MB
     private static final long RESUME_MAX_BYTES = 10L * 1024 * 1024;   // 10MB
     private static final long AUDIO_MAX_BYTES = 50L * 1024 * 1024;    // 50MB
+    private static final long VIDEO_MAX_BYTES = 50L * 1024 * 1024;    // 50MB
 
     /**
      * 문서 업로드 허용 형식. {@code FileFormat} enum 과 같은 목록이어야 합니다.
@@ -49,9 +50,17 @@ public class FileValidator {
             "doc", Set.of("application/msword"),
             "txt", Set.of("text/plain"));
 
+    // docs/20-storage.md: 답변 오디오는 webm, mp4. 오디오 MIME 만 허용합니다.
     private static final Map<String, Set<String>> AUDIO_TYPES = allowed(
-            "webm", Set.of("audio/webm", "video/webm"),
-            "mp4", Set.of("audio/mp4", "video/mp4"));
+            "webm", Set.of("audio/webm"),
+            "mp4", Set.of("audio/mp4"));
+
+    // 답변 영상도 같은 컨테이너(webm, mp4)를 쓰되 영상 MIME 만 허용합니다.
+    // docs/20-storage.md 의 답변 미디어 허용 포맷(webm, mp4) 안에서 audio↔video 를
+    // MIME 로 구분할 뿐, 새 포맷을 추가하지 않습니다.
+    private static final Map<String, Set<String>> VIDEO_TYPES = allowed(
+            "webm", Set.of("video/webm"),
+            "mp4", Set.of("video/mp4"));
 
     /**
      * 문서 업로드 검증. 통과하면 소문자 확장자를 돌려줍니다.
@@ -73,6 +82,14 @@ public class FileValidator {
 
     public String validateAnswerAudio(String fileName, String mimeType, long size) {
         return validate(fileName, mimeType, size, AUDIO_TYPES, AUDIO_MAX_BYTES);
+    }
+
+    /**
+     * 답변 영상 검증. 확장자는 오디오와 같은 webm·mp4 이지만 MIME 은 {@code video/*} 만
+     * 허용해, 오디오 파일이 영상 자리에 올라오는 것을 막습니다. docs/20-storage.md 기준.
+     */
+    public String validateAnswerVideo(String fileName, String mimeType, long size) {
+        return validate(fileName, mimeType, size, VIDEO_TYPES, VIDEO_MAX_BYTES);
     }
 
     public String extensionOf(String fileName) {

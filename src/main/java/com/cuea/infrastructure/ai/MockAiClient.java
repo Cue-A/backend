@@ -3,7 +3,6 @@ package com.cuea.infrastructure.ai;
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.infrastructure.ai.dto.AiAnswerSubmitRequest;
-import com.cuea.infrastructure.ai.dto.AiCompany;
 import com.cuea.infrastructure.ai.dto.AiQuestionResult;
 import com.cuea.infrastructure.ai.dto.AiSessionStartRequest;
 import com.cuea.infrastructure.ai.dto.AiSessionStartResponse;
@@ -87,14 +86,6 @@ public class MockAiClient implements AiClient {
     }
 
     @Override
-    public List<AiCompany> listCompanies() {
-        return List.of(
-                new AiCompany("hyundai_enc", "현대건설(주)", "종합건설 · 플랜트"),
-                new AiCompany("gs_enc", "GS건설(주)", "종합건설 · 주택"),
-                new AiCompany("samsung_cnt", "삼성물산(주)", "종합건설 · 인프라"));
-    }
-
-    @Override
     public void abortSession(String sessionId) {
         sessions.remove(sessionId);
         log.info("[MOCK] 세션 중단 sessionId={}", sessionId);
@@ -116,7 +107,7 @@ public class MockAiClient implements AiClient {
         if (number > session.questionTotal()) {
             return new AiQuestionResult(
                     AiQuestionResult.TYPE_SESSION_END,
-                    null, null, null, null, null,
+                    null, null, null, null, null, null,
                     null, session.questionTotal(), null, null,
                     false, false, session.questionTotal());
         }
@@ -126,6 +117,7 @@ public class MockAiClient implements AiClient {
         return new AiQuestionResult(
                 followup ? AiQuestionResult.TYPE_FOLLOWUP : AiQuestionResult.TYPE_QUESTION,
                 "q_" + number,
+                null,
                 followup
                         ? "방금 말씀하신 부분을 조금 더 구체적으로 설명해 주시겠어요?"
                         : "%s 관련해서 질문드리겠습니다. 준비해 오신 내용을 말씀해 주세요.".formatted(category),

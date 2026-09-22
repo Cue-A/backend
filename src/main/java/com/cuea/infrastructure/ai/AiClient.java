@@ -1,12 +1,9 @@
 package com.cuea.infrastructure.ai;
 
 import com.cuea.infrastructure.ai.dto.AiAnswerSubmitRequest;
-import com.cuea.infrastructure.ai.dto.AiCompany;
 import com.cuea.infrastructure.ai.dto.AiSessionStartRequest;
 import com.cuea.infrastructure.ai.dto.AiSessionStartResponse;
 import com.cuea.infrastructure.ai.dto.AiTaskStatusResponse;
-
-import java.util.List;
 
 /**
  * AI 서버와 통신하는 유일한 통로입니다.
@@ -25,9 +22,6 @@ public interface AiClient {
 
     /** 작업 상태 조회. 폴링용. */
     AiTaskStatusResponse getTask(String taskId);
-
-    /** 회사 목록. DB 에 저장하지 않고 Redis 에 1시간 캐시합니다. */
-    List<AiCompany> listCompanies();
 
     /**
      * 세션 중단. AI 쪽 상태도 정리합니다.

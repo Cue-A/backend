@@ -253,6 +253,11 @@ log.info("AI 작업 완료 sessionId={} taskId={} elapsedMs={}", sessionId, task
 - 서비스 레이어는 단위 테스트, 컨트롤러는 `@WebMvcTest`.
 - AI 클라이언트는 목으로 대체합니다. 실제 AI 서버에 붙는 테스트는 만들지 않습니다.
 - 테스트 메서드명은 한글로 써도 됩니다.
+- **DB 제약으로 갈리는 분기는 `@DataJpaTest` 로 실제 DB 에 붙입니다.**
+  mock 리포지토리는 `save()` 가 아무 일도 하지 않아 UNIQUE 제약이 작동할 기회가
+  없습니다. 같은 이메일로 행을 두 개 만드는 코드도 mock 테스트에서는 초록불이고
+  실제로는 500 이 납니다. `users.email` 이나 `user_auth` 의 UNIQUE 를 건드리는
+  코드가 여기 해당합니다.
 
 ```java
 @Test

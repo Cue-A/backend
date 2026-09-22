@@ -42,7 +42,15 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class DocumentRegisterService {
 
-    /** 사용자당 문서 상한. 넘으면 오래된 문서를 지우게 안내합니다. */
+    /**
+     * 사용자당 문서 상한. 넘으면 오래된 문서를 지우게 안내합니다.
+     *
+     * <p><b>동시 요청에는 정확하지 않습니다.</b> 개수를 센 뒤 저장하기 때문에, 같은
+     * 사용자의 요청 두 개가 겹치면 둘 다 검사를 통과해 21개가 될 수 있습니다.
+     * 잠금을 걸지 않은 이유는 넘쳐도 피해가 없고({@code @RateLimit} 20회/분이
+     * 완충합니다) 정확한 20 을 보장하려면 사용자 행을 잠가야 해서, 얻는 것보다
+     * 비용이 큽니다. 상한이 과금이나 용량과 묶이면 그때 잠금을 검토하세요.
+     */
     static final int MAX_DOCUMENTS_PER_USER = 20;
 
     /** 마크다운 본문 상한. {@code doc_text} 는 TEXT 라 DB 제약이 없어 여기서 막습니다. */

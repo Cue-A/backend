@@ -54,7 +54,7 @@ class FileValidatorTest {
                 "answer.webm", "audio/mp4;codecs=mp4a", 20L * ONE_MB))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
-                .isEqualTo(ErrorCode.UNSUPPORTED_FILE_TYPE);
+                .isEqualTo(ErrorCode.UNSUPPORTED_FILE_FORMAT);
     }
 
     @Test
@@ -64,7 +64,7 @@ class FileValidatorTest {
                 "answer.webm", "video/webm;codecs=vp8", 20L * ONE_MB))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
-                .isEqualTo(ErrorCode.UNSUPPORTED_FILE_TYPE);
+                .isEqualTo(ErrorCode.UNSUPPORTED_FILE_FORMAT);
     }
 
     @Test
@@ -74,7 +74,7 @@ class FileValidatorTest {
                 "answer.mp3", "audio/mpeg", 20L * ONE_MB))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
-                .isEqualTo(ErrorCode.UNSUPPORTED_FILE_TYPE);
+                .isEqualTo(ErrorCode.UNSUPPORTED_FILE_FORMAT);
     }
 
     @Test
@@ -84,7 +84,7 @@ class FileValidatorTest {
                 "answer.webm", "audio/webm;codecs=opus", 60L * ONE_MB))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode")
-                .isEqualTo(ErrorCode.FILE_TOO_LARGE);
+                .isEqualTo(ErrorCode.FILE_SIZE_EXCEEDED);
     }
 
     @Test

@@ -171,7 +171,7 @@ class InterviewAnswerServiceTest {
                         "ans.webm", "audio/webm", 1_000L,
                         "ans.mp4", "audio/mp4", 2_000L)))
                 .isInstanceOf(BusinessException.class)
-                .extracting("errorCode").isEqualTo(ErrorCode.UNSUPPORTED_FILE_TYPE);
+                .extracting("errorCode").isEqualTo(ErrorCode.UNSUPPORTED_FILE_FORMAT);
     }
 
     @Test
@@ -181,7 +181,7 @@ class InterviewAnswerServiceTest {
                 new AnswerUploadUrlRequest(QUESTION_ID,
                         "ans.webm", "video/webm", 1_000L, null, null, null)))
                 .isInstanceOf(BusinessException.class)
-                .extracting("errorCode").isEqualTo(ErrorCode.UNSUPPORTED_FILE_TYPE);
+                .extracting("errorCode").isEqualTo(ErrorCode.UNSUPPORTED_FILE_FORMAT);
     }
 
     // ── 답변 제출 ───────────────────────────────────────────────

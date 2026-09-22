@@ -35,9 +35,9 @@ public enum ErrorCode {
     // 아래 둘은 문서·이력서·녹음이 함께 씁니다. 허용 형식과 크기 상한이 경로마다
     // 달라 기본 메시지는 일반형으로 두고, 구체적인 안내는 FileValidator 가 허용
     // 목록에서 만들어 넘깁니다.
-    UNSUPPORTED_FILE_TYPE(HttpStatus.BAD_REQUEST, "지원하지 않는 파일 형식입니다"),
+    UNSUPPORTED_FILE_FORMAT(HttpStatus.BAD_REQUEST, "지원하지 않는 파일 형식입니다"),
     INVALID_SOURCE_TYPE(HttpStatus.BAD_REQUEST, "sourceType에 맞는 필드가 누락되었습니다"),
-    FILE_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "파일이 너무 큽니다"),
+    FILE_SIZE_EXCEEDED(HttpStatus.PAYLOAD_TOO_LARGE, "파일 크기가 허용치를 초과했습니다"),
     DOCUMENT_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "문서는 최대 20개까지 등록할 수 있습니다"),
     UPLOAD_NOT_COMPLETED(HttpStatus.BAD_REQUEST, "업로드가 완료되지 않았습니다"),
     STORAGE_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "파일 저장소 오류가 발생했습니다"),

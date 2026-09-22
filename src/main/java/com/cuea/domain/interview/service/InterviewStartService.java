@@ -183,7 +183,7 @@ public class InterviewStartService {
         }
         if (document.getSourceType() != SourceType.FILE
                 || document.getObjectKey() == null || document.getObjectKey().isBlank()) {
-            throw new BusinessException(ErrorCode.UNSUPPORTED_FILE_TYPE,
+            throw new BusinessException(ErrorCode.UNSUPPORTED_FILE_FORMAT,
                     "면접에는 업로드된 파일 문서가 필요합니다");
         }
         return document;

@@ -298,7 +298,7 @@ class InterviewStartServiceTest {
 
         assertThatThrownBy(() -> service.start(USER_ID, request(null)))
                 .isInstanceOf(BusinessException.class)
-                .extracting("errorCode").isEqualTo(ErrorCode.UNSUPPORTED_FILE_TYPE);
+                .extracting("errorCode").isEqualTo(ErrorCode.UNSUPPORTED_FILE_FORMAT);
 
         verify(aiClient, never()).startSession(any());
         verify(firstQuestionPoller, never()).pollAndDeliver(anyString(), anyString(), any());

@@ -228,7 +228,7 @@ class DocumentRegisterServiceTest {
         assertThatThrownBy(() -> service.register(user.getUserId(), new DocumentCreateCommand(
                 SourceType.FILE, DocType.RESUME, "제목", null, file)))
                 .isInstanceOf(BusinessException.class)
-                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNSUPPORTED_FILE_TYPE);
+                .hasFieldOrPropertyWithValue("errorCode", ErrorCode.UNSUPPORTED_FILE_FORMAT);
 
         assertThat(opened).hasValue(0);
     }

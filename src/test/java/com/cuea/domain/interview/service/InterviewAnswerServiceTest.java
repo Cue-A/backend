@@ -468,8 +468,79 @@ class InterviewAnswerServiceTest {
         verify(sessionWriter).markAborted(SESSION_ID);
     }
 
-    // ── C7: isTimeout 필수 (bean validation) ─────────────────────
+    // ── 사용자 면접 중단 (Issue #25) ─────────────────────────────
 
+    @Test
+    void 사용자_abort_는_AI세션을_중단하고_세션을_ABORTED_로_정리한다() {
+        // IN_PROGRESS 세션을 사용자가 중단. AI abort → 로컬 markAborted 순서로 정리한다.
+        service.abort(USER_ID, SESSION_ID);
+
+        var order = inOrder(aiClient, sessionWriter);
+        order.verify(aiClient).abortSession(SESSION_ID);
+        order.verify(sessionWriter).markAborted(SESSION_ID);
+    }
+
+    @Test
+    void 소유하지_않은_세션은_중단할_수_없다() {
+        when(sessionRepository.findBySessionIdAndUser_UserId(SESSION_ID, "other"))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.abort("other", SESSION_ID))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.SESSION_NOT_FOUND);
+
+        // 남의 세션이면 AI 도 로컬도 건드리지 않는다.
+        verify(aiClient, never()).abortSession(anyString());
+        verify(sessionWriter, never()).markAborted(anyString());
+    }
+
+    @Test
+    void 이미_ABORTED_인_세션의_abort_는_멱등이며_다시_정리하지_않는다() {
+        InterviewSession aborted = inProgressSession();
+        aborted.abort();
+        when(sessionRepository.findBySessionIdAndUser_UserId(SESSION_ID, USER_ID))
+                .thenReturn(Optional.of(aborted));
+
+        // 예외 없이 조용히 반환한다(멱등).
+        service.abort(USER_ID, SESSION_ID);
+
+        // 이미 중단된 세션은 AI abort 나 재정리를 하지 않는다.
+        verify(aiClient, never()).abortSession(anyString());
+        verify(sessionWriter, never()).markAborted(anyString());
+    }
+
+    @Test
+    void COMPLETED_세션은_ABORTED_로_역전시키지_않는다() {
+        InterviewSession completed = inProgressSession();
+        completed.complete();
+        when(sessionRepository.findBySessionIdAndUser_UserId(SESSION_ID, USER_ID))
+                .thenReturn(Optional.of(completed));
+
+        // 완료된 세션은 중단할 수 없다(SESSION_ENDED). 상태는 COMPLETED 로 유지.
+        assertThatThrownBy(() -> service.abort(USER_ID, SESSION_ID))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.SESSION_ENDED);
+
+        verify(aiClient, never()).abortSession(anyString());
+        verify(sessionWriter, never()).markAborted(anyString());
+        assertThat(completed.getStatus()).isEqualTo(SessionStatus.COMPLETED);
+    }
+
+    @Test
+    void AI_abort_가_실패해도_로컬_세션_정리는_수행한다() {
+        // AI 서버가 죽었어도(예: abort 호출이 예외) 우리 DB 세션은 ABORTED 로 정리해야
+        // 세션이 IN_PROGRESS 로 영구 잔류하지 않는다.
+        doThrow(new BusinessException(ErrorCode.AI_UNAVAILABLE))
+                .when(aiClient).abortSession(SESSION_ID);
+
+        service.abort(USER_ID, SESSION_ID);
+
+        verify(aiClient).abortSession(SESSION_ID);
+        // AI 실패와 무관하게 로컬 정리는 반드시 수행.
+        verify(sessionWriter).markAborted(SESSION_ID);
+    }
+
+    // ── C7: isTimeout 필수 (bean validation) ─────────────────────
     @Test
     void isTimeout_이_null_이면_bean_validation_이_거부한다() {
         // 컨트롤러의 @Valid 가 적용하는 것과 동일한 검증. JSON 에서 is_timeout 누락 시

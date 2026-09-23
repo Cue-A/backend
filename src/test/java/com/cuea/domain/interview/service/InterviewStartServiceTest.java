@@ -287,8 +287,8 @@ class InterviewStartServiceTest {
                 .docId(2L)
                 .publicId(DOCUMENT_PUBLIC_ID)
                 .user(user)
-                .docTitle("대본")
-                .docType(DocType.SCRIPT)
+                .docTitle("자기소개서")
+                .docType(DocType.RESUME)
                 .sourceType(SourceType.MARKDOWN)   // objectKey 없음
                 .docText("직접 입력한 본문")
                 .status(DocumentStatus.READY)
@@ -298,7 +298,7 @@ class InterviewStartServiceTest {
 
         assertThatThrownBy(() -> service.start(USER_ID, request(null)))
                 .isInstanceOf(BusinessException.class)
-                .extracting("errorCode").isEqualTo(ErrorCode.UNSUPPORTED_FILE_TYPE);
+                .extracting("errorCode").isEqualTo(ErrorCode.UNSUPPORTED_FILE_FORMAT);
 
         verify(aiClient, never()).startSession(any());
         verify(firstQuestionPoller, never()).pollAndDeliver(anyString(), anyString(), any());

@@ -1,14 +1,17 @@
 package com.cuea.domain.document.entity;
 
-/** 문서 종류. DB 에는 이름 그대로(대문자) 저장합니다. */
+/**
+ * 사용자가 등록하는 문서의 종류.
+ *
+ * <p>면접 질문의 근거가 되는 문서만 받습니다. 초안에 있던 {@code PRESENTATION}·
+ * {@code SCRIPT} 는 발표 코칭용이라 이번 범위에서 뺐습니다(Issue #28).
+ * 다시 넣으려면 {@code docs/02-database.md} 의 문서 절도 함께 고치세요.
+ */
 public enum DocType {
 
-    /** 포트폴리오 */
-    PORTFOLIO,
+    /** 자기소개서 · 이력서. */
+    RESUME,
 
-    /** 발표 자료 */
-    PRESENTATION,
-
-    /** 발표 대본 */
-    SCRIPT
+    /** 포트폴리오. */
+    PORTFOLIO
 }

@@ -97,7 +97,7 @@ users(user_id=u_1, email=kim@example.com, nickname=김취준)
 
 ---
 
-## 문서 (포트폴리오 · 발표자료 · 대본)
+## 문서 (자기소개서 · 포트폴리오)
 
 ```sql
 document
@@ -105,13 +105,13 @@ doc_id        BIGINT        PK
 public_id     UUID          UNIQUE NOT NULL
 user_id       VARCHAR(50)   NOT NULL FK -> users(user_id)
 doc_title     VARCHAR(100)  NOT NULL
-doc_type      VARCHAR(20)   NOT NULL   -- PORTFOLIO | PRESENTATION | SCRIPT
+doc_type      VARCHAR(20)   NOT NULL   -- RESUME | PORTFOLIO
 source_type   VARCHAR(10)   NOT NULL   -- FILE | MARKDOWN
 object_key    TEXT          NULL       -- S3 키. FILE 만
 file_name     VARCHAR(255)  NULL       -- FILE 만
 mime_type     VARCHAR(100)  NULL       -- FILE 만
 file_size     BIGINT        NULL       -- FILE 만
-file_format   VARCHAR(10)   NULL       -- PDF | DOCX | TXT | PPTX. FILE 만
+file_format   VARCHAR(10)   NULL       -- PDF | DOCX | TXT. FILE 만
 doc_text      TEXT          NULL       -- MARKDOWN 만
 status        VARCHAR(20)   NOT NULL   -- UPLOADED | PARSING | READY | FAILED
 created_at    TIMESTAMPTZ   NOT NULL
@@ -121,14 +121,34 @@ updated_at    TIMESTAMPTZ   NOT NULL
 **`source_type` 이 어느 컬럼을 읽을지를 정합니다.** `FILE` 이면 `object_key` 계열,
 `MARKDOWN` 이면 `doc_text` 입니다. 양쪽이 전부 nullable 인 이유가 이것입니다.
 
+등록은 `POST /api/documents` 하나로 받습니다. 업로드 URL 발급 → S3 직접 PUT → 등록
+확정으로 나누지 않고 **파일을 Spring 으로 통과시킵니다.** 자소서는 최대 10MB 라 그
+정도는 감당되고, 나누면 PUT 은 성공했는데 확정 전에 브라우저가 닫힐 때 버킷에 고아
+객체가 남기 때문입니다. 판단 근거와 되돌릴 조건은 Issue #28 참고.
+**녹화 영상은 크기가 달라 계속 Presigned 로 갑니다.**
+
 **S3 URL을 저장하지 않습니다.** `object_key` 만 두고 필요할 때 Presigned URL을
 만듭니다. Presigned URL은 만료되고, 버킷·경로가 바뀌면 전부 손봐야 합니다.
 
 `status` 가 `READY` 가 되기 전에는 세션을 시작할 수 없습니다. AI 서버가 문서를
 읽을 수 없는 상태입니다.
 
-면접 자료는 기존 `PORTFOLIO` 타입을 그대로 씁니다. 별도 `RESUME` 타입은
-추가하지 않습니다.
+### ★ status 를 그대로 내보내지 않습니다
+
+프론트에는 `IndexStatus`(`PROCESSING` · `COMPLETED` · `FAILED`)로 좁혀서 나갑니다.
+`status` 는 우리 쪽 처리 단계라 단계가 늘면 같이 늘어나는데, 프론트가 알아야 하는 건
+"이 문서로 면접을 시작할 수 있는가" 하나뿐입니다. 내부 단계가 바뀔 때마다 프론트
+분기가 깨지지 않도록 경계에서 줄입니다.
+
+```
+UPLOADED · PARSING  →  PROCESSING
+READY               →  COMPLETED
+FAILED              →  FAILED
+```
+
+**지금은 AI 인덱싱이 없어 등록 즉시 `READY` 입니다**(Issue #28). 그래서 `UPLOADED`·
+`PARSING` 은 현재 도달하지 않는 상태입니다. AI 에 문서 인덱싱 엔드포인트가 생기면
+등록 직후 상태를 `UPLOADED` 로 바꾸고 인덱싱 호출을 붙입니다.
 
 ### ★ ai_doc_ref 를 제거했습니다 (Issue #23)
 

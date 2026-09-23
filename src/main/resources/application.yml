@@ -77,11 +77,13 @@ app:
 
   oauth:
     kakao:
-      # 카카오 개발자 콘솔의 REST API 키. 인가 코드 방식이라 프론트가 아니라
-      # 여기서만 씁니다.
+      # 카카오 개발자 콘솔의 REST API 키. 인가 코드 요청(카카오 로그인 버튼)에는
+      # 프론트도 이 값을 씁니다. 토큰 교환에서만 이 백엔드가 함께 씁니다.
       client-id: ${APP_OAUTH_KAKAO_CLIENT_ID:local-dev-only-kakao-client-id}
-      # 콘솔에서 Client Secret 을 껐다면 빈 값으로 둡니다.
+      # client-secret 은 백엔드 전용입니다. 콘솔에서 Client Secret 을 껐다면 빈 값으로 둡니다.
       client-secret: ${APP_OAUTH_KAKAO_CLIENT_SECRET:}
+      connect-timeout: 5s
+      read-timeout: 10s
 
   ai:
     base-url: ${APP_AI_BASE_URL:http://localhost:8000}

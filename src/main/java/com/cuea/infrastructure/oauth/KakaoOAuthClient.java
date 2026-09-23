@@ -10,6 +10,7 @@ import com.cuea.infrastructure.oauth.dto.KakaoUserInfoResponse;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpHeaders;
 import org.springframework.http.MediaType;
+import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
@@ -42,8 +43,14 @@ public class KakaoOAuthClient implements OAuthClient {
 
     public KakaoOAuthClient(KakaoOAuthProperties properties) {
         this.properties = properties;
+
+        SimpleClientHttpRequestFactory factory = new SimpleClientHttpRequestFactory();
+        factory.setConnectTimeout(properties.connectTimeout());
+        factory.setReadTimeout(properties.readTimeout());
+
         this.tokenClient = RestClient.builder()
                 .baseUrl(TOKEN_URI)
+                .requestFactory(factory)
                 .defaultStatusHandler(status -> status.isError(), (req, res) -> {
                     log.warn("카카오 토큰 교환 실패 status={}", res.getStatusCode().value());
                     throw new BusinessException(ErrorCode.OAUTH_FAILED);
@@ -51,6 +58,7 @@ public class KakaoOAuthClient implements OAuthClient {
                 .build();
         this.apiClient = RestClient.builder()
                 .baseUrl(USER_INFO_URI)
+                .requestFactory(factory)
                 .defaultStatusHandler(status -> status.isError(), (req, res) -> {
                     log.warn("카카오 사용자 정보 조회 실패 status={}", res.getStatusCode().value());
                     throw new BusinessException(ErrorCode.OAUTH_FAILED);
@@ -105,7 +113,11 @@ public class KakaoOAuthClient implements OAuthClient {
 
         KakaoUserInfoResponse.KakaoAccount account = response.kakaoAccount();
         String email = account != null ? account.email() : null;
-        boolean emailVerified = account != null && Boolean.TRUE.equals(account.isEmailVerified());
+        // is_email_verified 만 보면 is_email_valid=false(마스킹 등 비정상 이메일)인
+        // 경우를 걸러내지 못합니다. 두 값이 모두 true 일 때만 검증된 것으로 봅니다.
+        boolean emailVerified = account != null
+                && Boolean.TRUE.equals(account.isEmailVerified())
+                && Boolean.TRUE.equals(account.isEmailValid());
         String nickname = (account != null && account.profile() != null)
                 ? account.profile().nickname()
                 : null;

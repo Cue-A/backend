@@ -97,14 +97,22 @@ public class AuthService {
                     ? userRepository.findByEmail(info.email())
                     : Optional.empty();
 
-            if (byEmail.isPresent()) {
+            // 이메일이 일치해도 그 계정에 이미 다른 카카오 계정이 연결돼 있으면 붙일 수
+            // 없습니다(uk_user_auth_user_provider 위반). 카카오 이메일은 나중에 바뀔 수
+            // 있어서, 지금 검증된 이 이메일이 예전에 다른 카카오 계정이 쓰던 값과 같은
+            // 상황이 생깁니다. 이 경우는 서로 다른 사람이므로 새 계정을 만듭니다.
+            boolean alreadyLinkedToOtherKakao = byEmail.isPresent()
+                    && userAuthRepository.findByUser_UserIdAndProvider(byEmail.get().getUserId(), Provider.KAKAO)
+                            .isPresent();
+
+            if (byEmail.isPresent() && !alreadyLinkedToOtherKakao) {
                 user = byEmail.get();
                 isNewUser = false;
             } else {
                 String nickname = info.nickname() != null
                         ? info.nickname()
                         : User.fallbackNickname(UUID.randomUUID().toString());
-                user = User.create(info.email(), nickname);
+                user = User.create(info.linkable() ? info.email() : null, nickname);
                 isNewUser = true;
             }
             user.link(Provider.KAKAO, info.providerId(), null);

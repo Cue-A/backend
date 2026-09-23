@@ -163,6 +163,43 @@ class AuthServiceTest {
     }
 
     @Test
+    void 이메일_미검증이면_새_계정의_이메일은_저장하지_않는다() {
+        when(userAuthRepository.findByProviderAndProviderId(Provider.KAKAO, "kakao-1"))
+                .thenReturn(Optional.empty());
+        when(kakaoOAuthClient.fetch("code", "redirect"))
+                .thenReturn(new OAuthUserInfo(Provider.KAKAO, "kakao-1", "kim@example.com", false, "김취준"));
+
+        TokenResponse response = authService.loginWithKakao(new KakaoLoginRequest("code", "redirect"));
+
+        assertThat(response.isNewUser()).isTrue();
+        assertThat(response.user().email()).isNull();
+    }
+
+    /**
+     * 카카오 이메일은 나중에 바뀔 수 있어, "검증된 이메일이 같은 기존 계정"이 사실은
+     * 이미 다른 카카오 계정과 연결돼 있을 수 있습니다. 그대로 연결하면
+     * uk_user_auth_user_provider 위반으로 500이 나므로 새 계정을 만들어야 합니다.
+     */
+    @Test
+    void 이메일이_같아도_이미_다른_카카오_계정과_연결됐으면_새로_만든다() {
+        User existing = User.create("kim@example.com", "김취준");
+        existing.link(Provider.KAKAO, "kakao-old", null);
+        when(userAuthRepository.findByProviderAndProviderId(Provider.KAKAO, "kakao-new"))
+                .thenReturn(Optional.empty());
+        when(userAuthRepository.findByUser_UserIdAndProvider(existing.getUserId(), Provider.KAKAO))
+                .thenReturn(existing.authOf(Provider.KAKAO));
+        when(kakaoOAuthClient.fetch("code", "redirect"))
+                .thenReturn(new OAuthUserInfo(Provider.KAKAO, "kakao-new", "kim@example.com", true, "김취준"));
+        when(userRepository.findByEmail("kim@example.com")).thenReturn(Optional.of(existing));
+
+        TokenResponse response = authService.loginWithKakao(new KakaoLoginRequest("code", "redirect"));
+
+        assertThat(response.isNewUser()).isTrue();
+        verify(userRepository, org.mockito.Mockito.never()).save(existing);
+        verify(userRepository).save(org.mockito.ArgumentMatchers.argThat(u -> u != existing));
+    }
+
+    @Test
     void 신규_카카오_사용자면_계정을_새로_만든다() {
         when(userAuthRepository.findByProviderAndProviderId(Provider.KAKAO, "kakao-9"))
                 .thenReturn(Optional.empty());

@@ -1,10 +1,14 @@
 package com.cuea.domain.document.service;
 
+import com.cuea.common.exception.BusinessException;
+import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.document.entity.Document;
 import com.cuea.domain.document.repository.DocumentRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.UUID;
 
 /**
  * DB 쓰기만 담당합니다.
@@ -22,5 +26,17 @@ public class DocumentWriter {
     @Transactional
     public Document save(Document document) {
         return documentRepository.save(document);
+    }
+
+    /**
+     * 본인의 살아 있는 문서를 찾아 소프트 삭제합니다. 없는 문서·남의 문서·이미
+     * 삭제된 문서는 구별하지 않고 {@code DOCUMENT_NOT_FOUND} 입니다.
+     */
+    @Transactional
+    public Document markDeleted(UUID publicId, String userId) {
+        Document document = documentRepository.findByPublicIdAndUser_UserId(publicId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.DOCUMENT_NOT_FOUND));
+        document.markDeleted();
+        return document;
     }
 }

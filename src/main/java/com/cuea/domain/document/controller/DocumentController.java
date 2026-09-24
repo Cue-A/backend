@@ -9,6 +9,7 @@ import com.cuea.domain.document.dto.response.DocumentListResponse;
 import com.cuea.domain.document.dto.response.DocumentResponse;
 import com.cuea.domain.document.entity.DocType;
 import com.cuea.domain.document.entity.SourceType;
+import com.cuea.domain.document.service.DocumentDeleteService;
 import com.cuea.domain.document.service.DocumentQueryService;
 import com.cuea.domain.document.service.DocumentRegisterService;
 import com.cuea.infrastructure.file.UploadedFile;
@@ -17,6 +18,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -45,6 +47,7 @@ public class DocumentController {
 
     private final DocumentRegisterService documentRegisterService;
     private final DocumentQueryService documentQueryService;
+    private final DocumentDeleteService documentDeleteService;
 
     @Operation(
             summary = "문서 등록",
@@ -104,6 +107,23 @@ public class DocumentController {
             @PathVariable String documentId) {
 
         return Result.ok(documentQueryService.detail(userId, documentId));
+    }
+
+    @Operation(
+            summary = "문서 삭제",
+            description = """
+                    본인 문서만 지울 수 있습니다. 남의 문서·없는 문서·이미 지운 문서는 404 입니다.
+
+                    지운 문서는 목록·상세에서 사라지고 20개 상한에서도 빠집니다.
+                    이 문서로 봤던 과거 면접 기록은 그대로 남습니다.""")
+    @DeleteMapping("/{documentId}")
+    @RateLimit(key = "document-delete", limit = 30, windowSeconds = 60)
+    public Result<Void> delete(
+            @CurrentUser String userId,
+            @PathVariable String documentId) {
+
+        documentDeleteService.delete(userId, documentId);
+        return Result.ok();
     }
 
     /**

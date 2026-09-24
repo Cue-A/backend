@@ -16,8 +16,10 @@ import com.cuea.infrastructure.file.FileValidator;
 import com.cuea.infrastructure.file.UploadedFile;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.core.io.ByteArrayResource;
 import org.springframework.stereotype.Service;
 
+import java.nio.charset.StandardCharsets;
 import java.util.UUID;
 
 /**
@@ -58,6 +60,9 @@ public class DocumentRegisterService {
 
     /** {@code doc_title VARCHAR(100)}. 넘으면 DB 가 잘라내는 게 아니라 터집니다. */
     static final int MAX_TITLE_LENGTH = 100;
+
+    private static final String MARKDOWN_COPY_FILE_NAME = "content.txt";
+    private static final String MARKDOWN_COPY_CONTENT_TYPE = "text/plain; charset=UTF-8";
 
     private final DocumentRepository documentRepository;
     private final UserRepository userRepository;
@@ -116,6 +121,12 @@ public class DocumentRegisterService {
         }
     }
 
+    /**
+     * 본문은 DB 에 두고, 같은 내용을 {@code .txt} 로 S3 에도 올립니다(Issue #36).
+     *
+     * <p>면접 시작은 AI 에 파일 URL 을 넘기는 구조라 S3 사본이 없으면 마크다운
+     * 문서로 면접을 볼 수 없습니다. {@code docText} 는 편집용 원본으로 남깁니다.
+     */
     private Document registerMarkdown(User user, DocumentCreateCommand command) {
         String content = command.content();
         if (content == null || content.isBlank()) {
@@ -127,13 +138,41 @@ public class DocumentRegisterService {
                     "본문은 %,d자 이하여야 합니다".formatted(MAX_MARKDOWN_LENGTH));
         }
 
-        return documentWriter.save(Document.ofMarkdown(
-                user,
-                UUID.randomUUID(),
-                command.documentType(),
-                command.title().trim(),
-                content,
-                initialStatus()));
+        UUID publicId = UUID.randomUUID();
+        String objectKey = fileStorage.store(user.getUserId(), publicId, markdownCopyOf(content));
+
+        // 파일 문서와 같은 이유로, DB 저장이 실패하면 올린 사본을 지웁니다.
+        try {
+            return documentWriter.save(Document.ofMarkdown(
+                    user,
+                    publicId,
+                    command.documentType(),
+                    command.title().trim(),
+                    content,
+                    objectKey,
+                    initialStatus()));
+        } catch (RuntimeException e) {
+            log.warn("문서 저장 실패. 올라간 본문 사본을 지웁니다 userId={} key={}",
+                    user.getUserId(), objectKey);
+            fileStorage.remove(objectKey);
+            throw e;
+        }
+    }
+
+    /**
+     * 본문을 AI 가 읽을 {@code .txt} 로 감쌉니다.
+     *
+     * <p>파일명은 저장소가 확장자를 뽑는 데만 씁니다. 사용자에게 보이지 않고
+     * {@code Document.fileName} 에도 남기지 않습니다. charset 을 명시하지 않으면
+     * 한글 본문이 깨져 읽힐 수 있습니다.
+     */
+    private UploadedFile markdownCopyOf(String content) {
+        byte[] bytes = content.getBytes(StandardCharsets.UTF_8);
+        return new UploadedFile(
+                MARKDOWN_COPY_FILE_NAME,
+                MARKDOWN_COPY_CONTENT_TYPE,
+                bytes.length,
+                new ByteArrayResource(bytes));
     }
 
     /**

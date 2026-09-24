@@ -212,7 +212,8 @@ class DocumentQueryServiceTest {
     }
 
     private Document markdown(String content) {
-        return Document.ofMarkdown(user, UUID.randomUUID(), DocType.RESUME, "제목", content, DocumentStatus.READY);
+        return Document.ofMarkdown(user, UUID.randomUUID(), DocType.RESUME, "제목", content,
+                "resumes/user-1/md.txt", DocumentStatus.READY);
     }
 
     private Document file() {

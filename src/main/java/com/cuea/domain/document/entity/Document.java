@@ -193,6 +193,15 @@ public class Document extends BaseTimeEntity {
         this.deletedAt = OffsetDateTime.now();
     }
 
+    /**
+     * 사용자가 지운 문서인지. S3 파일도 지워졌으므로 이 문서로 AI 세션을 만들 수
+     * 없습니다. 세션 연관관계로 가져온 문서는 삭제 여부로 걸러지지 않으니, 재연습처럼
+     * 과거 세션의 문서를 다시 쓰는 곳에서 이걸로 확인하세요.
+     */
+    public boolean isDeleted() {
+        return deletedAt != null;
+    }
+
     /** 세션에 붙일 수 있는 상태인지. */
     public boolean isUsableForSession() {
         return status == DocumentStatus.READY;

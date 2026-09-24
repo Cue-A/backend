@@ -14,6 +14,15 @@ cue-a-media/
   sessions/{sessionId}/questions/{questionId}.mp3        ★ AI가 직접 PUT
 ```
 
+### 문서 파일 삭제
+
+문서 삭제(`DELETE /api/documents/{documentId}`)는 DB 에서 문서를 숨기고, **그 문서로
+본 면접이 없을 때만** S3 파일을 지웁니다. 재연습이 원래 면접의 문서 파일을 AI 에 다시
+넘기기 때문입니다. 면접에 쓰인 문서의 파일은 버킷에 남습니다(Issue #38).
+
+S3 삭제가 실패해도 요청은 성공으로 끝납니다. DB 에서는 이미 숨겼고, 남은 파일은
+로그(`S3 파일 삭제 실패`)로 추적합니다.
+
 ### 답변 미디어 key 규칙
 
 답변 오디오·영상은 같은 `sessions/{sessionId}/answers/{questionId}` 계층에 놓입니다.

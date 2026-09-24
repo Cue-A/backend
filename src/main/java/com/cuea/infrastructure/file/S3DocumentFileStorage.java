@@ -45,7 +45,7 @@ public class S3DocumentFileStorage implements DocumentFileStorage {
     }
 
     /**
-     * 보상 삭제. 원래 실패 원인을 덮지 않도록 예외를 밖으로 내보내지 않습니다.
+     * 보상 삭제·문서 삭제 공용. 예외를 밖으로 내보내지 않습니다. 이유는 인터페이스 참고.
      *
      * <p>삭제까지 실패하면 버킷에 고아 객체가 남습니다. 지금은 로그만 남기고
      * 넘어갑니다. 쌓이는 양이 문제가 되면 정리 배치를 붙이세요.
@@ -55,7 +55,7 @@ public class S3DocumentFileStorage implements DocumentFileStorage {
         try {
             storage.delete(objectKey);
         } catch (RuntimeException e) {
-            log.error("업로드 보상 삭제 실패. 고아 객체가 남습니다 key={}", objectKey, e);
+            log.error("S3 파일 삭제 실패. 고아 객체가 남습니다 key={}", objectKey, e);
         }
     }
 }

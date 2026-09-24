@@ -23,10 +23,16 @@ public interface DocumentFileStorage {
     String store(String userId, UUID documentPublicId, UploadedFile file);
 
     /**
-     * 저장은 됐는데 뒤 단계가 실패했을 때 되돌리기 위한 삭제.
+     * 파일 삭제. 두 곳에서 부릅니다.
      *
-     * <p>보상 경로에서 불리므로 <b>여기서 예외를 던지면 원래 실패 원인을 덮습니다.</b>
-     * 구현은 실패를 로그로만 남기고 조용히 끝내야 합니다.
+     * <ul>
+     *   <li>저장은 됐는데 뒤 단계가 실패했을 때 되돌리는 보상 경로. <b>여기서 예외를
+     *       던지면 원래 실패 원인을 덮습니다.</b></li>
+     *   <li>문서 삭제(Issue #38). DB 에서는 이미 숨겼으므로 파일 삭제가 실패해도
+     *       사용자 요청을 실패시키지 않습니다.</li>
+     * </ul>
+     *
+     * <p>그래서 구현은 실패를 로그로만 남기고 조용히 끝내야 합니다.
      */
     void remove(String objectKey);
 }

@@ -25,5 +25,11 @@ public interface InterviewSessionRepository extends Repository<InterviewSession,
     @Query("select s from InterviewSession s where s.sessionId = :sessionId")
     Optional<InterviewSession> findBySessionIdForInternal(@Param("sessionId") String sessionId);
 
+    /**
+     * 이 문서로 본 면접이 하나라도 있는지. 세션 내용을 돌려주지 않아 소유자 조건이
+     * 없습니다. 호출하는 쪽이 이미 소유권을 확인한 문서의 {@code docId} 만 넘깁니다.
+     */
+    boolean existsByDocument_DocId(Long docId);
+
     InterviewSession save(InterviewSession session);
 }

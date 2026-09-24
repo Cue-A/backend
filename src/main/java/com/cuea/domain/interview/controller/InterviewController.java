@@ -42,7 +42,7 @@ public class InterviewController {
     @Operation(summary = "면접 세션 시작",
             description = "Document/Company 조회 → AI 세션 생성(session_id·task_id) 까지 동기로 처리하고 "
                     + "즉시 202 로 응답합니다. 첫 질문은 백그라운드 폴링 후 WebSocket 으로 전달됩니다. "
-                    + "문서는 status=READY 인 FILE 문서여야 하고, 기업을 선택했다면 verified=true 여야 합니다.")
+                    + "문서는 status=READY 여야 하고(파일·마크다운 모두 가능), 기업을 선택했다면 verified=true 여야 합니다.")
     @PostMapping
     @ResponseStatus(HttpStatus.ACCEPTED)
     @RateLimit(key = "session-start", limit = 10, windowSeconds = 60)

@@ -6,7 +6,6 @@ import com.cuea.domain.company.entity.Company;
 import com.cuea.domain.company.repository.CompanyRepository;
 import com.cuea.domain.company.service.CompanyProfileFormatter;
 import com.cuea.domain.document.entity.Document;
-import com.cuea.domain.document.entity.SourceType;
 import com.cuea.domain.document.repository.DocumentRepository;
 import com.cuea.domain.interview.dto.request.InterviewStartRequest;
 import com.cuea.domain.interview.dto.response.InterviewStartResponse;
@@ -165,12 +164,12 @@ public class InterviewStartService {
     }
 
     /**
-     * 세션에 붙일 수 있는 FILE 문서를 찾습니다.
+     * 세션에 붙일 수 있는 문서를 찾습니다.
      *
-     * <p>AI 세션 시작에는 presigned URL 을 만들 수 있는 실제 파일이 필요합니다.
-     * {@code MARKDOWN} 문서는 {@code objectKey} 가 없어 presigner 로 넘기면 통제되지
-     * 않은 오류가 납니다. Markdown → 파일 변환이나 텍스트 문서 AI 경로는 이번 PR
-     * 범위가 아니므로, FILE 타입 + 유효한 objectKey 가 아니면 AI 호출 전에 거부합니다.
+     * <p>AI 세션 시작에는 presigned URL 을 만들 수 있는 실제 파일이 필요합니다. 파일
+     * 문서도 마크다운 문서도 S3 에 파일을 갖고 있으므로(Issue #36) {@code sourceType}
+     * 이 아니라 {@code objectKey} 유무로 판단합니다. 없는 것은 Issue #36 이전에 등록된
+     * 마크다운 문서뿐이라, 다시 등록하라고 안내합니다.
      */
     private Document findUsableFileDocument(String documentPublicId, String userId) {
         Document document = documentRepository.findByPublicIdAndUser_UserId(
@@ -181,10 +180,9 @@ public class InterviewStartService {
             throw new BusinessException(ErrorCode.UPLOAD_NOT_COMPLETED,
                     "문서가 아직 준비되지 않았습니다");
         }
-        if (document.getSourceType() != SourceType.FILE
-                || document.getObjectKey() == null || document.getObjectKey().isBlank()) {
+        if (!document.hasStoredFile()) {
             throw new BusinessException(ErrorCode.UNSUPPORTED_FILE_FORMAT,
-                    "면접에는 업로드된 파일 문서가 필요합니다");
+                    "이 문서는 면접에 쓸 수 없습니다. 같은 내용으로 다시 등록해 주세요");
         }
         return document;
     }

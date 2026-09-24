@@ -108,8 +108,16 @@ class DocumentDeleteServiceTest {
     }
 
     private Document markdownWithoutCopy() {
-        return Document.ofMarkdown(user, PUBLIC_ID, DocType.RESUME, "직접 쓴 자소서", "본문",
-                DocumentStatus.READY);
+        return Document.builder()
+                .docId(1L)
+                .publicId(PUBLIC_ID)
+                .user(user)
+                .docTitle("직접 쓴 자소서")
+                .docType(DocType.RESUME)
+                .sourceType(SourceType.MARKDOWN)
+                .docText("본문")
+                .status(DocumentStatus.READY)
+                .build();
     }
 
     private Document fileDocument(String objectKey) {

@@ -117,6 +117,28 @@ class InterviewFirstQuestionPollerTest {
     }
 
     @Test
+    void 세션시작_LLM_FAILED_는_Backend_재전송_없이_세션을_정리한다() {
+        // AI 파트 확정: 세션 시작 LLM_FAILED 는 AI 가 동일 session_id/task_id 안에서 내부
+        // 재시도까지 실패한 상태다. Backend 는 재전송하지 않고 바로 세션을 정리(ABORTED)한다.
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.LLM_FAILED, "질문 생성 실패"));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        // Backend 재전송 없음(세션 시작 폴러에는 재시도가 없다).
+        verify(aiClient, org.mockito.Mockito.never()).submitAnswer(anyString(), any());
+        // 기존 cleanup 경로로 ABORTED.
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+
+        ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
+        verify(socketHandler).push(eq(SESSION_ID), captor.capture());
+        assertThat(captor.getValue().type()).isEqualTo("error");
+        ErrorPushMessage payload = (ErrorPushMessage) captor.getValue().payload();
+        assertThat(payload.errorCode()).isEqualTo("LLM_FAILED");
+    }
+
+    @Test
     void 첫질문_없이_done_이_오면_세션을_정리하고_error_를_push_한다() {
         when(aiPoller.await(eq(TASK_ID), any(), any()))
                 .thenReturn(new AiTaskStatusResponse(AiTaskStatusResponse.STATUS_DONE, null, null, null, null));

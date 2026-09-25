@@ -9,6 +9,7 @@ import com.cuea.infrastructure.ai.AiErrorTranslator;
 import com.cuea.infrastructure.ai.AiPoller;
 import com.cuea.infrastructure.ai.AiProperties;
 import com.cuea.infrastructure.ai.dto.AiQuestionResult;
+import com.cuea.infrastructure.ai.dto.AiAnswerSubmitRequest;
 import com.cuea.infrastructure.ai.dto.AiTaskStatusResponse;
 import com.cuea.infrastructure.websocket.SessionSocketHandler;
 import com.cuea.infrastructure.websocket.message.ErrorPushMessage;
@@ -77,26 +78,106 @@ public class InterviewAnswerPoller {
      * <p>백그라운드 실행이라 여기서 던진 예외는 호출자에게 전달되지 않습니다. 모든
      * 실패는 {@link ErrorPushMessage} 로 프론트에 알리며, 예상치 못한 예외는 세션까지
      * 정리합니다.
+     *
+     * <h3>STT/LLM 1회 자동 재시도 (Issue #25, Option 1)</h3>
+     * <p>폴링 결과가 {@code status=error} 이고 {@code LLM_FAILED}·{@code STT_FAILED}
+     * 이면({@link AiErrorTranslator#isRetryable(ErrorCode)}), <b>같은 {@code request} 를 1회</b>
+     * 재전송해 새 taskId 를 받아 다시 폴링합니다({@link AiErrorTranslator#MAX_RETRY}).
+     * <ul>
+     *   <li><b>processing 동안에는 재전송하지 않습니다.</b> 재전송은 {@link AiPoller#await}
+     *       가 {@code status=error} 를 실제로 확인해 예외를 던진 뒤에만 일어납니다.</li>
+     *   <li>재전송으로 받은 새 taskId 를 다시 폴링합니다. presigned URL(녹음 1시간)이
+     *       폴링 타임아웃(60초)보다 훨씬 길어 같은 {@code request} 를 그대로 재사용합니다.</li>
+     *   <li>재시도 후에도 실패하거나 non-retryable 이면 {@link #handlePollingFailure}
+     *       의 기존 정책을 따릅니다(STT→재녹음 안내·세션 유지, LLM→기존 통지, 그 외는
+     *       코드별 cleanup).</li>
+     * </ul>
      */
     @Async(AsyncConfig.INTERVIEW_EXECUTOR)
-    public void pollAndDeliver(String sessionId, String taskId) {
-        AiTaskStatusResponse taskStatus;
-        try {
-            taskStatus = aiPoller.await(
-                    taskId,
-                    aiProperties.answerTimeout(),
-                    stage -> socketHandler.push(sessionId,
-                            ProgressPushMessage.of(ProgressStage.from(stage))));
-        } catch (BusinessException e) {
-            // AI 가 알려준 실패·타임아웃. error_code 별로 세션 정리 여부가 갈린다(#25).
-            handlePollingFailure(sessionId, e);
-            return;
-        } catch (RuntimeException e) {
-            // 예상치 못한 예외(예: 응답 디코딩 실패). 상태 동기화를 보장할 수 없어 정리한다.
-            cleanupAndPushError(sessionId, "답변 폴링 중 예기치 못한 오류", unexpectedResponse(e));
+    public void pollAndDeliver(String sessionId, String taskId, AiAnswerSubmitRequest request) {
+        String currentTaskId = taskId;
+        int retries = 0;
+
+        while (true) {
+            AiTaskStatusResponse taskStatus;
+            try {
+                taskStatus = aiPoller.await(
+                        currentTaskId,
+                        aiProperties.answerTimeout(),
+                        stage -> socketHandler.push(sessionId,
+                                ProgressPushMessage.of(ProgressStage.from(stage))));
+            } catch (BusinessException e) {
+                // AI 가 알려준 실패·타임아웃. status=error 를 실제로 확인한 시점이다.
+                // LLM/STT 이고 재시도 여유가 있으면 같은 request 를 1회 재전송한다.
+                if (retries < AiErrorTranslator.MAX_RETRY
+                        && errorTranslator.isRetryable(e.getErrorCode())) {
+                    String retryTaskId;
+                    try {
+                        retryTaskId = resubmitForRetry(sessionId, request, e);
+                    } catch (BusinessException resubmitError) {
+                        // 재전송 POST 자체가 오류(예: INVALID_QUESTION_ID·AI_UNAVAILABLE)를 냈다.
+                        // 원래 STT/LLM 으로 가리지 말고 최신 오류를 재시도 이후 정책으로 처리한다.
+                        handlePollingFailure(sessionId, resubmitError, true);
+                        return;
+                    }
+                    if (retryTaskId != null) {
+                        retries++;
+                        currentTaskId = retryTaskId;
+                        continue;   // 새 taskId 로 다시 폴링
+                    }
+                    // 재전송이 task_id 를 못 주는 등 예기치 못한 실패. 재시도 이후 정책으로 처리.
+                    handlePollingFailure(sessionId, e, true);
+                    return;
+                }
+                // 최초 실패(재시도 대상 아님) 또는 재시도 task 의 실패.
+                handlePollingFailure(sessionId, e, retries > 0);
+                return;
+            } catch (RuntimeException e) {
+                // 예상치 못한 예외(예: 응답 디코딩 실패). 상태 동기화를 보장할 수 없어 정리한다.
+                cleanupAndPushError(sessionId, "답변 폴링 중 예기치 못한 오류", unexpectedResponse(e));
+                return;
+            }
+
+            deliverResult(sessionId, taskStatus);
             return;
         }
+    }
 
+    /**
+     * 재시도용 재전송. 같은 {@code request} 를 다시 제출해 새 taskId 를 받습니다.
+     *
+     * <p><b>재전송 POST 자체가 {@link BusinessException}(예: {@code INVALID_QUESTION_ID}·
+     * {@code AI_UNAVAILABLE})을 내면 그대로 던집니다.</b> 원래 STT/LLM 오류로 가리지 않고
+     * 호출부가 <b>최신 오류</b>를 재시도 이후 정책으로 처리하게 하기 위함입니다. 반면
+     * task_id 를 못 받거나 예기치 못한(비-Business) 예외면 {@code null} 을 돌려줍니다.
+     *
+     * @return 새 taskId. task_id 를 못 받거나 비-Business 예외면 {@code null}.
+     * @throws BusinessException 재전송 POST 가 낸 AI 오류(최신 오류). 호출부가 처리.
+     */
+    private String resubmitForRetry(String sessionId, AiAnswerSubmitRequest request,
+                                    BusinessException cause) {
+        log.info("답변 폴링이 {} 로 실패해 같은 요청을 1회 재전송합니다 sessionId={}",
+                cause.getErrorCode(), sessionId);
+        try {
+            String retryTaskId = aiClient.submitAnswer(sessionId, request);
+            if (retryTaskId == null || retryTaskId.isBlank()) {
+                log.warn("답변 재전송에서 task_id 를 받지 못했습니다 sessionId={}", sessionId);
+                return null;
+            }
+            return retryTaskId;
+        } catch (BusinessException e) {
+            // 재전송 POST 가 낸 AI 오류. 최신 오류로 처리하도록 그대로 전파한다.
+            log.warn("답변 재전송 POST 가 오류를 냈습니다 sessionId={} errorCode={}",
+                    sessionId, e.getErrorCode());
+            throw e;
+        } catch (RuntimeException e) {
+            log.warn("답변 재전송에 실패했습니다 sessionId={}", sessionId, e);
+            return null;
+        }
+    }
+
+    /** 폴링으로 받은 결과({@code done})를 검증·분기해 저장·전달합니다. */
+    private void deliverResult(String sessionId, AiTaskStatusResponse taskStatus) {
         AiQuestionResult result = taskStatus.result();
         if (result == null || result.type() == null) {
             // 계약 위반: 결과가 비어 있다. AI 상태와 어긋났을 수 있어 세션까지 정리한다.
@@ -127,18 +208,25 @@ public class InterviewAnswerPoller {
     /**
      * AI 폴링 실패({@link BusinessException})를 error_code 별 정책으로 처리합니다. (#25)
      *
+     * <p>{@code retried} 는 이 실패가 <b>재전송(1회) 이후</b>에 발생했는지를 나타냅니다.
+     * 재시도 이후에는 AI 파트 확정 정책에 따라 일부 코드가 세션 정리로 승격됩니다.
+     *
      * <ul>
      *   <li>{@code SESSION_ENDED} — 중복 제출. 세션 정리·error push 없이 로그만 남기고 무시.</li>
      *   <li>{@code SESSION_NOT_FOUND}·{@code RESUME_PARSE_FAILED}·{@code AI_TIMEOUT}·
      *       {@code AI_UNAVAILABLE}·{@code UNEXPECTED_AI_RESPONSE} — 복구 불가/상태 불명.
-     *       세션을 정리(abort+ABORTED)하고 error push.</li>
-     *   <li>{@code INVALID_QUESTION_ID}·{@code INVALID_CATEGORY} — 클라이언트·조립 버그.
-     *       세션을 유지하고 경고 로그 + error push.</li>
-     *   <li>그 외({@code LLM_FAILED}·{@code STT_FAILED}·{@code TTS_FAILED} 등) — 재시도·
-     *       재녹음 대상이라 세션을 유지하고 error push 만. (자동 재시도는 별도 확인 후.)</li>
+     *       세션을 정리(abort+ABORTED)하고 error push. (재시도 여부와 무관)</li>
+     *   <li><b>재시도 이후 {@code LLM_FAILED}</b> — 동일 요청 재전송에도 다시 실패한 것이므로
+     *       세션을 정리(abort+ABORTED)한다(AI 확정 정책).</li>
+     *   <li><b>재시도 이후 {@code INVALID_QUESTION_ID}</b> — 재전송 사이에 AI 가 이미 다음
+     *       질문으로 넘어간 뒤 실패한 상황일 수 있어 세션을 정리한다(AI 확정 정책).</li>
+     *   <li>{@code INVALID_QUESTION_ID}(최초)·{@code INVALID_CATEGORY} — 클라이언트·조립
+     *       버그. 세션을 유지하고 경고 로그 + error push.</li>
+     *   <li>{@code STT_FAILED}(재시도 소진 포함) — 세션을 유지하고 {@code needsRerecord=true}
+     *       로 재녹음을 안내한다. (재시도 여부와 무관하게 STT 정책은 동일)</li>
      * </ul>
      */
-    private void handlePollingFailure(String sessionId, BusinessException e) {
+    private void handlePollingFailure(String sessionId, BusinessException e, boolean retried) {
         ErrorCode code = e.getErrorCode();
 
         if (errorTranslator.isDuplicateSubmit(code)) {
@@ -149,12 +237,18 @@ public class InterviewAnswerPoller {
             cleanupAndPushError(sessionId, "답변 폴링 실패로 세션을 정리합니다", e);
             return;
         }
+        // 재시도 이후 LLM_FAILED·INVALID_QUESTION_ID 는 세션 정리로 승격(AI 확정 정책, #25).
+        // STT_FAILED 는 재시도 이후에도 재녹음 안내(세션 유지)로 남긴다.
+        if (retried && (code == ErrorCode.LLM_FAILED || code == ErrorCode.INVALID_QUESTION_ID)) {
+            cleanupAndPushError(sessionId, "재시도 이후에도 실패해 세션을 정리합니다", e);
+            return;
+        }
         if (errorTranslator.isClientContractError(code)) {
             log.warn("답변 폴링에서 클라이언트/조립 계약 오류 sessionId={} errorCode={}", sessionId, code);
             pushError(sessionId, e);
             return;
         }
-        // 재시도·재녹음 대상(LLM/STT)·TTS 등: 세션 유지하고 통지만.
+        // STT_FAILED(재녹음 안내)·기타: 세션 유지하고 통지만.
         log.warn("답변 폴링 실패(세션 유지) sessionId={} errorCode={}", sessionId, code);
         pushError(sessionId, e);
     }

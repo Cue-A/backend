@@ -149,8 +149,12 @@ public class InterviewAnswerService {
         // (예: 종료 중 TaskRejectedException) AI task 는 이미 수락됐고 폴러가 시작조차 못
         // 해 세션이 영구 잔류합니다. 세션 시작(InterviewStartService)과 동일하게, AI
         // 세션을 abort 하고 우리 세션을 ABORTED 로 정리한 뒤 원본 예외를 다시 던집니다.
+        //
+        // aiRequest 를 함께 넘깁니다. LLM/STT 실패 시 폴러가 같은 요청을 1회 재전송하는데
+        // (Issue #25), presigned URL(녹음 1시간)이 폴링 타임아웃(60초)보다 훨씬 길어
+        // 같은 요청을 그대로 재사용해도 URL 이 유효합니다.
         try {
-            answerPoller.pollAndDeliver(sessionId, taskId);
+            answerPoller.pollAndDeliver(sessionId, taskId, aiRequest);
         } catch (RuntimeException e) {
             log.warn("답변 폴링 시작에 실패해 세션을 정리합니다 sessionId={}", sessionId, e);
             abortAiSessionQuietly(sessionId, e);

@@ -270,7 +270,7 @@ class InterviewAnswerServiceTest {
                 QUESTION_ID, "sessions/sess_1/answers/q_1.webm", null, false));
 
         // 폴링/다음 질문 저장은 이 서비스가 직접 하지 않고 폴러에 위임한다.
-        verify(answerPoller).pollAndDeliver(SESSION_ID, "task_ans_1");
+        verify(answerPoller).pollAndDeliver(eq(SESSION_ID), eq("task_ans_1"), any());
         verify(sessionWriter, never()).saveNextQuestion(anyString(), any());
         verify(sessionWriter, never()).completeSession(anyString());
     }
@@ -288,7 +288,7 @@ class InterviewAnswerServiceTest {
         // task_id 미수신은 계약 위반. AI/Backend 상태 동기화 보장 불가라 세션 정리.
         verify(aiClient).abortSession(SESSION_ID);
         verify(sessionWriter).markAborted(SESSION_ID);
-        verify(answerPoller, never()).pollAndDeliver(anyString(), anyString());
+        verify(answerPoller, never()).pollAndDeliver(anyString(), anyString(), any());
     }
 
     @Test
@@ -304,7 +304,7 @@ class InterviewAnswerServiceTest {
                 .extracting("errorCode").isEqualTo(ErrorCode.SESSION_ENDED);
 
         verify(aiClient, never()).submitAnswer(anyString(), any());
-        verify(answerPoller, never()).pollAndDeliver(anyString(), anyString());
+        verify(answerPoller, never()).pollAndDeliver(anyString(), anyString(), any());
     }
 
     @Test
@@ -386,7 +386,7 @@ class InterviewAnswerServiceTest {
         service.submit(USER_ID, SESSION_ID, new AnswerSubmitRequest(
                 QUESTION_ID, "sessions/sess_1/answers/q_1.webm", null, false));
 
-        verify(answerPoller).pollAndDeliver(SESSION_ID, "task_ans_1");
+        verify(answerPoller).pollAndDeliver(eq(SESSION_ID), eq("task_ans_1"), any());
     }
 
     // ── C2: upload-urls questionId 소속 검증 ─────────────────────
@@ -457,7 +457,7 @@ class InterviewAnswerServiceTest {
         when(aiClient.submitAnswer(eq(SESSION_ID), any())).thenReturn("task_ans_1");
         // @Async 태스크 제출 자체가 거부되는(종료 중 등) 경우. AI task 는 이미 수락됐다.
         doThrow(new org.springframework.core.task.TaskRejectedException("executor shutting down"))
-                .when(answerPoller).pollAndDeliver(SESSION_ID, "task_ans_1");
+                .when(answerPoller).pollAndDeliver(eq(SESSION_ID), eq("task_ans_1"), any());
 
         assertThatThrownBy(() -> service.submit(USER_ID, SESSION_ID, new AnswerSubmitRequest(
                 QUESTION_ID, "sessions/sess_1/answers/q_1.webm", null, false)))

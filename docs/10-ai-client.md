@@ -306,3 +306,45 @@ app:
 `AiClient` 인터페이스에 `RealAiClient` / `MockAiClient` 두 구현을 두고
 `@ConditionalOnProperty` 로 갈아끼웁니다. 목이 없으면 AI 서버가 나올 때까지
 폴링·WebSocket·로그 저장을 전혀 검증할 수 없습니다.
+
+---
+
+## 리포트 생성
+
+면접이 끝난 세션의 분석을 요청합니다. 질문 생성과 같은 **task 등록 + 폴링** 구조입니다.
+Backend 흐름은 [`13-report.md`](./13-report.md) 참고.
+
+| 메서드 | 경로 | 용도 |
+|---|---|---|
+| POST | `/ai/sessions/{sessionId}/report` | 리포트 생성 요청. `202 { task_id }` |
+| GET | `/ai/tasks/{taskId}` | 진행 상황 (질문과 같은 경로, 결과 모양만 다름) |
+
+```
+Idempotency-Key: rpt_{sessionId}_{attempt}
+```
+
+- **같은 키면 AI 가 새 작업을 만들지 않고 기존 task_id 를 돌려줍니다.** 그래서 실패한
+  작업을 다시 돌릴 때는 반드시 `attempt` 를 올린 새 키를 씁니다. 같은 키로 보내면
+  실패한 task 가 그대로 돌아옵니다
+- 폴링 타임아웃은 **10분**(`app.report.poll-timeout`). 영상 다운로드와 시선 분석이
+  포함돼 질문 생성보다 훨씬 깁니다
+- 결과(`result`)는 해석하지 않고 원본 JSON 으로 받습니다(`AiReportTaskStatusResponse`).
+  점수 몇 개만 꺼내고 나머지는 `report.report_data` 에 통째로 둡니다
+- `processing` 응답에는 `stage` 와 `progress`(0~1)가 옵니다. stage 는
+  `ReportProgressStage` 로 옮겨 프론트에 보냅니다
+
+| error_code | 오는 곳 | Backend 처리 |
+|---|---|---|
+| `REPORT_TOO_SHORT` | 요청 422 | 그대로 422. 리포트 행을 만들지 않음 |
+| `INVALID_ANSWERS` · `INVALID_REQUEST` | 요청 400 | 조립 버그. 사용자에게는 서버 오류 |
+| `CONTENT_FAILED` | 폴링 `error` | 새 키로 자동 재시도 1회 |
+| `MEDIA_FETCH_FAILED` | 폴링 `error` | presigned URL 새로 발급해 새 키로 자동 재시도 1회 |
+| `STT_FAILED` | 폴링 `error` | 재시도 없음 |
+| `SPEECH_FAILED` · `GAZE_FAILED` | 오류가 아님 | `status: done` + `report_status: partial`, 그 축만 `failed` |
+
+### 연결 실패와 응답 지연을 나눕니다
+
+`RealAiClient` 는 연결 자체가 안 되면 503 `AI_UNAVAILABLE`, 붙었는데
+`read-timeout` 안에 답이 없으면 504 `AI_TIMEOUT` 을 냅니다. 둘 다
+`ResourceAccessException` 으로 오지만 원인이 `SocketTimeoutException`(연결 타임아웃
+제외)인지로 구분합니다. 질문 생성 호출에도 똑같이 적용됩니다.

@@ -32,6 +32,14 @@ public class AsyncConfig implements AsyncConfigurer {
         return new TaskExecutorAdapter(Executors.newVirtualThreadPerTaskExecutor());
     }
 
+    /** 리포트 생성 폴링(최대 10분) 전용 실행기 빈 이름. 면접 폴링과 섞이지 않게 나눕니다. */
+    public static final String REPORT_EXECUTOR = "reportTaskExecutor";
+
+    @Bean(REPORT_EXECUTOR)
+    public AsyncTaskExecutor reportTaskExecutor() {
+        return new TaskExecutorAdapter(Executors.newVirtualThreadPerTaskExecutor());
+    }
+
     @Override
     public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {
         // 반환값 없는 @Async(void) 에서 던진 예외의 최종 안전망.

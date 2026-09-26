@@ -1,5 +1,6 @@
 package com.cuea.common.config;
 
+import com.cuea.infrastructure.websocket.ReportSocketHandler;
 import com.cuea.infrastructure.websocket.SessionSocketHandler;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Configuration;
@@ -17,11 +18,15 @@ import org.springframework.web.socket.config.annotation.WebSocketHandlerRegistry
 public class WebSocketConfig implements WebSocketConfigurer {
 
     private final SessionSocketHandler sessionSocketHandler;
+    private final ReportSocketHandler reportSocketHandler;
     private final CorsProperties corsProperties;
 
     @Override
     public void registerWebSocketHandlers(WebSocketHandlerRegistry registry) {
+        String[] allowedOrigins = corsProperties.allowedOrigins().toArray(String[]::new);
         registry.addHandler(sessionSocketHandler, "/ws/interviews/{sessionId}")
-                .setAllowedOrigins(corsProperties.allowedOrigins().toArray(String[]::new));
+                .setAllowedOrigins(allowedOrigins);
+        registry.addHandler(reportSocketHandler, "/ws/reports/{reportId}")
+                .setAllowedOrigins(allowedOrigins);
     }
 }

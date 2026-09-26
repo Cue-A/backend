@@ -433,34 +433,61 @@ private String category;   // AI 원문 그대로
 
 ## 리포트
 
-> ⚠️ **계약 확정 전 상태입니다.** [`90-open-questions.md`](./90-open-questions.md) 는
-> 계약 도착 전까지 만들지 말라고 하지만, ERD 초안에 테이블이 있어 먼저 잡아뒀습니다.
-> 점수 스케일조차 미확정이라 **계약이 오면 갈아엎을 수 있습니다.**
-
 ```sql
 report
-report_id         BIGINT        PK
-public_id         UUID          UNIQUE NOT NULL
-session_id        VARCHAR(50)   UNIQUE NOT NULL FK -> session(session_id)
-score_content     INT           NULL      -- 내용 축
-score_speech      INT           NULL      -- 음성 축
-score_vision      INT           NULL      -- 시선 축
-score_total       INT           NULL
-summary           JSONB         NULL
-growth_narrative  TEXT          NULL
-timeline          JSONB         NULL
-resilience        JSONB         NULL
-report_data       JSONB         NULL      -- 컬럼으로 펴지 않은 원본 전체
-status            VARCHAR(20)   NOT NULL
-created_at        TIMESTAMPTZ   NOT NULL
+report_id       BIGINT        PK
+public_id       UUID          UNIQUE NOT NULL    -- 응답의 reportId
+session_id      VARCHAR(50)   UNIQUE NOT NULL FK -> session(session_id)
+status          VARCHAR(20)   NOT NULL           -- PROCESSING | COMPLETED | PARTIAL | FAILED
+ai_task_id      VARCHAR(100)  NULL               -- 폴링 중인 AI task
+attempt         INT           NOT NULL           -- 시도 번호. Idempotency-Key rpt_{sessionId}_{attempt}
+score_total     INT           NULL               -- 0~100. AI overall.score
+score_content   INT           NULL
+score_speech    INT           NULL               -- 실패 시 null
+score_gaze      INT           NULL               -- 실패 또는 카메라 미사용(skipped) 시 null
+report_data     JSONB         NULL               -- AI result 원본 전체. 삭제 금지
+error_code      VARCHAR(50)   NULL               -- FAILED 일 때
+created_at      TIMESTAMPTZ   NOT NULL
+completed_at    TIMESTAMPTZ   NULL
 ```
 
-**점수 4개가 전부 nullable 인 것은 부분 실패 때문입니다.** 음성·시선 분석이
-실패해도 리포트 자체는 생성되고 그 축만 빕니다. 단 내용 분석이 실패하면 총점을
-낼 수 없어 전체 실패입니다. [`13-report.md`](./13-report.md) 참고.
+**세션당 한 행입니다**(`session_id` UNIQUE). `FAILED` 리포트를 다시 요청하면 새 행을
+만들지 않고 이 행을 `PROCESSING` 으로 되돌리며 `attempt` 를 올립니다. 그래서 재요청해도
+`reportId` 가 같습니다. AI 는 같은 Idempotency-Key 면 실패한 기존 task 를 돌려주므로
+시도 번호가 키에 들어갑니다.
 
-`report_data` 는 계약 확정 전까지 AI 응답을 잃지 않기 위한 보관함입니다.
-**조회 조건으로 쓰지 마세요.** 확정되면 필요한 것만 컬럼으로 승격시킵니다.
+**`status` 는 우리 상태라 enum 입니다.** AI 의 `report_status`(complete | partial)는
+`COMPLETED` · `PARTIAL` 로 옮기고, 원문은 `report_data` 에 남습니다.
+
+**`report_data` 는 지우지 않습니다.** AI 는 리포트를 보관하지 않아서, 회차 비교
+(`/ai/reports/compare`) 때 Backend 가 전체 회차의 원본을 다시 보냅니다. 조회 조건으로도
+쓰지 마세요. 필요한 값은 컬럼으로 꺼내 둡니다.
+
+**점수가 전부 nullable 인 이유**는 부분 실패 때문입니다. 말하기·시선 축은 실패해도
+리포트가 만들어지고(`PARTIAL`) 그 축만 빕니다. 내용 축이 실패하면 리포트 자체가
+`FAILED` 입니다. [`13-report.md`](./13-report.md) 참고.
+
+### ★ 계약 전 초안 컬럼을 정리했습니다 (Issue #47)
+
+ERD 초안으로 먼저 잡아둔 컬럼 중 계약과 다른 것을 바꿨습니다.
+
+| 초안 | 지금 |
+|---|---|
+| `score_vision` | `score_gaze` (AI 축 이름과 맞춤) |
+| `summary` · `growth_narrative` · `timeline` · `resilience` (JSONB) | 제거. 전부 `report_data` 원본에 있음 |
+| `status` 자유 문자열 | `ReportStatus` enum |
+
+**`ddl-auto: update` 는 컬럼 삭제·이름 변경을 하지 않습니다.** 배포 DB 에 옛 컬럼이
+남아 있으면 report 행이 없는지 확인한 뒤 수동으로 지우세요. 행이 이미 있으면 새
+`attempt INT NOT NULL` 컬럼 추가도 실패하니, 그 경우 먼저 행을 정리해야 합니다.
+
+```sql
+ALTER TABLE report DROP COLUMN IF EXISTS score_vision,
+                   DROP COLUMN IF EXISTS summary,
+                   DROP COLUMN IF EXISTS growth_narrative,
+                   DROP COLUMN IF EXISTS timeline,
+                   DROP COLUMN IF EXISTS resilience;
+```
 
 ---
 

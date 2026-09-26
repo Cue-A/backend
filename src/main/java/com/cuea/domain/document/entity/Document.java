@@ -30,10 +30,14 @@ import java.util.UUID;
  * 입니다. 컨트롤러·DTO 에서 {@code docId} 를 노출하지 마세요. 연속된 정수라
  * 남의 문서 개수와 순서가 그대로 드러납니다.
  *
- * <p>{@code sourceType} 이 어느 컬럼을 읽을지를 정합니다. {@code FILE} 이면
- * {@code objectKey}·{@code fileName}·{@code mimeType}·{@code fileSize}·
- * {@code fileFormat}, {@code MARKDOWN} 이면 {@code docText} 입니다.
+ * <p>{@code sourceType} 은 <b>원본이 어디서 왔는가</b>입니다. {@code FILE} 은 사용자가
+ * 올린 파일이라 {@code fileName}·{@code mimeType}·{@code fileSize}·{@code fileFormat}
+ * 을 채우고, {@code MARKDOWN} 은 직접 작성한 본문이라 {@code docText} 를 채웁니다.
  * 양쪽 모두 nullable 인 이유가 이것입니다.
+ *
+ * <p>{@code objectKey} 는 <b>둘 다 가집니다</b>(Issue #36). 면접 시작은 AI 에 파일
+ * URL 을 넘기는 구조라, 마크다운도 본문을 {@code .txt} 로 S3 에 올려둡니다. 그래서
+ * "면접에 쓸 수 있는가" 는 {@code sourceType} 이 아니라 {@code objectKey} 로 판단합니다.
  */
 @Entity
 @Table(
@@ -77,7 +81,10 @@ public class Document extends BaseTimeEntity {
     private String fileName;
 
     /**
-     * S3 오브젝트 키. {@code SourceType.MARKDOWN} 이면 null.
+     * S3 오브젝트 키. {@code FILE} 은 올린 원본, {@code MARKDOWN} 은 본문의 {@code .txt} 사본입니다.
+     *
+     * <p>Issue #36 이전에 등록된 마크다운 문서는 null 입니다. 이 행들은 면접에 쓸 수
+     * 없고 다시 등록해야 합니다.
      *
      * <p><b>URL 을 저장하지 않습니다.</b> Presigned URL 은 만료되고, 버킷이나
      * 경로가 바뀌면 저장된 값을 전부 손봐야 합니다. 키만 두고 필요할 때
@@ -96,7 +103,13 @@ public class Document extends BaseTimeEntity {
     @Column(name = "file_size")
     private Long fileSize;
 
-    /** 사용자가 직접 입력한 본문. {@code SourceType.FILE} 이면 null. */
+    /**
+     * 사용자가 직접 입력한 본문. {@code SourceType.FILE} 이면 null.
+     *
+     * <p><b>원본은 이쪽입니다.</b> S3 의 {@code .txt} 는 AI 가 읽어가는 사본입니다.
+     * 본문 수정 기능을 만들 때는 같은 {@code objectKey} 에 사본을 다시 올려야 두 곳이
+     * 어긋나지 않습니다.
+     */
     @Column(name = "doc_text", columnDefinition = "text")
     private String docText;
 
@@ -141,12 +154,19 @@ public class Document extends BaseTimeEntity {
                 .build();
     }
 
-    /** 사용자가 직접 작성한 문서. 올라간 파일이 없으므로 {@code objectKey} 계열은 전부 null 입니다. */
+    /**
+     * 사용자가 직접 작성한 문서.
+     *
+     * <p>{@code objectKey} 는 본문을 올린 {@code .txt} 사본의 위치입니다. 원본 파일이
+     * 없으므로 {@code fileName}·{@code mimeType}·{@code fileSize}·{@code fileFormat} 은
+     * 비워둡니다.
+     */
     public static Document ofMarkdown(User user,
                                       UUID publicId,
                                       DocType docType,
                                       String title,
                                       String docText,
+                                      String objectKey,
                                       DocumentStatus status) {
         return Document.builder()
                 .user(user)
@@ -155,6 +175,7 @@ public class Document extends BaseTimeEntity {
                 .docTitle(title)
                 .sourceType(SourceType.MARKDOWN)
                 .docText(docText)
+                .objectKey(objectKey)
                 .status(status)
                 .build();
     }
@@ -180,5 +201,10 @@ public class Document extends BaseTimeEntity {
     /** 세션에 붙일 수 있는 상태인지. */
     public boolean isUsableForSession() {
         return status == DocumentStatus.READY;
+    }
+
+    /** AI 가 읽어갈 파일이 S3 에 있는지. 출처({@code sourceType})와 무관합니다. */
+    public boolean hasStoredFile() {
+        return objectKey != null && !objectKey.isBlank();
     }
 }

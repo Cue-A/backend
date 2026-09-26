@@ -17,6 +17,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.io.ByteArrayInputStream;
+import java.nio.charset.StandardCharsets;
 import java.util.Optional;
 import java.util.concurrent.atomic.AtomicInteger;
 
@@ -95,7 +96,21 @@ class DocumentRegisterServiceTest {
         assertThat(response.sourceType()).isEqualTo(SourceType.MARKDOWN);
         assertThat(response.fileName()).isNull();
         assertThat(response.fileSize()).isNull();
-        assertThat(fileStorage.stored).isEmpty();
+    }
+
+    /** 면접 시작은 AI 에 파일 URL 을 넘기므로, 마크다운도 본문 사본을 올려둬야 합니다(Issue #36). */
+    @Test
+    void 마크다운_본문을_UTF8_txt_사본으로_올린다() {
+        String content = "## 지원 동기\n저는 백엔드 개발자가 되고 싶습니다";
+
+        service.register(user.getUserId(), markdownCommand(content));
+
+        assertThat(fileStorage.stored).hasSize(1);
+        UploadedFile copy = fileStorage.files.get(0);
+        assertThat(copy.fileName()).endsWith(".txt");
+        assertThat(copy.contentType()).isEqualTo("text/plain; charset=UTF-8");
+        assertThat(fileStorage.contents.get(0)).isEqualTo(content.getBytes(StandardCharsets.UTF_8));
+        assertThat(copy.size()).isEqualTo(content.getBytes(StandardCharsets.UTF_8).length);
     }
 
     /** documentType 은 목록 필터용이라 필수가 아닙니다. 안 보내면 RESUME 입니다. */
@@ -189,14 +204,26 @@ class DocumentRegisterServiceTest {
     }
 
     @Test
-    void 마크다운은_저장에_실패해도_지울_파일이_없다() {
+    void 마크다운도_저장에_실패하면_올린_사본을_지운다() {
         when(documentWriter.save(any(Document.class)))
                 .thenThrow(new IllegalStateException("DB 끊김"));
 
         assertThatThrownBy(() -> service.register(user.getUserId(), markdownCommand("본문")))
                 .isInstanceOf(IllegalStateException.class);
 
-        assertThat(fileStorage.removed).isEmpty();
+        assertThat(fileStorage.stored).hasSize(1);
+        assertThat(fileStorage.removed).isEqualTo(fileStorage.stored);
+    }
+
+    /** 본문 검증에서 거절되면 사본도 올리지 않습니다. 거절당한 본문이 버킷에 남으면 안 됩니다. */
+    @Test
+    void 마크다운_본문이_거절되면_사본을_올리지_않는다() {
+        String tooLong = "가".repeat(DocumentRegisterService.MAX_MARKDOWN_LENGTH + 1);
+
+        assertThatThrownBy(() -> service.register(user.getUserId(), markdownCommand(tooLong)))
+                .isInstanceOf(BusinessException.class);
+
+        assertThat(fileStorage.stored).isEmpty();
     }
 
     @Test

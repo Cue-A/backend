@@ -107,19 +107,36 @@ user_id       VARCHAR(50)   NOT NULL FK -> users(user_id)
 doc_title     VARCHAR(100)  NOT NULL
 doc_type      VARCHAR(20)   NOT NULL   -- RESUME | PORTFOLIO
 source_type   VARCHAR(10)   NOT NULL   -- FILE | MARKDOWN
-object_key    TEXT          NULL       -- S3 키. FILE 만
+object_key    TEXT          NULL       -- S3 키. FILE 은 원본, MARKDOWN 은 .txt 사본
 file_name     VARCHAR(255)  NULL       -- FILE 만
 mime_type     VARCHAR(100)  NULL       -- FILE 만
 file_size     BIGINT        NULL       -- FILE 만
 file_format   VARCHAR(10)   NULL       -- PDF | DOCX | TXT. FILE 만
-doc_text      TEXT          NULL       -- MARKDOWN 만
+doc_text      TEXT          NULL       -- MARKDOWN 만. 편집용 원본
 status        VARCHAR(20)   NOT NULL   -- UPLOADED | PARSING | READY | FAILED
 created_at    TIMESTAMPTZ   NOT NULL
 updated_at    TIMESTAMPTZ   NOT NULL
 ```
 
-**`source_type` 이 어느 컬럼을 읽을지를 정합니다.** `FILE` 이면 `object_key` 계열,
-`MARKDOWN` 이면 `doc_text` 입니다. 양쪽이 전부 nullable 인 이유가 이것입니다.
+**`source_type` 은 원본이 어디서 왔는지입니다.** `FILE` 은 사용자가 올린 파일이라
+`file_name` · `mime_type` · `file_size` · `file_format` 을 채우고, `MARKDOWN` 은 직접
+작성한 본문이라 `doc_text` 를 채웁니다. 양쪽이 전부 nullable 인 이유가 이것입니다.
+
+**`object_key` 는 둘 다 가집니다**(Issue #36). 면접 시작은 AI 에 파일 URL
+(`resume_file_url`)을 넘기는 구조라, 마크다운도 등록할 때 본문을 `.txt` 로 S3 에
+올립니다. 그래서 면접에 쓸 수 있는지는 `source_type` 이 아니라 `object_key` 유무로
+판단합니다.
+
+| | `doc_text` | `object_key` | `source_type` |
+|---|---|---|---|
+| 파일 문서 | null | 원본 | `FILE` |
+| 마크다운 문서 | 원본 | `.txt` 사본 | `MARKDOWN` |
+
+- 마크다운의 원본은 `doc_text` 입니다. S3 사본은 AI 가 읽어가는 용도입니다.
+  **본문 수정 기능을 만들 때는 같은 `object_key` 에 사본을 다시 올려야** 두 곳이
+  어긋나지 않습니다
+- Issue #36 이전에 등록된 마크다운 문서는 `object_key` 가 null 입니다. 백필하지 않고
+  두며, 면접 시작 시 "다시 등록해 주세요" 로 거절합니다
 
 등록은 `POST /api/documents` 하나로 받습니다. 업로드 URL 발급 → S3 직접 PUT → 등록
 확정으로 나누지 않고 **파일을 Spring 으로 통과시킵니다.** 자소서는 최대 10MB 라 그

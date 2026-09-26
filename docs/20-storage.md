@@ -2,6 +2,22 @@
 
 로컬은 MinIO, 배포는 S3. 코드는 AWS S3 SDK로 통일하고 엔드포인트만 바꿉니다.
 
+## 로컬 MinIO vs 실제 모드 S3
+
+**실제 모드에서는 AWS S3 를 씁니다.** 실제 AI 서버는 외부 GPU 서버에서 돌기 때문에
+로컬 MinIO 주소(`localhost:9000`)에 접근할 수 없습니다. AI 가 이력서·답변 미디어를
+직접 다운로드하고 질문 음성을 직접 업로드하려면 외부에서 닿는 S3 가 필요합니다.
+
+| | 로컬/더미 | 실제 모드 |
+|---|---|---|
+| 스토리지 | MinIO (`docker-compose.dev.yml`) | AWS S3 |
+| `path-style-access` | `true` (필수) | `false` |
+| AI 접근 | 없음(mock) 또는 같은 호스트 | 외부 GPU 서버 → S3 직접 |
+| 자격증명 | `minioadmin` 공유 | IAM (경로 제한) |
+
+버킷 이름·리전·실제 IAM 자격증명은 운영 설정이며 **문서에 값을 적지 않습니다.**
+설정 키는 `app.storage.*`(`APP_STORAGE_*` 환경변수)입니다.
+
 ---
 
 ## 버킷 구조
@@ -55,17 +71,38 @@ namespace 에 속하는지 + S3 에 실제 업로드됐는지(`headObject`) 확�
 
 ## 접근 권한
 
+실제 모드에서 AI 가 S3 를 다루는 방식은 세 가지입니다.
+
+| 대상 | 발급/주체 | 방향 |
+|---|---|---|
+| 이력서 | Backend 가 presigned GET 발급 | AI 가 URL 로 직접 다운로드 |
+| 답변 오디오·영상 | Backend 가 presigned GET 발급 | AI 가 URL 로 직접 다운로드 |
+| 질문 음성 | AI 가 S3 에 직접 업로드 | `sessions/{sessionId}/questions/{questionId}.mp3` |
+
+이력서·답변 미디어는 Backend 가 만료 있는 presigned GET 을 발급하므로 AI 에 상시
+자격증명이 필요 없습니다. **질문 음성만 AI 가 직접 PUT** 하므로 여기에만 쓰기
+자격증명이 필요합니다.
+
 | 주체 | 권한 |
 |---|---|
 | 프론트 | Presigned URL로만 접근. 자격증명 없음 |
-| AI 서버 | `sessions/*/questions/*` **쓰기 권한** |
+| AI 서버 | `sessions/*/questions/*` **쓰기 전용** (최소 권한) |
 | Spring | 전체 |
 
-AI에 발급하는 자격증명은 **질문 오디오 경로에만** 쓰기 권한을 줍니다.
-전체 버킷 쓰기 권한을 주지 않습니다.
+AI 에 발급하는 IAM 자격증명은 **질문 오디오 경로(`sessions/*/questions/*`) 쓰기
+권한만** 주는 최소 권한으로 발급할 예정입니다. 전체 버킷 쓰기 권한이나 읽기 권한을
+주지 않습니다. 이력서·답변 미디어 읽기는 presigned GET 으로 충분하기 때문입니다.
 
-로컬 개발에서는 MinIO 계정(`minioadmin`)을 공유해도 무방하지만,
-배포 시에는 IAM 정책으로 경로를 제한합니다.
+로컬 개발에서는 MinIO 계정(`minioadmin`)을 공유해도 무방하지만, 실제 모드에서는
+IAM 정책으로 경로를 제한합니다. **실제 access key·secret 값은 문서에 적지 않습니다.**
+
+### 질문 음성 재생 문제는 Issue #41 (이번 범위 밖)
+
+AI 는 현재 질문 음성에 대해 **서명되지 않은 `audio_url`** 을 반환합니다. 버킷이
+private 이면 프론트가 그 URL 로 직접 재생할 때 403 이 날 수 있습니다. Backend 가
+질문 음성용 presigned GET 을 발급하는 방식으로 바꾸는 작업은 **별도 Issue #41** 에서
+처리합니다. 이 문서는 현재 구조(AI 직접 업로드 + unsigned URL)와 별도 이슈가 있다는
+사실만 기록하며, 해결된 것처럼 쓰지 않습니다.
 
 ---
 
@@ -137,16 +174,35 @@ mc admin config set local api cors_allow_origin="http://localhost:5173"
 
 ## 업로드 흐름
 
+### 문서(이력서·포트폴리오) — Spring 을 통과 (Issue #28)
+
+문서는 presigned 2단계가 아니라 **`POST /api/documents` 로 파일을 Spring 에
+통과시킵니다.**
+
 ```
-1. 프론트: POST /api/documents/presigned  (파일명, 크기, MIME)
-2. Spring: 검증 후 Presigned PUT URL + documentId 반환
-3. 프론트: 해당 URL로 S3에 직접 PUT
-4. 프론트: POST /api/documents/{id}/complete
-5. Spring: object_key 확정, DB 저장
+1. 프론트: POST /api/documents  (multipart: 파일 + 메타)
+2. Spring: 검증 → S3 에 PUT → DB 저장 → 즉시 READY
 ```
 
-**4번을 빼먹지 마세요.** 3번만으로는 Spring이 업로드 성공 여부를 모릅니다.
-`complete` 호출 시 S3에 객체가 실제로 있는지 `headObject` 로 확인합니다.
+자소서는 최대 10MB 라 통과가 감당되고, presigned 로 나누면 PUT 은 성공했는데 확정
+전에 브라우저가 닫힐 때 버킷에 고아 객체가 남기 때문입니다. 판단 근거는 Issue #28,
+[`02-database.md`](./02-database.md) 의 문서 절 참고. 마크다운 문서도 본문을 `.txt`
+사본으로 이 경로에서 함께 올립니다(Issue #36).
+
+### 답변 미디어 — Presigned PUT
+
+녹화·녹음은 크기가 커 계속 presigned 로 갑니다.
+
+```
+1. 프론트: POST /api/interviews/{sessionId}/answers/upload-urls  (questionId 등)
+2. Spring: (sessionId, questionId) 질문 존재 확인 → Presigned PUT URL 발급
+3. 프론트: 해당 URL 로 S3 에 직접 PUT (오디오·영상)
+4. 프론트: POST /api/interviews/{sessionId}/answers  (제출)
+5. Spring: 제출된 key 가 정규 namespace 인지 + S3 에 실제 있는지(headObject) 확인
+```
+
+object key 는 서버가 `sessionId`·`questionId` 로 만들므로, 프론트가 임의 key 로 다른
+경로의 URL 을 얻을 수 없습니다.
 
 ### 파일 검증
 

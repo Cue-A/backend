@@ -40,7 +40,7 @@ public class ReportRequestAssembler {
         InterviewSession session = sessionQueryService.getSessionForInternal(sessionId);
         Company company = session.getCompany();
 
-        List<AiReportAnswer> answers = sessionQueryService.findQuestionsInOrder(sessionId).stream()
+        List<AiReportAnswer> answers = sessionQueryService.findQuestionsInOrderForInternal(sessionId).stream()
                 .filter(question -> hasAnswer(sessionId, question))
                 .map(this::toAnswer)
                 .toList();

@@ -3,7 +3,7 @@ package com.cuea.domain.report.service;
 import com.cuea.common.config.AsyncConfig;
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
-import com.cuea.domain.report.ReportProperties;
+import com.cuea.common.config.ReportProperties;
 import com.cuea.domain.report.entity.Report;
 import com.cuea.infrastructure.ai.AiClient;
 import com.cuea.infrastructure.ai.AiPoller;
@@ -62,7 +62,7 @@ public class ReportPoller {
                 AiReportTaskStatusResponse done = aiPoller.await(
                         taskId, reportProperties.pollTimeout(), aiClient::getReportTask,
                         status -> pushProgress(reportId, status));
-                finish(event, ReportResult.from(done.result()));
+                finish(event, ReportResult.from(done));
                 return;
             } catch (BusinessException e) {
                 if (retried || !ReportFailurePolicy.shouldAutoRetry(e.getErrorCode())) {

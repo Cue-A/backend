@@ -2,7 +2,7 @@ package com.cuea.domain.report.service;
 
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
-import com.cuea.domain.report.ReportProperties;
+import com.cuea.common.config.ReportProperties;
 import com.cuea.domain.report.entity.Report;
 import com.cuea.domain.report.entity.ReportStatus;
 import com.cuea.infrastructure.ai.AiClient;

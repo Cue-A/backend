@@ -13,13 +13,13 @@ import java.util.Optional;
  * 소유자가 있는 엔티티라 {@code JpaRepository} 를 상속하지 않습니다.
  * docs/01-conventions.md 의 "소유자 있는 엔티티는 Repository 를 상속합니다" 참고.
  *
- * <p>리포트의 소유자는 세션의 소유자입니다. 등록 API 는 세션 소유권을 먼저 확인한 뒤
- * 이 리포지토리를 부릅니다.
+ * <p>리포트의 소유자는 세션의 소유자입니다. {@code report} 에 {@code user_id} 가 없어
+ * 세션을 거쳐 소유자로 좁힙니다.
  */
 public interface ReportRepository extends Repository<Report, Long> {
 
-    /** 세션의 리포트. <b>세션 소유권을 확인한 뒤에만</b> 부르세요. 소유자 조건이 없습니다. */
-    Optional<Report> findBySession_SessionId(String sessionId);
+    /** 본인 세션의 리포트. 소유자 조건을 쿼리에 묶어 남의 리포트는 애초에 나오지 않습니다. */
+    Optional<Report> findBySession_SessionIdAndSession_User_UserId(String sessionId, String userId);
 
     /**
      * 내부 PK 로 조회. 백그라운드 폴러 전용입니다. <b>API 경계에서 쓰지 마세요.</b>

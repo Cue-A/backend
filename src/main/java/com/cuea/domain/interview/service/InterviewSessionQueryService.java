@@ -45,9 +45,11 @@ public class InterviewSessionQueryService {
                 .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND));
     }
 
-    /** 나간 순서대로. 되묻기 포함. */
+    /**
+     * 나간 순서대로. 되묻기 포함. 소유권 확인이 없어 <b>API 경계에서 쓰지 마세요.</b>
+     */
     @Transactional(readOnly = true)
-    public List<Question> findQuestionsInOrder(String sessionId) {
+    public List<Question> findQuestionsInOrderForInternal(String sessionId) {
         return questionRepository.findAllBySessionIdOrderByCreatedAtAsc(sessionId);
     }
 }

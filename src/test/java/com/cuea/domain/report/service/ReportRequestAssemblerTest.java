@@ -48,7 +48,7 @@ class ReportRequestAssemblerTest {
 
     @Test
     void 질문을_나간_순서대로_되묻기까지_소문자_type_으로_담는다() {
-        when(sessionQueryService.findQuestionsInOrder(SESSION_ID)).thenReturn(List.of(
+        when(sessionQueryService.findQuestionsInOrderForInternal(SESSION_ID)).thenReturn(List.of(
                 question("q_1", QuestionType.QUESTION, 1, "a/q_1.webm", "a/q_1_video.mp4", null),
                 question("q_1r", QuestionType.REASK, 1, "a/q_1r.webm", null, "q_1"),
                 question("q_2", QuestionType.FOLLOWUP, 2, "a/q_2.webm", null, null)));
@@ -66,7 +66,7 @@ class ReportRequestAssemblerTest {
 
     @Test
     void 녹음은_presigned_URL_로_주고_영상이_없으면_null() {
-        when(sessionQueryService.findQuestionsInOrder(SESSION_ID)).thenReturn(List.of(
+        when(sessionQueryService.findQuestionsInOrderForInternal(SESSION_ID)).thenReturn(List.of(
                 question("q_1", QuestionType.QUESTION, 1, "a/q_1.webm", "a/q_1_video.mp4", null),
                 question("q_2", QuestionType.FOLLOWUP, 2, "a/q_2.webm", null, null)));
 
@@ -80,7 +80,7 @@ class ReportRequestAssemblerTest {
     /** 빈 녹음 URL 을 보내면 AI 가 MEDIA_FETCH_FAILED 로 리포트 전체를 실패시킵니다. */
     @Test
     void 녹음이_없는_질문은_뺀다() {
-        when(sessionQueryService.findQuestionsInOrder(SESSION_ID)).thenReturn(List.of(
+        when(sessionQueryService.findQuestionsInOrderForInternal(SESSION_ID)).thenReturn(List.of(
                 question("q_1", QuestionType.QUESTION, 1, "a/q_1.webm", null, null),
                 question("q_2", QuestionType.FOLLOWUP, 2, null, null, null)));
 

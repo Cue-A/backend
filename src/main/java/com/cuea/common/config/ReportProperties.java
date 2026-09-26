@@ -1,4 +1,4 @@
-package com.cuea.domain.report;
+package com.cuea.common.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 

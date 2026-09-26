@@ -61,7 +61,7 @@ class ReportRequestServiceTest {
 
         when(requestAssembler.build(SESSION_ID))
                 .thenReturn(new AiReportRequest("friendly", "백엔드 개발", null, null, List.of()));
-        when(reportRepository.findBySession_SessionId(SESSION_ID)).thenReturn(Optional.empty());
+        when(reportRepository.findBySession_SessionIdAndSession_User_UserId(SESSION_ID, USER_ID)).thenReturn(Optional.empty());
     }
 
     @Test
@@ -108,7 +108,7 @@ class ReportRequestServiceTest {
     void 리포트가_이미_있으면_409_이고_AI_를_부르지_않는다() {
         givenSession(session(SessionStatus.COMPLETED));
         for (ReportStatus status : List.of(ReportStatus.PROCESSING, ReportStatus.COMPLETED, ReportStatus.PARTIAL)) {
-            when(reportRepository.findBySession_SessionId(SESSION_ID)).thenReturn(Optional.of(report(status, 1)));
+            when(reportRepository.findBySession_SessionIdAndSession_User_UserId(SESSION_ID, USER_ID)).thenReturn(Optional.of(report(status, 1)));
 
             assertError(ErrorCode.REPORT_ALREADY_EXISTS);
         }
@@ -120,7 +120,7 @@ class ReportRequestServiceTest {
     void 실패한_리포트는_시도_번호를_올린_새_키로_다시_요청하고_같은_행을_쓴다() {
         givenSession(session(SessionStatus.COMPLETED));
         Report failed = report(ReportStatus.FAILED, 2);
-        when(reportRepository.findBySession_SessionId(SESSION_ID)).thenReturn(Optional.of(failed));
+        when(reportRepository.findBySession_SessionIdAndSession_User_UserId(SESSION_ID, USER_ID)).thenReturn(Optional.of(failed));
         when(aiClient.requestReport(eq(SESSION_ID), anyString(), any())).thenReturn("task_r3");
         when(reportWriter.reopenFailed(failed, SESSION_ID, "task_r3")).thenReturn(report(ReportStatus.PROCESSING, 3));
 

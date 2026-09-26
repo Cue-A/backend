@@ -48,7 +48,7 @@ public class ReportRequestService {
         InterviewSession session = sessionQueryService.getOwnedSession(sessionId, userId);
         checkReportable(session.getStatus());
 
-        Optional<Report> existing = reportRepository.findBySession_SessionId(sessionId);
+        Optional<Report> existing = reportRepository.findBySession_SessionIdAndSession_User_UserId(sessionId, userId);
         int attempt = nextAttempt(existing);
 
         AiReportRequest body = requestAssembler.build(sessionId);

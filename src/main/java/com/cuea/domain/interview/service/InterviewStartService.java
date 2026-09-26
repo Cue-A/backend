@@ -72,7 +72,7 @@ public class InterviewStartService {
     public InterviewStartResponse start(String userId, InterviewStartRequest request) {
         int questionCount = resolveQuestionCount(request.questionCount());
         User user = findUser(userId);
-        Document document = findUsableFileDocument(request.documentPublicId(), userId);
+        Document document = findUsableFileDocument(request.documentId(), userId);
         Company company = findVerifiedCompany(request.companyId());
 
         String resumeFileUrl = presignedUrlIssuer.issueResumeDownload(document.getObjectKey());

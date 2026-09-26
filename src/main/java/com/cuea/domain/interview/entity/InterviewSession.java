@@ -155,14 +155,32 @@ public class InterviewSession extends BaseTimeEntity {
     @Column(name = "completed_at")
     private OffsetDateTime completedAt;
 
-    /** {@code session_end} 수신. 여기서부터 리포트를 만들 수 있습니다. */
+    /**
+     * {@code session_end} 수신. 여기서부터 리포트를 만들 수 있습니다.
+     *
+     * <p><b>진행 중일 때만 전이합니다.</b> 이미 종료된(ABORTED·COMPLETED) 세션은
+     * 그대로 둡니다. 사용자 abort 로 ABORTED 가 된 뒤 뒤늦게 폴링 결과가 도착해도
+     * 완료로 역전되지 않게 막습니다(#25). 이미 COMPLETED 면 멱등입니다.
+     */
     public void complete() {
+        if (this.status != SessionStatus.IN_PROGRESS) {
+            return;
+        }
         this.status = SessionStatus.COMPLETED;
         this.completedAt = OffsetDateTime.now();
     }
 
-    /** 사용자 중단 · 타임아웃 · 복구 불가 오류. 리포트를 만들지 않습니다. */
+    /**
+     * 사용자 중단 · 타임아웃 · 복구 불가 오류. 리포트를 만들지 않습니다.
+     *
+     * <p><b>진행 중일 때만 전이합니다.</b> 이미 COMPLETED 인 세션은 그대로 둡니다.
+     * 폴링이 session_end 로 완료시킨 직후 사용자 abort 가 도착해도 완료된 세션을
+     * 중단으로 역전시키지 않습니다(#25). 이미 ABORTED 면 멱등입니다.
+     */
     public void abort() {
+        if (this.status != SessionStatus.IN_PROGRESS) {
+            return;
+        }
         this.status = SessionStatus.ABORTED;
     }
 

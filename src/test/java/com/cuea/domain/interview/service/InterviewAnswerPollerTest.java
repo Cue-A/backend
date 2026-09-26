@@ -9,6 +9,7 @@ import com.cuea.infrastructure.ai.AiErrorTranslator;
 import com.cuea.infrastructure.ai.AiPoller;
 import com.cuea.infrastructure.ai.AiProperties;
 import com.cuea.infrastructure.ai.dto.AiQuestionResult;
+import com.cuea.infrastructure.ai.dto.AiAnswerSubmitRequest;
 import com.cuea.infrastructure.ai.dto.AiTaskStatusResponse;
 import com.cuea.infrastructure.websocket.SessionSocketHandler;
 import com.cuea.infrastructure.websocket.message.ErrorPushMessage;
@@ -28,6 +29,7 @@ import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.doThrow;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
@@ -42,6 +44,10 @@ class InterviewAnswerPollerTest {
 
     private static final String SESSION_ID = "sess_1";
     private static final String TASK_ID = "task_ans_1";
+
+    /** 재전송 대상이 되는 최초 답변 요청. 재시도 시 이 객체가 그대로 다시 제출돼야 한다. */
+    private static final AiAnswerSubmitRequest REQUEST = new AiAnswerSubmitRequest(
+            "q_1", "https://s3/get/audio", null, false);
 
     private AiClient aiClient;
     private AiPoller aiPoller;
@@ -91,7 +97,7 @@ class InterviewAnswerPollerTest {
         when(sessionWriter.saveNextQuestion(eq(SESSION_ID), eq(result)))
                 .thenReturn(savedQuestion("q_2", QuestionType.QUESTION, "직무역량", "L2", 2));
 
-        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
 
         // answerTimeout(60초) 로 폴링해야 한다(세션 시작의 90초가 아니라).
         verify(aiPoller).await(eq(TASK_ID), eq(Duration.ofSeconds(60)), any());
@@ -108,7 +114,7 @@ class InterviewAnswerPollerTest {
         when(sessionWriter.saveNextQuestion(eq(SESSION_ID), eq(result)))
                 .thenReturn(savedQuestion("q_2", QuestionType.QUESTION, "직무역량", "L2", 2));
 
-        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
 
         verify(sessionWriter).saveNextQuestion(SESSION_ID, result);
         QuestionPushMessage payload = capturePush("question", QuestionPushMessage.class);
@@ -127,7 +133,7 @@ class InterviewAnswerPollerTest {
         when(sessionWriter.saveNextQuestion(eq(SESSION_ID), eq(result)))
                 .thenReturn(savedQuestion("q_3", QuestionType.FOLLOWUP, "직무역량", "L2", 3));
 
-        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
 
         verify(sessionWriter).saveNextQuestion(SESSION_ID, result);
         QuestionPushMessage payload = capturePush("question", QuestionPushMessage.class);
@@ -149,7 +155,7 @@ class InterviewAnswerPollerTest {
                 .questionNumber(2).topicIndex(1).build();
         when(sessionWriter.saveNextQuestion(eq(SESSION_ID), eq(result))).thenReturn(saved);
 
-        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
 
         // reask 도 saveNextQuestion 으로 저장한다(reask_of 매핑은 Writer 책임, 아래 Writer 테스트에서 검증).
         verify(sessionWriter).saveNextQuestion(SESSION_ID, result);
@@ -173,7 +179,7 @@ class InterviewAnswerPollerTest {
                 null, 9, null, null, false, false, 9);
         when(aiPoller.await(eq(TASK_ID), any(), any())).thenReturn(done(sessionEnd));
 
-        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
 
         // session_end 는 Question row 를 만들지 않는다.
         verify(sessionWriter, never()).saveNextQuestion(anyString(), any());
@@ -194,7 +200,7 @@ class InterviewAnswerPollerTest {
                 null, 9, null, null, false, false, null);
         when(aiPoller.await(eq(TASK_ID), any(), any())).thenReturn(done(unknown));
 
-        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
 
         verify(sessionWriter, never()).saveNextQuestion(anyString(), any());
         verify(sessionWriter, never()).completeSession(anyString());
@@ -211,7 +217,7 @@ class InterviewAnswerPollerTest {
         when(aiPoller.await(eq(TASK_ID), any(), any()))
                 .thenReturn(new AiTaskStatusResponse(AiTaskStatusResponse.STATUS_DONE, null, null, null, null));
 
-        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
 
         verify(sessionWriter, never()).saveNextQuestion(anyString(), any());
         verify(aiClient).abortSession(SESSION_ID);
@@ -232,7 +238,7 @@ class InterviewAnswerPollerTest {
         when(sessionWriter.saveNextQuestion(eq(SESSION_ID), eq(result)))
                 .thenReturn(savedQuestion("q_2", QuestionType.QUESTION, "직무역량", "L2", 2));
 
-        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
 
         QuestionPushMessage payload = capturePush("question", QuestionPushMessage.class);
         assertThat(payload.questionTotal()).isEqualTo(9);
@@ -242,26 +248,331 @@ class InterviewAnswerPollerTest {
         assertThat(hasTopicTotal).isFalse();
     }
 
-    // ── 폴링 실패 ───────────────────────────────────────────────
+    // ── STT/LLM 1회 자동 재시도 (Issue #25, Option 1) ────────────
+
+    private static final String RETRY_TASK_ID = "task_ans_2";
 
     @Test
-    void 폴링이_BusinessException_으로_실패하면_error_를_push_하되_세션은_abort_하지_않는다() {
-        // AI 가 알려준 실패(STT_FAILED 등). 재시도·세션 정리 정책은 #25 범위이므로
-        // 여기서는 통지만 하고 세션을 임의로 abort 하지 않는다.
+    void STT_FAILED_1차_실패하면_같은_요청을_1회_재전송하고_성공하면_정상_진행한다() {
+        // 1차 폴링은 STT_FAILED, 재전송으로 받은 새 task 는 정상 done.
+        AiQuestionResult result = new AiQuestionResult(
+                AiQuestionResult.TYPE_QUESTION, "q_2", null, "다음 질문", "https://s3/q.mp3",
+                "직무역량", "L2", 2, 9, 1, 4, false, false, null);
         when(aiPoller.await(eq(TASK_ID), any(), any()))
                 .thenThrow(new BusinessException(ErrorCode.STT_FAILED, "음성을 인식하지 못했습니다"));
+        when(aiClient.submitAnswer(eq(SESSION_ID), eq(REQUEST))).thenReturn(RETRY_TASK_ID);
+        when(aiPoller.await(eq(RETRY_TASK_ID), any(), any())).thenReturn(done(result));
+        when(sessionWriter.saveNextQuestion(eq(SESSION_ID), eq(result)))
+                .thenReturn(savedQuestion("q_2", QuestionType.QUESTION, "직무역량", "L2", 2));
 
-        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
 
-        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
-        assertThat(payload.errorCode()).isEqualTo("STT_FAILED");
-        // STT 실패는 재녹음 안내가 필요하다.
-        assertThat(payload.needsRerecord()).isTrue();
-        // 결과 처리 로직은 타지 않고, 세션도 정리하지 않는다(#25 정책).
-        verify(sessionWriter, never()).saveNextQuestion(anyString(), any());
-        verify(sessionWriter, never()).completeSession(anyString());
+        // 같은 request 를 정확히 1회 재전송했다.
+        verify(aiClient, times(1)).submitAnswer(SESSION_ID, REQUEST);
+        // 새 taskId 를 폴링했다.
+        verify(aiPoller).await(eq(RETRY_TASK_ID), any(), any());
+        // 정상 질문 저장·push, 세션 정리 없음.
+        verify(sessionWriter).saveNextQuestion(SESSION_ID, result);
         verify(aiClient, never()).abortSession(anyString());
         verify(sessionWriter, never()).markAborted(anyString());
+        QuestionPushMessage payload = capturePush("question", QuestionPushMessage.class);
+        assertThat(payload.questionId()).isEqualTo("q_2");
+    }
+
+    @Test
+    void STT_FAILED_가_2회_연속이면_재전송은_1회만_하고_needsRerecord_로_통지한다() {
+        // 1차·재시도 모두 STT_FAILED. 재전송은 딱 1회, 이후 재녹음 안내.
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.STT_FAILED, "음성을 인식하지 못했습니다"));
+        when(aiClient.submitAnswer(eq(SESSION_ID), eq(REQUEST))).thenReturn(RETRY_TASK_ID);
+        when(aiPoller.await(eq(RETRY_TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.STT_FAILED, "음성을 인식하지 못했습니다"));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
+
+        // 재전송은 정확히 1회 (MAX_RETRY=1).
+        verify(aiClient, times(1)).submitAnswer(SESSION_ID, REQUEST);
+        // 최종 STT_FAILED 는 재녹음 안내, 세션 유지, abort 없음.
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("STT_FAILED");
+        assertThat(payload.needsRerecord()).isTrue();
+        verify(sessionWriter, never()).saveNextQuestion(anyString(), any());
+        verify(aiClient, never()).abortSession(anyString());
+        verify(sessionWriter, never()).markAborted(anyString());
+    }
+
+    @Test
+    void LLM_FAILED_1차_실패하면_같은_요청을_재전송하고_성공하면_정상_진행한다() {
+        AiQuestionResult result = new AiQuestionResult(
+                AiQuestionResult.TYPE_QUESTION, "q_2", null, "다음 질문", "https://s3/q.mp3",
+                "직무역량", "L2", 2, 9, 1, 4, false, false, null);
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.LLM_FAILED, "질문 생성 실패"));
+        when(aiClient.submitAnswer(eq(SESSION_ID), eq(REQUEST))).thenReturn(RETRY_TASK_ID);
+        when(aiPoller.await(eq(RETRY_TASK_ID), any(), any())).thenReturn(done(result));
+        when(sessionWriter.saveNextQuestion(eq(SESSION_ID), eq(result)))
+                .thenReturn(savedQuestion("q_2", QuestionType.QUESTION, "직무역량", "L2", 2));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
+
+        // 동일 request 를 재전송하고 새 taskId 로 폴링해 정상 진행.
+        verify(aiClient, times(1)).submitAnswer(SESSION_ID, REQUEST);
+        verify(aiPoller).await(eq(RETRY_TASK_ID), any(), any());
+        verify(sessionWriter).saveNextQuestion(SESSION_ID, result);
+        verify(aiClient, never()).abortSession(anyString());
+        QuestionPushMessage payload = capturePush("question", QuestionPushMessage.class);
+        assertThat(payload.questionId()).isEqualTo("q_2");
+    }
+
+    // ── T1: 재전송 POST 자체가 실패 (최신 오류 정책 적용) ────────
+
+    @Test
+    void 재전송_POST가_AI_UNAVAILABLE이면_원래_STT로_가리지_않고_최신_코드로_세션을_정리한다() {
+        // 최초 STT_FAILED → 재전송하려는 submitAnswer 가 AI_UNAVAILABLE 로 실패.
+        // 원래 STT 로 가리지 않고 최신 AI_UNAVAILABLE 정책(기존 cleanup)으로 ABORTED.
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.STT_FAILED, "음성을 인식하지 못했습니다"));
+        when(aiClient.submitAnswer(eq(SESSION_ID), eq(REQUEST)))
+                .thenThrow(new BusinessException(ErrorCode.AI_UNAVAILABLE));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
+
+        // 재전송은 정확히 1회 시도됐다(그리고 오류).
+        verify(aiClient, times(1)).submitAnswer(SESSION_ID, REQUEST);
+        // 새 task 폴링은 없다(재전송 POST 가 오류).
+        verify(aiPoller, never()).await(eq(RETRY_TASK_ID), any(), any());
+        // 최신 AI_UNAVAILABLE 기준 cleanup.
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("AI_UNAVAILABLE");
+    }
+
+    @Test
+    void 재전송_POST가_INVALID_QUESTION_ID면_원래_LLM으로_가리지_않고_세션을_정리한다() {
+        // 최초 LLM_FAILED → 재전송 POST 가 INVALID_QUESTION_ID(이미 다음 질문으로 진행됨).
+        // 재시도 이후 INVALID_QUESTION_ID 는 세션 정리(AI 확정 정책).
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.LLM_FAILED, "질문 생성 실패"));
+        when(aiClient.submitAnswer(eq(SESSION_ID), eq(REQUEST)))
+                .thenThrow(new BusinessException(ErrorCode.INVALID_QUESTION_ID));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
+
+        verify(aiClient, times(1)).submitAnswer(SESSION_ID, REQUEST);
+        verify(aiPoller, never()).await(eq(RETRY_TASK_ID), any(), any());
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("INVALID_QUESTION_ID");
+    }
+
+    // ── T2: 재전송 성공 후 새 task 가 다른 error_code 로 실패 ──
+
+    @Test
+    void STT_재전송_성공_후_새_task가_SESSION_NOT_FOUND면_최신_코드로_세션을_정리한다() {
+        // 최초 STT_FAILED → 재전송 성공 → 새 task 가 SESSION_NOT_FOUND.
+        // 최종 정책은 최초 STT 가 아니라 최신 SESSION_NOT_FOUND 기준이어야 한다:
+        // cleanup(abort + ABORTED). 최초 STT 의 needsRerecord 정책은 적용되지 않는다.
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.STT_FAILED, "음성을 인식하지 못했습니다"));
+        when(aiClient.submitAnswer(eq(SESSION_ID), eq(REQUEST))).thenReturn(RETRY_TASK_ID);
+        when(aiPoller.await(eq(RETRY_TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.SESSION_NOT_FOUND));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
+
+        // 재전송 1회, 새 task 폴링 1회.
+        verify(aiClient, times(1)).submitAnswer(SESSION_ID, REQUEST);
+        verify(aiPoller).await(eq(RETRY_TASK_ID), any(), any());
+        // 최신 코드(SESSION_NOT_FOUND) 기준 cleanup.
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("SESSION_NOT_FOUND");
+        // 최초 STT 의 needsRerecord 정책은 적용되지 않는다.
+        assertThat(payload.needsRerecord()).isFalse();
+    }
+
+    @Test
+    void LLM_재전송_성공_후_새_task가_AI_TIMEOUT이면_최신_코드로_세션을_정리한다() {
+        // 최초 LLM_FAILED → 재전송 성공 → 새 task 가 AI_TIMEOUT → AI_TIMEOUT 기준 cleanup.
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.LLM_FAILED, "질문 생성 실패"));
+        when(aiClient.submitAnswer(eq(SESSION_ID), eq(REQUEST))).thenReturn(RETRY_TASK_ID);
+        when(aiPoller.await(eq(RETRY_TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.AI_TIMEOUT));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
+
+        verify(aiClient, times(1)).submitAnswer(SESSION_ID, REQUEST);
+        verify(aiPoller).await(eq(RETRY_TASK_ID), any(), any());
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("AI_TIMEOUT");
+    }
+
+    @Test
+    void STT_재전송_성공_후_새_task가_INVALID_QUESTION_ID면_세션을_정리한다() {
+        // 최초 STT_FAILED → 재전송 성공 → 새 task 가 INVALID_QUESTION_ID(이미 다음 질문 진행).
+        // 재시도 이후 INVALID_QUESTION_ID 는 세션 정리(AI 확정 정책). 최초 INVALID_QUESTION_ID
+        // (재시도 없음)의 통지-only 정책과 구분된다.
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.STT_FAILED, "음성을 인식하지 못했습니다"));
+        when(aiClient.submitAnswer(eq(SESSION_ID), eq(REQUEST))).thenReturn(RETRY_TASK_ID);
+        when(aiPoller.await(eq(RETRY_TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.INVALID_QUESTION_ID));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
+
+        verify(aiClient, times(1)).submitAnswer(SESSION_ID, REQUEST);
+        verify(aiPoller).await(eq(RETRY_TASK_ID), any(), any());
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("INVALID_QUESTION_ID");
+    }
+
+    @Test
+    void 재전송_후_두번째도_LLM_FAILED면_재전송은_1회만_하고_세션을_정리한다() {
+        // 최초 LLM_FAILED → 재전송 → 새 task 도 LLM_FAILED. 재전송은 1회만(MAX_RETRY=1),
+        // 재시도 이후 LLM_FAILED 는 세션 정리(AI 확정 정책). IN_PROGRESS 유지하면 안 된다.
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.LLM_FAILED, "질문 생성 실패"));
+        when(aiClient.submitAnswer(eq(SESSION_ID), eq(REQUEST))).thenReturn(RETRY_TASK_ID);
+        when(aiPoller.await(eq(RETRY_TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.LLM_FAILED, "질문 생성 실패"));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
+
+        // 재전송은 딱 1회. 세 번째 POST 없음.
+        verify(aiClient, times(1)).submitAnswer(SESSION_ID, REQUEST);
+        // 재시도 이후 LLM_FAILED 는 세션 정리.
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("LLM_FAILED");
+    }
+
+    @Test
+    void non_retryable_error_는_재전송하지_않고_기존_처리를_따른다() {
+        // AI_TIMEOUT 은 재시도 대상이 아니다. submitAnswer 재호출 없이 기존 cleanup 을 탄다.
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.AI_TIMEOUT));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
+
+        // 재전송 없음.
+        verify(aiClient, never()).submitAnswer(anyString(), any());
+        // AI_TIMEOUT 은 기존 정책대로 세션 정리.
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("AI_TIMEOUT");
+    }
+
+    @Test
+    void processing_동안에는_재전송하지_않는다() {
+        // AiPoller.await 가 done 을 돌려줄 때까지(내부적으로 processing 을 폴링) 정상 진행하며,
+        // 재전송(submitAnswer)은 한 번도 일어나지 않는다. status=error 를 실제로 받은 뒤에만
+        // 재전송한다는 계약을 폴러 관점에서 확인한다.
+        AiQuestionResult result = new AiQuestionResult(
+                AiQuestionResult.TYPE_QUESTION, "q_2", null, "다음 질문", "https://s3/q.mp3",
+                "직무역량", "L2", 2, 9, 1, 4, false, false, null);
+        when(aiPoller.await(eq(TASK_ID), any(), any())).thenReturn(done(result));
+        when(sessionWriter.saveNextQuestion(eq(SESSION_ID), eq(result)))
+                .thenReturn(savedQuestion("q_2", QuestionType.QUESTION, "직무역량", "L2", 2));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
+
+        // 정상 done 이면 재전송 없음.
+        verify(aiClient, never()).submitAnswer(anyString(), any());
+        verify(sessionWriter).saveNextQuestion(SESSION_ID, result);
+    }
+
+    // ── error_code 별 cleanup 정책 (Issue #25) ───────────────────
+
+    @Test
+    void SESSION_NOT_FOUND_은_세션을_정리하고_error_를_push_한다() {
+        // AI 쪽 세션이 사라짐(재배포 등). 복구 불가라 세션을 ABORTED 로 정리한다.
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.SESSION_NOT_FOUND));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
+
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("SESSION_NOT_FOUND");
+    }
+
+    @Test
+    void AI_TIMEOUT_은_답변_흐름에서도_세션을_정리한다() {
+        // 답변 폴링 타임아웃도 세션 시작과 동일하게 세션을 정리해야 일관적이다.
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.AI_TIMEOUT));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
+
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("AI_TIMEOUT");
+    }
+
+    @Test
+    void AI_UNAVAILABLE_도_세션을_정리한다() {
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.AI_UNAVAILABLE));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
+
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("AI_UNAVAILABLE");
+    }
+
+    @Test
+    void SESSION_ENDED_는_중복_제출로_무시한다_abort도_error_push도_없다() {
+        // 이미 종료된 세션에 답변이 또 들어온 상황. 계약대로 무시(로그만).
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.SESSION_ENDED));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
+
+        verify(aiClient, never()).abortSession(anyString());
+        verify(sessionWriter, never()).markAborted(anyString());
+        // error push 도 하지 않는다.
+        verify(socketHandler, never()).push(eq(SESSION_ID), any());
+    }
+
+    @Test
+    void INVALID_QUESTION_ID_는_abort_없이_error_만_push_한다() {
+        // 클라이언트 버그. 세션을 정리하지 않고 오류만 전달한다.
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.INVALID_QUESTION_ID));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
+
+        verify(aiClient, never()).abortSession(anyString());
+        verify(sessionWriter, never()).markAborted(anyString());
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("INVALID_QUESTION_ID");
+    }
+
+    @Test
+    void INVALID_CATEGORY_는_abort_없이_error_만_push_한다() {
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.INVALID_CATEGORY));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
+
+        verify(aiClient, never()).abortSession(anyString());
+        verify(sessionWriter, never()).markAborted(anyString());
+        ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
+        assertThat(payload.errorCode()).isEqualTo("INVALID_CATEGORY");
     }
 
     // ── C1: 예상치 못한(non-Business) 예외 ──────────────────────
@@ -273,7 +584,7 @@ class InterviewAnswerPollerTest {
         when(aiPoller.await(eq(TASK_ID), any(), any()))
                 .thenThrow(new IllegalStateException("decode failed"));
 
-        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
 
         verify(aiClient).abortSession(SESSION_ID);
         verify(sessionWriter).markAborted(SESSION_ID);
@@ -290,7 +601,7 @@ class InterviewAnswerPollerTest {
         when(sessionWriter.saveNextQuestion(eq(SESSION_ID), eq(result)))
                 .thenThrow(new RuntimeException("DB down"));
 
-        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
 
         verify(aiClient).abortSession(SESSION_ID);
         verify(sessionWriter).markAborted(SESSION_ID);
@@ -306,10 +617,47 @@ class InterviewAnswerPollerTest {
                 .thenThrow(new IllegalStateException("decode failed"));
         doThrow(new RuntimeException("cleanup down")).when(sessionWriter).markAborted(SESSION_ID);
 
-        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
 
         ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
         assertThat(payload.errorCode()).isEqualTo("UNEXPECTED_AI_RESPONSE");
+    }
+
+    // ── TTS text-only 정상 경로 회귀 (Issue #25) ─────────────────
+
+    @Test
+    void TTS_실패로_audio_url_이_null_이어도_질문을_저장하고_텍스트로_push_한다() {
+        // 계약: status=done + result.text 있음 + audio_url=null (TTS_FAILED 시 음성만 없음).
+        // 이 경우는 오류가 아니라 정상 진행이다. 질문을 저장하고 audioAvailable=false 로
+        // push 하며, error push 나 세션 정리를 하지 않는다.
+        // (새 TTS_FAILED error 처리 로직을 추가하지 않는다 — 기존 handleQuestion 경로 그대로.)
+        AiQuestionResult result = new AiQuestionResult(
+                AiQuestionResult.TYPE_QUESTION, "q_2", null, "다음 질문 텍스트", null,
+                "직무역량", "L2", 2, 9, 1, 4, false, false, null);
+        when(aiPoller.await(eq(TASK_ID), any(), any())).thenReturn(done(result));
+        // 저장된 Question 도 audioUrl=null 이다(TTS 없음).
+        Question savedWithoutAudio = Question.builder()
+                .sessionId(SESSION_ID).questionId("q_2").type(QuestionType.QUESTION)
+                .text("다음 질문 텍스트").audioUrl(null)
+                .category("직무역량").difficulty("L2")
+                .questionNumber(2).topicIndex(1).build();
+        when(sessionWriter.saveNextQuestion(eq(SESSION_ID), eq(result))).thenReturn(savedWithoutAudio);
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
+
+        // 질문은 정상 저장된다.
+        verify(sessionWriter).saveNextQuestion(SESSION_ID, result);
+        // 세션은 유지된다(정리하지 않음).
+        verify(aiClient, never()).abortSession(anyString());
+        verify(sessionWriter, never()).markAborted(anyString());
+        verify(sessionWriter, never()).completeSession(anyString());
+
+        // question 으로 push 하되 audio_url 은 null, audioAvailable=false.
+        QuestionPushMessage payload = capturePush("question", QuestionPushMessage.class);
+        assertThat(payload.questionId()).isEqualTo("q_2");
+        assertThat(payload.text()).isEqualTo("다음 질문 텍스트");
+        assertThat(payload.audioUrl()).isNull();
+        assertThat(payload.audioAvailable()).isFalse();
     }
 
     @SuppressWarnings("unchecked")

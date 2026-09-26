@@ -77,4 +77,16 @@ public class InterviewController {
         interviewAnswerService.submit(userId, sessionId, request);
         return Result.ok();
     }
+
+    @Operation(summary = "면접 세션 중단",
+            description = "사용자가 진행 중인 면접을 중단합니다. AI 세션(POST /ai/sessions/{id}/abort)을 정리하고 "
+                    + "Backend 세션을 ABORTED 로 전이합니다. 이미 중단된 세션이면 멱등하게 처리되고, 완료된 세션은 "
+                    + "중단할 수 없습니다. AI 중단 호출이 실패해도 Backend 세션 정리는 수행합니다.")
+    @PostMapping("/{sessionId}/abort")
+    @RateLimit(key = "session-abort", limit = 30, windowSeconds = 60)
+    public Result<Void> abort(@CurrentUser String userId,
+                              @PathVariable String sessionId) {
+        interviewAnswerService.abort(userId, sessionId);
+        return Result.ok();
+    }
 }

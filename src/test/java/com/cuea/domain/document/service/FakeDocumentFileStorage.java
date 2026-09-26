@@ -20,6 +20,8 @@ class FakeDocumentFileStorage implements DocumentFileStorage {
 
     final List<String> stored = new ArrayList<>();
     final List<String> removed = new ArrayList<>();
+    final List<UploadedFile> files = new ArrayList<>();
+    final List<byte[]> contents = new ArrayList<>();
 
     /**
      * 실제 구현처럼 스트림을 열고 닫습니다. 여기서 열지 않으면 "거부 경로에서는
@@ -28,12 +30,13 @@ class FakeDocumentFileStorage implements DocumentFileStorage {
     @Override
     public String store(String userId, UUID documentPublicId, UploadedFile file) {
         try (InputStream content = file.content().getInputStream()) {
-            content.readAllBytes();
+            contents.add(content.readAllBytes());
         } catch (IOException e) {
             throw new UncheckedIOException(e);
         }
         String objectKey = "resumes/%s/%s".formatted(userId, documentPublicId);
         stored.add(objectKey);
+        files.add(file);
         return objectKey;
     }
 

@@ -4,7 +4,7 @@ package com.cuea.infrastructure.file;
  * 버킷 안 경로 규칙. docs/20-storage.md 와 같아야 합니다.
  *
  * <pre>
- * resumes/{userId}/{documentId}.{ext}                프론트가 Presigned PUT
+ * resumes/{userId}/{documentId}.{ext}                Spring 이 PUT (파일 원본 · 마크다운 .txt 사본)
  * sessions/{sessionId}/answers/{questionId}.{ext}        프론트가 Presigned PUT (audio)
  * sessions/{sessionId}/answers/{questionId}_video.{ext}  프론트가 Presigned PUT (video)
  * sessions/{sessionId}/questions/{questionId}.mp3    AI 가 직접 PUT

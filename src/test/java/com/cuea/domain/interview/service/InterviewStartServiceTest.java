@@ -61,6 +61,7 @@ class InterviewStartServiceTest {
     private AiClient aiClient;
     private InterviewSessionWriter sessionWriter;
     private InterviewFirstQuestionPoller firstQuestionPoller;
+    private PresignedUrlIssuer presignedUrlIssuer;
     private InterviewStartService service;
 
     private Document document;
@@ -75,7 +76,7 @@ class InterviewStartServiceTest {
         sessionWriter = mock(InterviewSessionWriter.class);
         firstQuestionPoller = mock(InterviewFirstQuestionPoller.class);
 
-        PresignedUrlIssuer presignedUrlIssuer = mock(PresignedUrlIssuer.class);
+        presignedUrlIssuer = mock(PresignedUrlIssuer.class);
         when(presignedUrlIssuer.issueResumeDownload(anyString()))
                 .thenReturn("https://s3.example.com/resume.pdf?presigned=1");
 
@@ -102,6 +103,20 @@ class InterviewStartServiceTest {
                 .sourceType(SourceType.FILE)
                 .objectKey("resumes/user-1/1.pdf")
                 .status(status)
+                .build();
+    }
+
+    private Document markdown(String objectKey) {
+        return Document.builder()
+                .docId(2L)
+                .publicId(DOCUMENT_PUBLIC_ID)
+                .user(user)
+                .docTitle("자기소개서")
+                .docType(DocType.RESUME)
+                .sourceType(SourceType.MARKDOWN)
+                .docText("직접 입력한 본문")
+                .objectKey(objectKey)
+                .status(DocumentStatus.READY)
                 .build();
     }
 
@@ -281,20 +296,28 @@ class InterviewStartServiceTest {
         verify(firstQuestionPoller, never()).pollAndDeliver(anyString(), anyString(), any());
     }
 
+    /** Issue #36: 마크다운도 본문 사본을 S3 에 두므로 파일 문서와 똑같이 면접을 시작합니다. */
     @Test
-    void MARKDOWN_문서는_presigned_URL_을_만들_수_없어_AI_호출_전에_거부한다() {
-        Document markdown = Document.builder()
-                .docId(2L)
-                .publicId(DOCUMENT_PUBLIC_ID)
-                .user(user)
-                .docTitle("자기소개서")
-                .docType(DocType.RESUME)
-                .sourceType(SourceType.MARKDOWN)   // objectKey 없음
-                .docText("직접 입력한 본문")
-                .status(DocumentStatus.READY)
-                .build();
+    void S3_사본이_있는_MARKDOWN_문서로_면접을_시작한다() {
+        Document markdown = markdown("resumes/user-1/2.txt");
         when(documentRepository.findByPublicIdAndUser_UserId(DOCUMENT_PUBLIC_ID, USER_ID))
                 .thenReturn(Optional.of(markdown));
+        AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_md", "task_md", 6);
+        when(aiClient.startSession(any())).thenReturn(aiResponse);
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6)))
+                .thenReturn(fakeSession("sess_md"));
+
+        service.start(USER_ID, request(null));
+
+        verify(presignedUrlIssuer).issueResumeDownload("resumes/user-1/2.txt");
+        verify(aiClient).startSession(any());
+    }
+
+    /** Issue #36 이전에 등록된 마크다운 문서는 S3 사본이 없어 AI 에 넘길 URL 을 만들 수 없습니다. */
+    @Test
+    void S3_사본이_없는_예전_MARKDOWN_문서는_AI_호출_전에_거부한다() {
+        when(documentRepository.findByPublicIdAndUser_UserId(DOCUMENT_PUBLIC_ID, USER_ID))
+                .thenReturn(Optional.of(markdown(null)));
 
         assertThatThrownBy(() -> service.start(USER_ID, request(null)))
                 .isInstanceOf(BusinessException.class)

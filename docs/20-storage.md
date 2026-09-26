@@ -8,7 +8,7 @@
 
 ```
 cue-a-media/
-  resumes/{userId}/{documentId}.{ext}                    프론트가 Presigned PUT
+  resumes/{userId}/{documentId}.{ext}                    Spring 이 PUT (문서 등록)
   sessions/{sessionId}/answers/{questionId}.{ext}        프론트가 Presigned PUT (답변 오디오)
   sessions/{sessionId}/answers/{questionId}_video.{ext}  프론트가 Presigned PUT (답변 영상)
   sessions/{sessionId}/questions/{questionId}.mp3        ★ AI가 직접 PUT
@@ -22,6 +22,16 @@ cue-a-media/
 
 S3 삭제가 실패해도 요청은 성공으로 끝납니다. DB 에서는 이미 숨겼고, 남은 파일은
 로그(`S3 파일 삭제 실패`)로 추적합니다.
+### 문서 key 규칙
+
+파일 문서와 마크다운 문서가 같은 `resumes/{userId}/{documentId}.{ext}` 를 씁니다.
+
+- **파일 문서**: 올린 원본. 확장자는 원본 그대로(`pdf` · `docx` · `txt`)
+- **마크다운 문서**: 본문의 사본. 항상 `.txt`, `text/plain; charset=UTF-8`(Issue #36)
+
+마크다운 사본을 따로 두는 이유는 면접 시작이 AI 에 파일 URL 만 넘기기 때문입니다.
+원본은 DB 의 `doc_text` 이고, 사본은 AI 가 읽어가는 용도입니다.
+[`02-database.md`](./02-database.md) 의 문서 절 참고.
 
 ### 답변 미디어 key 규칙
 

@@ -45,6 +45,7 @@ class InterviewFirstQuestionPollerTest {
     private AiPoller aiPoller;
     private SessionSocketHandler socketHandler;
     private InterviewSessionWriter sessionWriter;
+    private QuestionPushFactory questionPushFactory;
     private InterviewFirstQuestionPoller poller;
 
     @BeforeEach
@@ -53,6 +54,7 @@ class InterviewFirstQuestionPollerTest {
         aiPoller = mock(AiPoller.class);
         socketHandler = mock(SessionSocketHandler.class);
         sessionWriter = mock(InterviewSessionWriter.class);
+        questionPushFactory = mock(QuestionPushFactory.class);
 
         AiProperties aiProperties = new AiProperties(
                 "http://localhost:8000", "secret",
@@ -61,7 +63,8 @@ class InterviewFirstQuestionPollerTest {
                 new AiProperties.Mock(false));
 
         poller = new InterviewFirstQuestionPoller(
-                aiClient, aiPoller, aiProperties, new AiErrorTranslator(), socketHandler, sessionWriter);
+                aiClient, aiPoller, aiProperties, new AiErrorTranslator(),
+                socketHandler, sessionWriter, questionPushFactory);
     }
 
     private AiQuestionResult firstQuestion() {
@@ -76,17 +79,26 @@ class InterviewFirstQuestionPollerTest {
         AiQuestionResult result = firstQuestion();
         when(aiPoller.await(eq(TASK_ID), eq(Duration.ofSeconds(90)), any()))
                 .thenReturn(new AiTaskStatusResponse(AiTaskStatusResponse.STATUS_DONE, null, result, null, null));
-        when(sessionWriter.saveFirstQuestion(eq(SESSION_ID), eq(result))).thenReturn(
-                Question.builder().sessionId(SESSION_ID).questionId("q_1")
-                        .type(QuestionType.QUESTION).text("지원 동기를 말씀해 주세요.")
-                        .audioUrl("https://s3.../q_1.mp3").category("지원동기").difficulty("L1")
-                        .questionNumber(1).topicIndex(0).build());
+        Question saved = Question.builder().sessionId(SESSION_ID).questionId("q_1")
+                .type(QuestionType.QUESTION).text("지원 동기를 말씀해 주세요.")
+                .audioUrl("https://s3.../q_1.mp3").category("지원동기").difficulty("L1")
+                .questionNumber(1).topicIndex(0).build();
+        when(sessionWriter.saveFirstQuestion(eq(SESSION_ID), eq(result))).thenReturn(saved);
+        // 질문 push 메시지 조립·presign 은 QuestionPushFactory 책임(별도 테스트에서 검증).
+        // 여기서는 저장된 질문으로 factory 를 호출해 그 결과를 그대로 push 하는지만 본다.
+        // factory 가 signed URL 을 담아준 상황을 가정한다(audioAvailable=true).
+        when(questionPushFactory.create(saved, 9)).thenReturn(new QuestionPushMessage(
+                "q_1", "QUESTION", "지원 동기를 말씀해 주세요.",
+                "https://s3.../q_1.mp3?X-Amz-Signature=abc", true,
+                "지원동기", "L1", 1, 9));
         // 수신자(WebSocket 연결) 1개가 붙어 정상 전송된 상황.
         when(socketHandler.push(eq(SESSION_ID), any())).thenReturn(1);
 
         poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
 
         verify(sessionWriter).saveFirstQuestion(SESSION_ID, result);
+        // 저장된 질문으로 push 메시지(presign 포함)를 조립하도록 factory 에 위임한다.
+        verify(questionPushFactory).create(saved, 9);
 
         ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
         verify(socketHandler).push(eq(SESSION_ID), captor.capture());
@@ -97,6 +109,43 @@ class InterviewFirstQuestionPollerTest {
         assertThat(payload.questionId()).isEqualTo("q_1");
         assertThat(payload.questionTotal()).isEqualTo(9);
         assertThat(payload.audioAvailable()).isTrue();
+        // 프론트에는 서명된 GET URL 이 내려간다(AI 원본 unsigned URL 이 아니다).
+        assertThat(payload.audioUrl()).contains("X-Amz-Signature");
+    }
+
+    @Test
+    void 첫질문_presign_이_실패해_text_only_로_와도_질문을_정상_push_하고_세션을_정리하지_않는다() {
+        // Issue #41 정책: presign 실패는 factory 안에서 text-only fallback 으로 흡수된다
+        // (audioUrl=null, audioAvailable=false). poller 는 그 메시지를 그대로 question 으로
+        // push 하고, error/abort/markAborted 로 처리하지 않는다.
+        AiQuestionResult result = firstQuestion();
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenReturn(new AiTaskStatusResponse(AiTaskStatusResponse.STATUS_DONE, null, result, null, null));
+        Question saved = Question.builder().sessionId(SESSION_ID).questionId("q_1")
+                .type(QuestionType.QUESTION).text("지원 동기를 말씀해 주세요.")
+                .audioUrl("https://s3.../q_1.mp3").category("지원동기").difficulty("L1")
+                .questionNumber(1).topicIndex(0).build();
+        when(sessionWriter.saveFirstQuestion(eq(SESSION_ID), eq(result))).thenReturn(saved);
+        // factory 가 presign 실패를 흡수해 text-only 메시지를 돌려준 상황.
+        when(questionPushFactory.create(saved, 9)).thenReturn(new QuestionPushMessage(
+                "q_1", "QUESTION", "지원 동기를 말씀해 주세요.",
+                null, false, "지원동기", "L1", 1, 9));
+        when(socketHandler.push(eq(SESSION_ID), any())).thenReturn(1);
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        // 세션 정리는 일어나지 않는다.
+        verify(aiClient, org.mockito.Mockito.never()).abortSession(anyString());
+        verify(sessionWriter, org.mockito.Mockito.never()).markAborted(anyString());
+
+        ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
+        verify(socketHandler).push(eq(SESSION_ID), captor.capture());
+        assertThat(captor.getValue().type()).isEqualTo("question");
+        QuestionPushMessage payload = (QuestionPushMessage) captor.getValue().payload();
+        // 텍스트는 그대로, 음성만 빠진다.
+        assertThat(payload.text()).isEqualTo("지원 동기를 말씀해 주세요.");
+        assertThat(payload.audioUrl()).isNull();
+        assertThat(payload.audioAvailable()).isFalse();
     }
 
     @Test

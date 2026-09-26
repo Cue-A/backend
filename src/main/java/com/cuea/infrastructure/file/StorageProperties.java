@@ -21,16 +21,20 @@ public record StorageProperties(
 ) {
 
     /**
-     * @param resumeGet    이력서 GET(AI 전달용). Celery 큐 지연 대비로 15분. 줄이지 마세요
-     * @param uploadPut    업로드 PUT
-     * @param recordingGet 녹음 다운로드 GET. 사용자가 리포트를 보며 재생합니다
-     * @param documentGet  사용자가 자기 문서를 다시 볼 때 쓰는 GET
+     * @param resumeGet        이력서 GET(AI 전달용). Celery 큐 지연 대비로 15분. 줄이지 마세요
+     * @param uploadPut        업로드 PUT
+     * @param recordingGet     녹음 다운로드 GET. 사용자가 리포트를 보며 재생합니다
+     * @param documentGet      사용자가 자기 문서를 다시 볼 때 쓰는 GET
+     * @param questionAudioGet 질문 TTS 음성 GET. AI 가 private 버킷에 올린 질문 음성을
+     *                         WebSocket 질문 push 시 프론트에 서명해 내려줍니다. 사용자가
+     *                         한 문항을 듣는 시간이라 짧게 잡습니다
      */
     public record Presign(
             Duration resumeGet,
             Duration uploadPut,
             Duration recordingGet,
-            Duration documentGet
+            Duration documentGet,
+            Duration questionAudioGet
     ) {
     }
 }

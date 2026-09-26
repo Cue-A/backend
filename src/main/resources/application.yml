@@ -115,3 +115,6 @@ app:
       # 사용자가 브라우저에서 열어보는 시간입니다. resume-get(15분)과 달리
       # AI 큐 사정과 무관해 따로 둡니다.
       document-get: 1h
+      # 질문 TTS 음성 GET. AI 가 private 버킷에 올린 질문 음성을 질문 push 때 서명해
+      # 내려줍니다. 사용자가 한 문항을 듣는 시간이라 짧게 잡습니다.
+      question-audio-get: 15m

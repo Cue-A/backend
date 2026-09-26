@@ -67,6 +67,19 @@ public class PresignedUrlIssuer {
         return issueDownload(objectKey, properties.presign().recordingGet());
     }
 
+    /**
+     * 질문 TTS 음성 GET.
+     *
+     * <p>AI 가 private 버킷의 {@code sessions/{sessionId}/questions/{questionId}.mp3}
+     * 에 올린 음성을, WebSocket 질문 push 시점에 서명해 프론트에 내려줍니다. 버킷을
+     * public 으로 열지 않고 이 서명 URL 로만 재생하게 합니다. object key 는 AI 계약상
+     * 고정 규칙이라 {@link ObjectKeys#questionAudio} 로 생성하며, AI 가 준 URL 을
+     * parsing 하지 않습니다(엔드포인트·path-style 차이로 취약).
+     */
+    public String issueQuestionAudioDownload(String objectKey) {
+        return issueDownload(objectKey, properties.presign().questionAudioGet());
+    }
+
     private String issueDownload(String objectKey, Duration validity) {
         GetObjectRequest get = GetObjectRequest.builder()
                 .bucket(properties.bucket())

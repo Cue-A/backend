@@ -70,6 +70,7 @@ public class InterviewAnswerPoller {
     private final AiErrorTranslator errorTranslator;
     private final SessionSocketHandler socketHandler;
     private final InterviewSessionWriter sessionWriter;
+    private final QuestionPushFactory questionPushFactory;
 
     /**
      * 답변 처리 task 를 폴링해 결과 타입별로 저장·전달합니다.
@@ -190,17 +191,8 @@ public class InterviewAnswerPoller {
     }
 
     private void pushQuestion(String sessionId, Question question, Integer questionTotal) {
-        socketHandler.push(sessionId, QuestionPushMessage.of(new QuestionPushMessage(
-                question.getQuestionId(),
-                question.getType().name(),
-                question.getText(),
-                question.getAudioUrl(),
-                question.getAudioUrl() != null,
-                question.getCategory(),
-                question.getDifficulty(),
-                question.getQuestionNumber(),
-                questionTotal
-        )));
+        socketHandler.push(sessionId,
+                QuestionPushMessage.of(questionPushFactory.create(question, questionTotal)));
     }
 
     private void pushError(String sessionId, BusinessException e) {

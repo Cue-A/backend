@@ -48,6 +48,7 @@ class InterviewAnswerPollerTest {
     private AiProperties aiProperties;
     private SessionSocketHandler socketHandler;
     private InterviewSessionWriter sessionWriter;
+    private QuestionPushFactory questionPushFactory;
     private InterviewAnswerPoller poller;
 
     @BeforeEach
@@ -56,6 +57,7 @@ class InterviewAnswerPollerTest {
         aiPoller = mock(AiPoller.class);
         socketHandler = mock(SessionSocketHandler.class);
         sessionWriter = mock(InterviewSessionWriter.class);
+        questionPushFactory = mock(QuestionPushFactory.class);
 
         aiProperties = new AiProperties(
                 "http://localhost:8000", "secret",
@@ -64,7 +66,20 @@ class InterviewAnswerPollerTest {
                 new AiProperties.Mock(false));
 
         poller = new InterviewAnswerPoller(
-                aiClient, aiPoller, aiProperties, new AiErrorTranslator(), socketHandler, sessionWriter);
+                aiClient, aiPoller, aiProperties, new AiErrorTranslator(),
+                socketHandler, sessionWriter, questionPushFactory);
+
+        // QuestionPushFactory 는 저장된 질문을 push 메시지로 조립하고 presign 하는 책임을
+        // 갖습니다(presign 검증은 QuestionPushFactoryTest). 여기서는 기본 스텁으로 질문
+        // 필드를 그대로 옮긴 메시지를 돌려줘, 기존 push 필드 검증이 그대로 유지되게 합니다.
+        when(questionPushFactory.create(any(Question.class), any())).thenAnswer(invocation -> {
+            Question q = invocation.getArgument(0);
+            Integer total = invocation.getArgument(1);
+            return new QuestionPushMessage(
+                    q.getQuestionId(), q.getType().name(), q.getText(),
+                    q.getAudioUrl(), q.getAudioUrl() != null,
+                    q.getCategory(), q.getDifficulty(), q.getQuestionNumber(), total);
+        });
     }
 
     private AiTaskStatusResponse done(AiQuestionResult result) {
@@ -98,6 +113,58 @@ class InterviewAnswerPollerTest {
     }
 
     // ── question / followup / reask ────────────────────────────
+
+    @Test
+    void 답변후_다음질문도_QuestionPushFactory_로_조립해_presign_경로를_태운다() {
+        // Issue #41: 첫 질문뿐 아니라 답변 이후 다음 질문도 같은 factory 로 push 해야
+        // presign 이 일관되게 적용된다. factory 가 signed URL 을 담아준 상황을 가정한다.
+        AiQuestionResult result = new AiQuestionResult(
+                AiQuestionResult.TYPE_QUESTION, "q_2", null, "다음 질문", "https://s3/q_2.mp3",
+                "직무역량", "L2", 2, 9, 1, 4, false, false, null);
+        Question saved = savedQuestion("q_2", QuestionType.QUESTION, "직무역량", "L2", 2);
+        when(aiPoller.await(eq(TASK_ID), any(), any())).thenReturn(done(result));
+        when(sessionWriter.saveNextQuestion(eq(SESSION_ID), eq(result))).thenReturn(saved);
+        when(questionPushFactory.create(saved, 9)).thenReturn(new QuestionPushMessage(
+                "q_2", "QUESTION", "다음 질문",
+                "https://s3/q_2.mp3?X-Amz-Signature=abc", true,
+                "직무역량", "L2", 2, 9));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+
+        // 저장된 질문으로 factory 에 위임한다(presign 은 factory 책임).
+        verify(questionPushFactory).create(saved, 9);
+        QuestionPushMessage payload = capturePush("question", QuestionPushMessage.class);
+        // 프론트에는 서명 URL 이 내려간다(AI 원본 unsigned URL 이 아니다).
+        assertThat(payload.audioUrl()).contains("X-Amz-Signature");
+        assertThat(payload.audioAvailable()).isTrue();
+    }
+
+    @Test
+    void followup_presign_이_실패해_text_only_로_와도_질문을_정상_push_하고_세션을_정리하지_않는다() {
+        // Issue #41 정책: presign 실패는 factory 가 text-only 로 흡수한다. follow-up 도
+        // 첫 질문과 동일하게 error/abort 없이 question 을 그대로 push 한다.
+        AiQuestionResult result = new AiQuestionResult(
+                AiQuestionResult.TYPE_FOLLOWUP, "q_3", null, "꼬리질문", "https://s3/q_3.mp3",
+                "직무역량", "L2", 3, 9, 1, 4, false, false, null);
+        Question saved = savedQuestion("q_3", QuestionType.FOLLOWUP, "직무역량", "L2", 3);
+        when(aiPoller.await(eq(TASK_ID), any(), any())).thenReturn(done(result));
+        when(sessionWriter.saveNextQuestion(eq(SESSION_ID), eq(result))).thenReturn(saved);
+        // factory 가 presign 실패를 흡수해 text-only 메시지를 돌려준 상황.
+        when(questionPushFactory.create(saved, 9)).thenReturn(new QuestionPushMessage(
+                "q_3", "FOLLOWUP", "꼬리질문", null, false, "직무역량", "L2", 3, 9));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID);
+
+        // 세션 정리는 일어나지 않는다.
+        verify(aiClient, never()).abortSession(anyString());
+        verify(sessionWriter, never()).markAborted(anyString());
+
+        QuestionPushMessage payload = capturePush("question", QuestionPushMessage.class);
+        assertThat(payload.questionType()).isEqualTo("FOLLOWUP");
+        assertThat(payload.text()).isEqualTo("꼬리질문");
+        assertThat(payload.audioUrl()).isNull();
+        assertThat(payload.audioAvailable()).isFalse();
+    }
 
     @Test
     void QUESTION_결과를_저장하고_push_한다() {

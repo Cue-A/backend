@@ -183,15 +183,28 @@ READY               →  COMPLETED
 FAILED              →  FAILED
 ```
 
-**지금은 AI 인덱싱이 없어 등록 즉시 `READY` 입니다**(Issue #28). 그래서 `UPLOADED`·
-`PARSING` 은 현재 도달하지 않는 상태입니다. AI 에 문서 인덱싱 엔드포인트가 생기면
-등록 직후 상태를 `UPLOADED` 로 바꾸고 인덱싱 호출을 붙입니다.
+**등록하면 즉시 `READY` 입니다**(Issue #28). 문서 등록 때 AI 를 호출하지 않기
+때문입니다. `POST /api/documents` 는 Backend 에 저장만 하고 바로 `READY` 로 둡니다.
+그래서 `UPLOADED`·`PARSING` 은 현재 도달하지 않는 상태입니다.
+
+**AI 문서 인덱싱 엔드포인트는 없으며, 현재 MVP 계약에서는 만들지 않습니다.** 초기
+설계의 RAG·벡터 인덱싱 전제는 폐기됐습니다. AI 는 이력서를 분할·색인하지 않고 면접
+시작 시 전체 내용을 받아 처리합니다([`10-ai-client.md`](./10-ai-client.md) 참고).
+`UPLOADED`·`PARSING` 상태는 향후 인덱싱이 아니라 다른 비동기 전처리가 필요해질
+때를 대비해 enum 에만 남겨둔 것입니다.
 
 ### ★ ai_doc_ref 를 제거했습니다 (Issue #23)
 
-AI 계약이 확정되면서 `doc_id`(AI 쪽 이력서 파싱 캐시 키)가 지금은 항상 `null`이고
-Spring이 값을 받아 보관할 일이 없다는 것이 명확해졌습니다. 기존
-`ai_doc_ref VARCHAR(100)` 컬럼과 `Document.markReady(String)` 을 제거했습니다.
+AI 계약이 확정되면서 `doc_id` 가 지금은 항상 `null` 이고 Spring 이 값을 받아 보관할
+일이 없다는 것이 명확해졌습니다. 기존 `ai_doc_ref VARCHAR(100)` 컬럼과
+`Document.markReady(String)` 을 제거했습니다.
+
+**`doc_id` 는 RAG·벡터 인덱스 ID 가 아닙니다.** 초기 설계의 인덱스 키 개념은
+폐기됐습니다. 현재는 AI 세션 시작 요청의 예약 필드(향후 이력서 파싱 결과 재사용용)일
+뿐이고, AI 가 응답으로 돌려주지도, Backend 가 저장하지도 않습니다. 향후 이 기능이
+켜지면 AI 가 먼저 계약을 바꿔 세션 시작 응답에 `doc_id` 를 추가하고, 그때 Backend 가
+컬럼을 만들어 저장·재전달합니다. **지금은 선행 컬럼을 만들지 않습니다.** 필드 계약은
+[`10-ai-client.md`](./10-ai-client.md) 의 doc_id 절 참고.
 
 **`ddl-auto: update` 는 컬럼 삭제를 하지 않습니다.** 배포 환경에 기존
 `ai_doc_ref` 컬럼이 남아 있다면 필요 시 수동으로 `DROP COLUMN` 하세요. 이 PR은
@@ -298,7 +311,7 @@ session_id              VARCHAR(50)   -- PK (복합), FK -> session(session_id)
 question_id             VARCHAR(50)   -- PK (복합). AI 발급
 type                    VARCHAR(20)   NOT NULL  -- QUESTION | FOLLOWUP | REASK
 text                    TEXT          NOT NULL
-audio_url               TEXT          NULL      -- TTS_FAILED 시 null
+audio_url               TEXT          NULL      -- TTS 생성 실패 시 null (에러 아님, text-only)
 category                VARCHAR(20)   NULL      -- REASK는 null
 difficulty              VARCHAR(5)    NULL      -- REASK는 null
 reask_of                VARCHAR(50)   NULL      -- ★ REASK 일 때 원 질문의 question_id

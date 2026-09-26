@@ -21,6 +21,7 @@ import lombok.experimental.SuperBuilder;
 import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 
+import java.time.OffsetDateTime;
 import java.util.UUID;
 
 /**
@@ -123,6 +124,16 @@ public class Document extends BaseTimeEntity {
     private DocumentStatus status;
 
     /**
+     * 사용자가 삭제한 시각. null 이면 살아 있는 문서입니다.
+     *
+     * <p><b>행을 지우지 않습니다</b>(Issue #38). {@code session.document_id} 가 NOT NULL
+     * 로 이 행을 참조하므로, 지우면 FK 에 막히거나 과거 면접 기록이 깨집니다. 삭제된
+     * 문서는 목록·상세·등록 상한·면접 시작에서 빠집니다. {@code DocumentRepository} 참고.
+     */
+    @Column(name = "deleted_at")
+    private OffsetDateTime deletedAt;
+
+    /**
      * 파일로 등록된 문서.
      *
      * <p>{@code publicId} 를 <b>밖에서 받습니다.</b> 저장소 키에 이 값이 들어가므로
@@ -196,6 +207,20 @@ public class Document extends BaseTimeEntity {
 
     public void markFailed() {
         this.status = DocumentStatus.FAILED;
+    }
+
+    /** 소프트 삭제. 이미 삭제된 문서는 조회에서 걸러지므로 여기까지 오지 않습니다. */
+    public void markDeleted() {
+        this.deletedAt = OffsetDateTime.now();
+    }
+
+    /**
+     * 사용자가 지운 문서인지. S3 파일도 지워졌으므로 이 문서로 AI 세션을 만들 수
+     * 없습니다. 세션 연관관계로 가져온 문서는 삭제 여부로 걸러지지 않으니, 재연습처럼
+     * 과거 세션의 문서를 다시 쓰는 곳에서 이걸로 확인하세요.
+     */
+    public boolean isDeleted() {
+        return deletedAt != null;
     }
 
     /** 세션에 붙일 수 있는 상태인지. */

@@ -114,6 +114,7 @@ file_size     BIGINT        NULL       -- FILE 만
 file_format   VARCHAR(10)   NULL       -- PDF | DOCX | TXT. FILE 만
 doc_text      TEXT          NULL       -- MARKDOWN 만. 편집용 원본
 status        VARCHAR(20)   NOT NULL   -- UPLOADED | PARSING | READY | FAILED
+deleted_at    TIMESTAMPTZ   NULL       -- 소프트 삭제 시각. null 이면 살아 있음
 created_at    TIMESTAMPTZ   NOT NULL
 updated_at    TIMESTAMPTZ   NOT NULL
 ```
@@ -149,6 +150,25 @@ updated_at    TIMESTAMPTZ   NOT NULL
 
 `status` 가 `READY` 가 되기 전에는 세션을 시작할 수 없습니다. AI 서버가 문서를
 읽을 수 없는 상태입니다.
+
+### ★ 문서 삭제는 소프트 삭제입니다 (Issue #38)
+
+`DELETE /api/documents/{documentId}` 는 행을 지우지 않고 `deleted_at` 만 채웁니다.
+`session.document_id` 가 NOT NULL 로 문서를 참조해서, 행을 지우면 FK 에 막히거나
+과거 면접 기록이 깨지기 때문입니다.
+
+- 삭제된 문서는 **목록 · 상세 · 등록 상한(20개) · 면접 시작**에서 빠집니다.
+  `DocumentRepository` 의 모든 조회에 `deleted_at is null` 이 들어 있고, 삭제된 문서를
+  꺼내는 메서드는 두지 않습니다. 호출하는 쪽에 조건을 맡기면 한 곳만 빠뜨려도 새기
+  때문입니다
+- **S3 파일은 항상 지웁니다.** 사용자는 문서를 지우면 파일도 사라진다고 기대합니다
+- 그래서 **삭제된 문서로 본 면접은 재연습할 수 없습니다.** 재연습은 원래 면접의 문서
+  파일을 AI 에 다시 넘기는데([`12-replay.md`](./12-replay.md)) 파일이 없기 때문입니다.
+  재연습은 최초 세션의 문서를 연관관계(`session.getDocument()`)로 가져오고,
+  `Document.isDeleted()` 면 AI 호출 전에 거절해야 합니다. 연관관계 로딩은 삭제 여부로
+  걸러지지 않습니다
+- 과거 면접 기록과 리포트는 행이 남아 있어 그대로 보입니다
+- 없는 문서 · 남의 문서 · 이미 지운 문서는 모두 `DOCUMENT_NOT_FOUND` 입니다
 
 ### ★ status 를 그대로 내보내지 않습니다
 
@@ -674,7 +694,7 @@ session 삭제    → retry_of_session_id, user_badge.source_session_id SET NULL
 folder 삭제     → session.folder_id SET NULL
 badge 삭제      → user_badge 가 막음 (NO ACTION)
 company 삭제    → session.company_id 가 막음 (NO ACTION)
-document 삭제   → session.document_id 가 막음 (NO ACTION)
+document 삭제   → session.document_id 가 막음 (NO ACTION). API 는 소프트 삭제만 합니다
 ```
 
 ---

@@ -255,3 +255,13 @@ spring:
 |---|---|
 | `local` (IDE 실행) | `http://localhost:8000` |
 | `docker` (compose 실행) | `http://python-ai:8000` |
+
+실제 AI 는 학과 GPU 서버의 `https` 고정 주소입니다. 학과 서버가 MinIO 에 닿지
+못하므로 스토리지도 S3 로 바꿉니다.
+
+| 모드 | AI | 스토리지 |
+|---|---|---|
+| 평소 개발 | 내부 목 (`APP_AI_MOCK_ENABLED=true`) | MinIO |
+| 실제 AI 연동 | 학과 GPU 서버 `https://…` | S3 |
+
+전환은 `.env.example` 주석 블록, 배포는 [`30-deploy.md`](./30-deploy.md).

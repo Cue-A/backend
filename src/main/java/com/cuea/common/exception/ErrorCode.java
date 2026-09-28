@@ -69,6 +69,7 @@ public enum ErrorCode {
     INVALID_ANSWERS(HttpStatus.INTERNAL_SERVER_ERROR, "분석 요청을 만들지 못했습니다"),
 
     // ── 리포트 ──────────────────────────────────────────────
+    REPORT_NOT_FOUND(HttpStatus.NOT_FOUND, "리포트를 찾을 수 없습니다"),
     SESSION_NOT_COMPLETED(HttpStatus.CONFLICT, "아직 진행 중인 세션입니다"),
     REPORT_ALREADY_EXISTS(HttpStatus.CONFLICT, "이미 분석을 요청한 세션입니다"),
     // AI 계약 코드와 같은 이름입니다. 되묻기를 뺀 답변이 2문항 미만이면 AI 가 422 로 거절합니다.

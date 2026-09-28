@@ -8,6 +8,7 @@ import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
 
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 소유자가 있는 엔티티라 {@code JpaRepository} 를 상속하지 않습니다.
@@ -20,6 +21,9 @@ public interface ReportRepository extends Repository<Report, Long> {
 
     /** 본인 세션의 리포트. 소유자 조건을 쿼리에 묶어 남의 리포트는 애초에 나오지 않습니다. */
     Optional<Report> findBySession_SessionIdAndSession_User_UserId(String sessionId, String userId);
+
+    /** 본인 리포트를 외부 식별자({@code reportId})로. 남의 리포트는 없는 것과 같습니다. */
+    Optional<Report> findByPublicIdAndSession_User_UserId(UUID publicId, String userId);
 
     /**
      * 내부 PK 로 조회. 백그라운드 폴러 전용입니다. <b>API 경계에서 쓰지 마세요.</b>

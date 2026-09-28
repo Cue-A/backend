@@ -55,9 +55,15 @@ public class InterviewSessionWriter {
         return sessionRepository.save(session);
     }
 
+    /**
+     * 세션 시작 첫 질문 저장. <b>세션이 아직 {@code IN_PROGRESS} 일 때만 저장</b>합니다.
+     * 사용자 abort 등으로 이미 종료된 세션이면 저장하지 않고 {@code null} 을 돌려줍니다(#25).
+     * 상태 확인과 저장이 같은 트랜잭션 안에 있어, 확인-저장 사이에 abort 가 끼어드는
+     * 창을 (같은 커넥션 기준으로) 닫습니다.
+     */
     @Transactional
     public Question saveFirstQuestion(String sessionId, AiQuestionResult result) {
-        return saveQuestion(sessionId, result);
+        return saveIfInProgress(sessionId, result);
     }
 
     /**
@@ -66,10 +72,14 @@ public class InterviewSessionWriter {
      * <p><b>수신 즉시 저장합니다.</b> 프론트 push 전에 저장해야 사용자가 그 사이에
      * 나가도 기록이 남습니다. {@code session_end} 나 알 수 없는 type 은 질문이 아니므로
      * {@link #toQuestionType} 에서 거부합니다(호출 측에서 미리 걸러야 합니다).
+     *
+     * <p><b>세션이 아직 {@code IN_PROGRESS} 일 때만 저장</b>합니다. 사용자 abort 로 이미
+     * {@code ABORTED}(또는 {@code COMPLETED}) 인 세션에 늦게 도착한 결과는 저장하지 않고
+     * {@code null} 을 돌려줍니다. 호출부는 {@code null} 이면 push 도 하지 않습니다(#25).
      */
     @Transactional
     public Question saveNextQuestion(String sessionId, AiQuestionResult result) {
-        return saveQuestion(sessionId, result);
+        return saveIfInProgress(sessionId, result);
     }
 
     /**
@@ -87,12 +97,37 @@ public class InterviewSessionWriter {
         question.attachAnswerMedia(audioObjectKey, videoObjectKey, isTimeout);
     }
 
-    /** {@code session_end} 수신. 세션을 COMPLETED 로 전이합니다. */
+    /**
+     * {@code session_end} 수신. 세션이 {@code IN_PROGRESS} 일 때만 COMPLETED 로 전이합니다.
+     *
+     * @return 이번 호출로 실제 COMPLETED 로 전이했으면 {@code true}. 이미 abort/complete 된
+     *         세션이라 전이하지 않았으면 {@code false}. 호출부는 {@code false} 면 session_end
+     *         push 도 하지 않습니다(#25).
+     */
     @Transactional
-    public void completeSession(String sessionId) {
-        sessionRepository.findBySessionIdForInternal(sessionId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND))
-                .complete();
+    public boolean completeSession(String sessionId) {
+        InterviewSession session = sessionRepository.findBySessionIdForInternal(sessionId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND));
+        if (!session.isInProgress()) {
+            return false;
+        }
+        session.complete();
+        return true;
+    }
+
+    /**
+     * 세션이 {@code IN_PROGRESS} 일 때만 질문을 저장합니다. 상태 확인과 저장을 한 트랜잭션에
+     * 두어, 사용자 abort 이후 늦게 도착한 결과가 DB 에 새로 쌓이지 않게 합니다(#25).
+     *
+     * @return 저장한 {@link Question}. 세션이 이미 종료돼 저장하지 않았으면 {@code null}.
+     */
+    private Question saveIfInProgress(String sessionId, AiQuestionResult result) {
+        InterviewSession session = sessionRepository.findBySessionIdForInternal(sessionId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND));
+        if (!session.isInProgress()) {
+            return null;
+        }
+        return saveQuestion(sessionId, result);
     }
 
     private Question saveQuestion(String sessionId, AiQuestionResult result) {

@@ -178,6 +178,8 @@ class InterviewAnswerPollerTest {
                 AiQuestionResult.TYPE_SESSION_END, null, null, null, null, null, null,
                 null, 9, null, null, false, false, 9);
         when(aiPoller.await(eq(TASK_ID), any(), any())).thenReturn(done(sessionEnd));
+        // IN_PROGRESS 세션이라 완료 전이가 실제로 일어난다(true).
+        when(sessionWriter.completeSession(SESSION_ID)).thenReturn(true);
 
         poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
 
@@ -663,6 +665,52 @@ class InterviewAnswerPollerTest {
         assertThat(payload.text()).isEqualTo("다음 질문 텍스트");
         assertThat(payload.audioUrl()).isNull();
         assertThat(payload.audioAvailable()).isFalse();
+    }
+
+    // ── abort 이후 늦게 도착한 결과는 반영하지 않는다 (리뷰 5, Issue #25) ──
+
+    @Test
+    void 사용자_abort_후_늦게_도착한_question_은_저장도_push도_하지_않는다() {
+        // 답변 폴링 중 사용자가 abort 하면 세션이 ABORTED 다. 이후 AI 가 question 을 돌려줘도
+        // saveNextQuestion 이 IN_PROGRESS 가 아니므로 저장하지 않고 null 을 돌려준다(Writer 가
+        // 상태를 확인). 그 경우 question push 도 나가지 않아야 한다. 세션은 ABORTED 유지.
+        AiQuestionResult result = new AiQuestionResult(
+                AiQuestionResult.TYPE_QUESTION, "q_2", null, "다음 질문", "https://s3/q.mp3",
+                "직무역량", "L2", 2, 9, 1, 4, false, false, null);
+        when(aiPoller.await(eq(TASK_ID), any(), any())).thenReturn(done(result));
+        // 이미 종료된 세션: Writer 가 저장하지 않고 null 반환.
+        when(sessionWriter.saveNextQuestion(eq(SESSION_ID), eq(result))).thenReturn(null);
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
+
+        // 저장 시도는 했지만(=상태 확인 포함) push 는 나가지 않는다.
+        verify(sessionWriter).saveNextQuestion(SESSION_ID, result);
+        verify(socketHandler, never()).push(eq(SESSION_ID), any());
+        // 여기서 새로 세션을 정리하거나 error 를 push 하지 않는다(이미 abort 로 ABORTED).
+        verify(aiClient, never()).abortSession(anyString());
+        verify(sessionWriter, never()).markAborted(anyString());
+    }
+
+    @Test
+    void 사용자_abort_후_늦게_도착한_session_end_는_완료전이도_push도_하지_않는다() {
+        // 답변 폴링 중 사용자가 abort 하면 세션이 ABORTED 다. 이후 session_end 가 늦게 와도
+        // completeSession 이 IN_PROGRESS 가 아니라 전이하지 않고 false 를 돌려준다.
+        // 그 경우 session_end push 도 나가지 않아야 한다. 세션은 ABORTED 유지.
+        AiQuestionResult sessionEnd = new AiQuestionResult(
+                AiQuestionResult.TYPE_SESSION_END, null, null, null, null, null, null,
+                null, 9, null, null, false, false, 9);
+        when(aiPoller.await(eq(TASK_ID), any(), any())).thenReturn(done(sessionEnd));
+        // 이미 종료된 세션: 완료 전이가 일어나지 않음(false).
+        when(sessionWriter.completeSession(SESSION_ID)).thenReturn(false);
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, REQUEST);
+
+        // 완료 전이 시도는 했지만 push 는 나가지 않는다.
+        verify(sessionWriter).completeSession(SESSION_ID);
+        verify(sessionWriter, never()).saveNextQuestion(anyString(), any());
+        verify(socketHandler, never()).push(eq(SESSION_ID), any());
+        verify(aiClient, never()).abortSession(anyString());
+        verify(sessionWriter, never()).markAborted(anyString());
     }
 
     @SuppressWarnings("unchecked")

@@ -188,6 +188,11 @@ public class InterviewSession extends BaseTimeEntity {
         this.folder = folder;
     }
 
+    /** 아직 진행 중인지. 늦게 도착한 폴링 결과를 반영해도 되는지 판단에 씁니다(#25). */
+    public boolean isInProgress() {
+        return this.status == SessionStatus.IN_PROGRESS;
+    }
+
     /** 재연습 세션인지. 1회차면 false 입니다. */
     public boolean isRetry() {
         return retryOfSession != null;

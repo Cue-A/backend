@@ -285,4 +285,26 @@ class InterviewFirstQuestionPollerTest {
         assertThat(payload.retryable()).isFalse();
         assertThat(payload.needsRerecord()).isFalse();
     }
+
+    @Test
+    void 사용자_abort_후_늦게_도착한_첫질문은_저장도_push도_하지_않는다() {
+        // 세션 시작 폴링 중 사용자가 abort 하면 세션이 ABORTED 다. 이후 첫 질문이 늦게 와도
+        // saveFirstQuestion 이 IN_PROGRESS 가 아니라 저장하지 않고 null 을 돌려준다(Writer 가
+        // 상태를 확인). 그 경우 question push 도 나가지 않고, 이미 ABORTED 라 추가 정리·error
+        // push 도 하지 않는다(리뷰 5, #25).
+        AiQuestionResult result = firstQuestion();
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenReturn(new AiTaskStatusResponse(AiTaskStatusResponse.STATUS_DONE, null, result, null, null));
+        // 이미 종료된 세션: Writer 가 저장하지 않고 null 반환.
+        when(sessionWriter.saveFirstQuestion(eq(SESSION_ID), eq(result))).thenReturn(null);
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        // 저장 시도(=상태 확인 포함)는 했지만 push 는 나가지 않는다.
+        verify(sessionWriter).saveFirstQuestion(SESSION_ID, result);
+        verify(socketHandler, org.mockito.Mockito.never()).push(eq(SESSION_ID), any());
+        // 추가 정리·error push 없음(이미 abort 로 ABORTED).
+        verify(aiClient, org.mockito.Mockito.never()).abortSession(anyString());
+        verify(sessionWriter, org.mockito.Mockito.never()).markAborted(anyString());
+    }
 }

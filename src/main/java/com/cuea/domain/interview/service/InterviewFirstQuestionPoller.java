@@ -125,6 +125,13 @@ public class InterviewFirstQuestionPoller {
     }
 
     private void pushFirstQuestion(String sessionId, Question question, Integer questionTotal) {
+        // 사용자 abort 등으로 세션이 이미 종료됐으면 saveFirstQuestion 이 저장하지 않고
+        // null 을 돌려줍니다(#25). 그 경우 첫 질문 push 도 하지 않고 조용히 무시합니다.
+        // (세션은 사용자 abort 로 이미 ABORTED 라 여기서 추가 정리·error push 는 하지 않습니다.)
+        if (question == null) {
+            log.info("이미 종료된 세션에 늦게 도착한 첫 질문이라 저장·push 하지 않습니다 sessionId={}", sessionId);
+            return;
+        }
         int delivered = socketHandler.push(sessionId, QuestionPushMessage.of(new QuestionPushMessage(
                 question.getQuestionId(),
                 question.getType().name(),

@@ -300,9 +300,17 @@ public class InterviewAnswerPoller {
     /**
      * question·followup·reask 를 저장하고 push 합니다. <b>수신 즉시 저장</b>한 뒤
      * push 하므로 사용자가 중간에 나가도 기록이 남습니다.
+     *
+     * <p>사용자 abort 등으로 세션이 이미 종료됐으면 {@code saveNextQuestion} 이 저장하지
+     * 않고 {@code null} 을 돌려줍니다. 그 경우 push 도 하지 않고 조용히 무시합니다(#25).
      */
     private void handleQuestion(String sessionId, AiQuestionResult result) {
         Question question = sessionWriter.saveNextQuestion(sessionId, result);
+        if (question == null) {
+            log.info("이미 종료된 세션에 늦게 도착한 결과라 저장·push 하지 않습니다 sessionId={} type={}",
+                    sessionId, result.type());
+            return;
+        }
         pushQuestion(sessionId, question, result.questionTotal());
     }
 
@@ -310,9 +318,16 @@ public class InterviewAnswerPoller {
      * session_end 는 Question 을 저장하지 않고 세션을 COMPLETED 로 전이한 뒤
      * {@code session_end} 를 push 합니다. 진행률·문항 수는
      * {@code question_number/question_total} 기준이며 topic_total 은 쓰지 않습니다.
+     *
+     * <p>사용자 abort 등으로 세션이 이미 종료됐으면 {@code completeSession} 이 전이하지
+     * 않고 {@code false} 를 돌려줍니다. 그 경우 session_end push 도 하지 않습니다(#25).
      */
     private void handleSessionEnd(String sessionId, AiQuestionResult result) {
-        sessionWriter.completeSession(sessionId);
+        if (!sessionWriter.completeSession(sessionId)) {
+            log.info("이미 종료된 세션에 늦게 도착한 session_end 라 완료·push 하지 않습니다 sessionId={}",
+                    sessionId);
+            return;
+        }
         socketHandler.push(sessionId,
                 SessionEndPushMessage.of(sessionId, result.totalQuestions()));
     }

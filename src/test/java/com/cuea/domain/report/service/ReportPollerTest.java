@@ -5,12 +5,14 @@ import com.cuea.common.exception.ErrorCode;
 import com.cuea.common.config.ReportProperties;
 import com.cuea.domain.report.entity.Report;
 import com.cuea.domain.report.entity.ReportStatus;
+import com.cuea.domain.report.service.ReportProgressStore.ReportProgress;
 import com.cuea.infrastructure.ai.AiClient;
 import com.cuea.infrastructure.ai.AiPoller;
 import com.cuea.infrastructure.ai.dto.AiReportRequest;
 import com.cuea.infrastructure.ai.dto.AiReportTaskStatusResponse;
 import com.cuea.infrastructure.websocket.ReportSocketHandler;
 import com.cuea.infrastructure.websocket.message.ReportErrorPushMessage;
+import com.cuea.infrastructure.websocket.message.ReportProgressStage;
 import com.cuea.infrastructure.websocket.message.ReportPushMessage;
 import com.cuea.infrastructure.websocket.message.SocketMessage;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -22,6 +24,7 @@ import org.mockito.ArgumentCaptor;
 import java.time.Duration;
 import java.util.List;
 import java.util.UUID;
+import java.util.function.Consumer;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
@@ -49,6 +52,7 @@ class ReportPollerTest {
     private ReportRequestAssembler requestAssembler;
     private ReportWriter reportWriter;
     private ReportSocketHandler socketHandler;
+    private FakeReportProgressStore progressStore;
     private ReportPoller poller;
 
     @BeforeEach
@@ -58,8 +62,9 @@ class ReportPollerTest {
         requestAssembler = mock(ReportRequestAssembler.class);
         reportWriter = mock(ReportWriter.class);
         socketHandler = mock(ReportSocketHandler.class);
+        progressStore = new FakeReportProgressStore();
         poller = new ReportPoller(aiClient, aiPoller, new ReportProperties(Duration.ofMinutes(10)),
-                requestAssembler, reportWriter, socketHandler);
+                requestAssembler, reportWriter, socketHandler, progressStore);
 
         when(requestAssembler.build(SESSION_ID))
                 .thenReturn(new AiReportRequest("friendly", "백엔드 개발", null, null, List.of()));
@@ -179,6 +184,45 @@ class ReportPollerTest {
         poller.onRequested(event());
 
         verify(reportWriter).fail(REPORT_ID, ErrorCode.UNEXPECTED_AI_RESPONSE);
+    }
+
+    /** 소켓에 늦게 붙은 프론트가 상태 조회 API 로 마지막 단계를 알 수 있어야 합니다. */
+    @Test
+    void 진행_단계를_보낼_때_상태_조회용으로도_남긴다() {
+        when(aiPoller.await(anyString(), any(), any(), any())).thenAnswer(invocation -> {
+            Consumer<AiReportTaskStatusResponse> onStageChange = invocation.getArgument(3);
+            onStageChange.accept(new AiReportTaskStatusResponse(
+                    "processing", "analyzing_content", 0.6, null, null, null));
+            assertThat(progressStore.find(PUBLIC_ID.toString()))
+                    .contains(new ReportProgress(ReportProgressStage.ANALYZING_CONTENT, 0.6));
+            throw new BusinessException(ErrorCode.STT_FAILED);
+        });
+
+        poller.onRequested(event());
+
+        verify(socketHandler, times(2)).push(eq(PUBLIC_ID.toString()), any());   // progress + error
+    }
+
+    @Test
+    void 완료되면_남긴_진행_단계를_지운다() throws Exception {
+        progressStore.save(PUBLIC_ID.toString(), new ReportProgress(ReportProgressStage.COMPOSING, 0.9), null);
+        givenPollResults(done("complete", 68, null));
+        when(reportWriter.finish(eq(REPORT_ID), any())).thenReturn(finished(ReportStatus.COMPLETED, 68));
+
+        poller.onRequested(event());
+
+        assertThat(progressStore.find(PUBLIC_ID.toString())).isEmpty();
+    }
+
+    @Test
+    void 실패해도_남긴_진행_단계를_지운다() {
+        progressStore.save(PUBLIC_ID.toString(), new ReportProgress(ReportProgressStage.TRANSCRIBING, 0.1), null);
+        when(aiPoller.await(anyString(), any(), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.STT_FAILED));
+
+        poller.onRequested(event());
+
+        assertThat(progressStore.find(PUBLIC_ID.toString())).isEmpty();
     }
 
     private void givenPollResults(AiReportTaskStatusResponse response) {

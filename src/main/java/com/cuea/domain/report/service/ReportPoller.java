@@ -5,6 +5,7 @@ import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.common.config.ReportProperties;
 import com.cuea.domain.report.entity.Report;
+import com.cuea.domain.report.service.ReportProgressStore.ReportProgress;
 import com.cuea.infrastructure.ai.AiClient;
 import com.cuea.infrastructure.ai.AiPoller;
 import com.cuea.infrastructure.ai.dto.AiReportRequest;
@@ -36,6 +37,10 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * {@code CONTENT_FAILED} · {@code MEDIA_FETCH_FAILED} 는 한 번만 다시 요청합니다.
  * <b>시도 번호를 올린 새 Idempotency-Key 를 씁니다.</b> 같은 키면 AI 가 실패한 기존
  * task_id 를 그대로 돌려줍니다. 요청 본문도 다시 조립해 presigned URL 을 새로 받습니다.
+ *
+ * <h2>진행 단계 저장</h2>
+ * WebSocket 으로 보내는 progress 를 {@link ReportProgressStore} 에도 남깁니다. 소켓에 늦게
+ * 붙은 프론트가 상태 조회 API 로 마지막 단계를 알 수 있게 하려는 것입니다. 끝나면 지웁니다.
  */
 @Slf4j
 @Component
@@ -48,6 +53,7 @@ public class ReportPoller {
     private final ReportRequestAssembler requestAssembler;
     private final ReportWriter reportWriter;
     private final ReportSocketHandler socketHandler;
+    private final ReportProgressStore progressStore;
 
     @Async(AsyncConfig.REPORT_EXECUTOR)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -99,6 +105,7 @@ public class ReportPoller {
 
     private void finish(ReportRequestedEvent event, ReportResult result) {
         Report report = reportWriter.finish(event.reportId(), result);
+        progressStore.delete(event.reportPublicId().toString());
         log.info("리포트 생성 완료 sessionId={} status={}", event.sessionId(), report.getStatus());
         int delivered = socketHandler.push(event.reportPublicId().toString(), ReportPushMessage.of(
                 new ReportPushMessage(event.reportPublicId().toString(),
@@ -121,6 +128,7 @@ public class ReportPoller {
         } catch (RuntimeException e) {
             log.error("리포트 FAILED 처리 실패 reportId={}", event.reportId(), e);
         }
+        progressStore.delete(event.reportPublicId().toString());
         socketHandler.push(event.reportPublicId().toString(), ReportErrorPushMessage.of(
                 new ReportErrorPushMessage(errorCode.name(), cause.getMessage(),
                         ReportFailurePolicy.isUserRetryable(errorCode))));
@@ -132,6 +140,7 @@ public class ReportPoller {
             log.warn("모르는 리포트 stage 라 알리지 않습니다 stage={}", status.stage());
             return;
         }
+        progressStore.save(reportId, new ReportProgress(stage, status.progress()), reportProperties.pollTimeout());
         socketHandler.push(reportId, ReportProgressPushMessage.of(stage, status.progress()));
     }
 

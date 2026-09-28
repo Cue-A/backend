@@ -1,7 +1,7 @@
 # 13. 리포트 · 성장 추적
 
-리포트 계약(「리포트생성 API계약」)이 도착해 **생성 흐름**을 반영했습니다(Issue #47).
-조회·부분 재시도·회차 비교는 아직입니다. 아래 "아직 없는 것" 참고.
+리포트 계약(「리포트생성 API계약」)이 도착해 **생성 흐름**(Issue #47)과 **상태 조회**(Issue #48)를
+반영했습니다. 리포트 조회·부분 재시도·회차 비교는 아직입니다. 아래 "아직 없는 것" 참고.
 
 ---
 
@@ -37,6 +37,7 @@ DB 에는 0~100 점수만 컬럼으로 꺼내고, 나머지는 원본(`report_da
 ```
 POST /api/interviews/{sessionId}/reports     → 202 { reportId, sessionId, status, createdAt }
 WS   /ws/reports/{reportId}                  → progress · report · error
+GET  /api/reports/{reportId}/status          → { reportId, status, stage, progress, errorCode, retryable }
 ```
 
 ### 동기 구간 (HTTP 요청 스레드, 1초 이내)
@@ -64,7 +65,7 @@ WS   /ws/reports/{reportId}                  → progress · report · error
 
 | AI 결과 | 처리 |
 |---|---|
-| `processing` | stage 가 바뀔 때마다 WS `progress` |
+| `processing` | stage 가 바뀔 때마다 WS `progress`. 같은 값을 Redis 에도 남김(아래 상태 조회) |
 | `done` + `complete` | `COMPLETED`, 점수·원본 저장, WS `report` |
 | `done` + `partial` | `PARTIAL`, 실패 축 점수 null, WS `report` |
 | `CONTENT_FAILED` · `MEDIA_FETCH_FAILED` | **새 키로 자동 재시도 1회.** 또 실패하면 `FAILED` |
@@ -111,13 +112,51 @@ WS   /ws/reports/{reportId}                  → progress · report · error
 면접 소켓(`/ws/interviews/{sessionId}`)과 따로 둡니다. 리포트는 면접이 끝난 뒤라 면접
 소켓은 닫혀 있을 가능성이 높습니다.
 
+### 상태 조회 (`GET /api/reports/{reportId}/status`)
+
+WS 메시지는 붙어 있는 연결에만 갑니다. 소켓에 늦게 붙거나 새로고침하면 그 사이의
+`report` · `error` 를 놓치고 로딩 화면에서 빠져나오지 못합니다. 그래서 상태를 한 번
+조회하는 API 를 둡니다.
+
+**프론트: 소켓 연결 직후 1회 호출합니다.** 폴링용이 아닙니다.
+
+```
+1. WS /ws/reports/{reportId} 연결
+2. GET /api/reports/{reportId}/status
+   PROCESSING          → stage 가 있으면 그 단계로 로딩 화면을 맞추고 WS 를 기다림
+   COMPLETED · PARTIAL → 리포트 화면으로
+   FAILED              → retryable 이면 다시 요청 버튼, 아니면 실패 안내
+```
+
+연결 → 조회 순서여야 합니다. 조회를 먼저 하면 조회와 연결 사이에 끝난 메시지를 놓칩니다.
+
+```json
+{ "reportId": "...", "status": "PROCESSING", "stage": "ANALYZING_CONTENT", "progress": 0.6,
+  "errorCode": null, "retryable": null }
+```
+
+| status | stage · progress | errorCode · retryable |
+|---|---|---|
+| `PROCESSING` | 마지막 WS progress 와 같은 값. 첫 progress 전이면 null | null |
+| `COMPLETED` · `PARTIAL` | null | null |
+| `FAILED` | null | DB `error_code`, `retryable` 은 WS `error` 와 같은 규칙 |
+
+- 본인 리포트만. 없는 것 · 남의 것 · UUID 가 아닌 값 모두 404 `REPORT_NOT_FOUND`
+- **상태는 DB 기준**입니다. stage · progress 만 Redis `report:progress:{reportId}` 에서 붙입니다
+- Redis 값은 폴러가 progress 를 보낼 때 덮어쓰고(TTL = 폴링 한도 10분), 끝나면 지웁니다.
+  PROCESSING 일 때만 읽으므로 지우지 못한 값이 끝난 리포트에 붙지 않습니다
+- Redis 오류는 삼킵니다. 저장 실패가 폴러로 새면 리포트가 `INTERNAL_ERROR` 로 실패하기 때문입니다.
+  조회 쪽은 stage · progress 가 null 로 나갑니다
+
 ---
 
 ## 알아둘 제약
 
 - **서버가 재시작되면 폴링이 끊깁니다.** 그 리포트는 `PROCESSING` 으로 남고 재요청도
   409 로 막힙니다. 오래된 `PROCESSING` 을 정리하는 작업이 필요합니다(후속)
-- **소켓에 늦게 붙으면 완료 메시지를 놓칩니다.** 상태 조회 API 로 따라잡습니다(Issue #48)
+- **소켓에 늦게 붙으면 완료 메시지를 놓칩니다.** 상태 조회 API 로 따라잡습니다
+- 서버 재시작으로 폴링이 끊긴 리포트는 상태 조회에서도 `PROCESSING` 으로 보입니다. stage 는
+  TTL 이 지나면 null 이 됩니다. 고아 정리 작업이 생기기 전까지는 이 상태로 남습니다
 - AI 서버는 단일 인스턴스라 재배포하면 task 가 사라집니다. 폴링이 `SESSION_NOT_FOUND`
   로 끝나 `FAILED` 가 되고, 사용자가 다시 요청하면 됩니다
 
@@ -128,7 +167,6 @@ WS   /ws/reports/{reportId}                  → progress · report · error
 | 기능 | 비고 |
 |---|---|
 | 리포트 조회 API | `report_data` 원본을 DTO 로 옮겨 내보냄 |
-| 상태 조회 API | Issue #48 |
 | 실패한 축만 재시도 (`/ai/sessions/{id}/report/retry`) | `PARTIAL` 전용. 만들지 팀 확인 필요 |
 | 회차 비교 (`/ai/reports/compare`) | 전체 회차의 `report_data` 를 함께 보냄 |
 

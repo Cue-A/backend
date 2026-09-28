@@ -333,10 +333,15 @@ public class InterviewAnswerPoller {
 
     private void pushError(String sessionId, BusinessException e) {
         ErrorCode errorCode = e.getErrorCode();
+        // error push 는 항상 최종 지점이다. 답변 처리의 STT/LLM 자동 재전송(1회)은 이미
+        // 소진됐거나(재시도 이후 실패) 대상이 아니므로, 여기서 Backend 가 추가 자동 재시도를
+        // 하지 않는다. 따라서 retryable=false 로 내보낸다. 사용자 다음 행동은 needsRerecord
+        // (STT 최종 실패 시 재녹음) 로 알린다. errorCode 자체(LLM_FAILED 등)로 retryable 을
+        // 정하지 않는다 — 그건 내부 재전송 판정용이다.
         socketHandler.push(sessionId, ErrorPushMessage.of(new ErrorPushMessage(
                 errorCode.name(),
                 e.getMessage(),
-                errorTranslator.isRetryable(errorCode),
+                false,
                 errorTranslator.needsRerecord(errorCode)
         )));
     }

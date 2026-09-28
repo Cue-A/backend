@@ -150,10 +150,15 @@ public class InterviewFirstQuestionPoller {
 
     private void pushError(String sessionId, BusinessException e) {
         ErrorCode errorCode = e.getErrorCode();
+        // 세션 시작 폴러의 error push 는 항상 cleanup + ABORTED 이후의 최종 오류다.
+        // 세션 시작 LLM_FAILED 는 AI 내부 1회 재시도까지 실패한 상태이고 Backend 는
+        // startSession 을 재전송하지 않는다. 즉 여기서 Backend 가 자동 재시도할 여지가
+        // 없으므로 retryable=false 로 내보낸다. errorCode(LLM_FAILED 등)로 retryable 을
+        // 정하지 않는다.
         socketHandler.push(sessionId, ErrorPushMessage.of(new ErrorPushMessage(
                 errorCode.name(),
                 e.getMessage(),
-                errorTranslator.isRetryable(errorCode),
+                false,
                 errorTranslator.needsRerecord(errorCode)
         )));
     }

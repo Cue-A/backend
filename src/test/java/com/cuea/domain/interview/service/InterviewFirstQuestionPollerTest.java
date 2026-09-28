@@ -136,6 +136,10 @@ class InterviewFirstQuestionPollerTest {
         assertThat(captor.getValue().type()).isEqualTo("error");
         ErrorPushMessage payload = (ErrorPushMessage) captor.getValue().payload();
         assertThat(payload.errorCode()).isEqualTo("LLM_FAILED");
+        // 세션 시작 LLM_FAILED 는 Backend 재시도 대상이 아니고 세션이 ABORTED 다.
+        // 최종 오류이므로 retryable=false.
+        assertThat(payload.retryable()).isFalse();
+        assertThat(payload.needsRerecord()).isFalse();
     }
 
     @Test
@@ -228,8 +232,9 @@ class InterviewFirstQuestionPollerTest {
         ErrorPushMessage payload = (ErrorPushMessage) captor.getValue().payload();
         assertThat(payload.errorCode()).isEqualTo("STT_FAILED");
         assertThat(payload.errorCode()).isNotEqualTo("AI_TIMEOUT");
-        // STT 실패는 재시도 가능하고 재녹음 안내가 필요하다.
-        assertThat(payload.retryable()).isTrue();
+        // error push 는 최종 지점이라 Backend 자동 재시도가 없다: retryable=false.
+        // 사용자 다음 행동은 needsRerecord(재녹음)로 알린다.
+        assertThat(payload.retryable()).isFalse();
         assertThat(payload.needsRerecord()).isTrue();
     }
 

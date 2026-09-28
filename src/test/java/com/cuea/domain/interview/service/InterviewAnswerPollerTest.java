@@ -296,6 +296,8 @@ class InterviewAnswerPollerTest {
         ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
         assertThat(payload.errorCode()).isEqualTo("STT_FAILED");
         assertThat(payload.needsRerecord()).isTrue();
+        // 자동 재전송(1회)을 이미 소진한 최종 오류다: retryable=false. 사용자 행동은 재녹음.
+        assertThat(payload.retryable()).isFalse();
         verify(sessionWriter, never()).saveNextQuestion(anyString(), any());
         verify(aiClient, never()).abortSession(anyString());
         verify(sessionWriter, never()).markAborted(anyString());
@@ -453,6 +455,9 @@ class InterviewAnswerPollerTest {
         verify(sessionWriter).markAborted(SESSION_ID);
         ErrorPushMessage payload = capturePush("error", ErrorPushMessage.class);
         assertThat(payload.errorCode()).isEqualTo("LLM_FAILED");
+        // 재전송(1회)에도 실패해 세션이 ABORTED 다. 최종 오류이므로 retryable=false.
+        assertThat(payload.retryable()).isFalse();
+        assertThat(payload.needsRerecord()).isFalse();
     }
 
     @Test

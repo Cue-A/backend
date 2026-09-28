@@ -44,6 +44,20 @@ class InterviewSessionWriterTest {
         questionRepository = mock(QuestionRepository.class);
         writer = new InterviewSessionWriter(sessionRepository, questionRepository);
         when(questionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        // 기본값: 세션이 존재하고 IN_PROGRESS. 저장/완료 전이는 IN_PROGRESS 일 때만
+        // 일어나므로(늦은 결과 무시, 리뷰 5/#25) 정상 경로 테스트는 이 세션을 씁니다.
+        // 종료 상태를 봐야 하는 테스트는 각자 다시 stub 합니다.
+        when(sessionRepository.findBySessionIdForInternal(SESSION_ID))
+                .thenReturn(Optional.of(inProgressSession()));
+    }
+
+    private InterviewSession inProgressSession() {
+        return InterviewSession.builder()
+                .sessionId(SESSION_ID).user(mock(User.class))
+                .document(mock(com.cuea.domain.document.entity.Document.class))
+                .mode("PRACTICE").jobRole("백엔드").questionCount(9)
+                .persona(Persona.FRIENDLY).hideQuestionText(false)
+                .status(SessionStatus.IN_PROGRESS).build();
     }
 
     private AiQuestionResult reaskResult() {
@@ -148,20 +162,32 @@ class InterviewSessionWriterTest {
     }
 
     @Test
-    void completeSession_은_세션을_COMPLETED_로_전이한다() {
-        InterviewSession session = InterviewSession.builder()
-                .sessionId(SESSION_ID).user(mock(User.class))
-                .document(mock(com.cuea.domain.document.entity.Document.class))
-                .mode("PRACTICE").jobRole("백엔드").questionCount(9)
-                .persona(Persona.FRIENDLY).hideQuestionText(false)
-                .status(SessionStatus.IN_PROGRESS).build();
+    void completeSession_은_세션을_COMPLETED_로_전이하고_true_를_반환한다() {
+        // 기본 stub(IN_PROGRESS 세션) 사용.
+        InterviewSession session = inProgressSession();
         when(sessionRepository.findBySessionIdForInternal(SESSION_ID))
                 .thenReturn(Optional.of(session));
 
-        writer.completeSession(SESSION_ID);
+        boolean transitioned = writer.completeSession(SESSION_ID);
 
+        assertThat(transitioned).isTrue();
         assertThat(session.getStatus()).isEqualTo(SessionStatus.COMPLETED);
         assertThat(session.getCompletedAt()).isNotNull();
+    }
+
+    @Test
+    void completeSession_은_이미_ABORTED_면_전이하지_않고_false_를_반환한다() {
+        // 사용자 abort 로 이미 ABORTED 인 세션에 늦게 session_end 가 와도 완료로 역전하지
+        // 않고, 호출부가 session_end push 를 건너뛸 수 있게 false 를 준다(리뷰 5, #25).
+        InterviewSession aborted = inProgressSession();
+        aborted.abort();
+        when(sessionRepository.findBySessionIdForInternal(SESSION_ID))
+                .thenReturn(Optional.of(aborted));
+
+        boolean transitioned = writer.completeSession(SESSION_ID);
+
+        assertThat(transitioned).isFalse();
+        assertThat(aborted.getStatus()).isEqualTo(SessionStatus.ABORTED);
     }
 
     @Test
@@ -182,5 +208,34 @@ class InterviewSessionWriterTest {
 
         verify(questionRepository).save(captor.capture());
         assertThat(captor.getValue().getQuestionId()).isEqualTo("q_2r");
+    }
+
+    @Test
+    void saveNextQuestion_은_세션이_이미_ABORTED_면_저장하지_않고_null_을_반환한다() {
+        // 사용자 abort 로 종료된 세션에 늦게 도착한 결과는 새 Question 을 만들지 않는다.
+        // 상태 확인과 저장이 같은 트랜잭션 안에 있어(리뷰 5, #25), null 을 돌려주면 호출부가
+        // push 도 건너뛴다.
+        InterviewSession aborted = inProgressSession();
+        aborted.abort();
+        when(sessionRepository.findBySessionIdForInternal(SESSION_ID))
+                .thenReturn(Optional.of(aborted));
+
+        Question saved = writer.saveNextQuestion(SESSION_ID, reaskResult());
+
+        assertThat(saved).isNull();
+        verify(questionRepository, never()).save(any());
+    }
+
+    @Test
+    void saveFirstQuestion_도_세션이_이미_ABORTED_면_저장하지_않고_null_을_반환한다() {
+        InterviewSession aborted = inProgressSession();
+        aborted.abort();
+        when(sessionRepository.findBySessionIdForInternal(SESSION_ID))
+                .thenReturn(Optional.of(aborted));
+
+        Question saved = writer.saveFirstQuestion(SESSION_ID, reaskResult());
+
+        assertThat(saved).isNull();
+        verify(questionRepository, never()).save(any());
     }
 }

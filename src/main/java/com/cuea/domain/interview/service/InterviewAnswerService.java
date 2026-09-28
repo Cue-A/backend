@@ -149,14 +149,58 @@ public class InterviewAnswerService {
         // (예: 종료 중 TaskRejectedException) AI task 는 이미 수락됐고 폴러가 시작조차 못
         // 해 세션이 영구 잔류합니다. 세션 시작(InterviewStartService)과 동일하게, AI
         // 세션을 abort 하고 우리 세션을 ABORTED 로 정리한 뒤 원본 예외를 다시 던집니다.
+        //
+        // aiRequest 를 함께 넘깁니다. LLM/STT 실패 시 폴러가 같은 요청을 1회 재전송하는데
+        // (Issue #25), presigned URL(녹음 1시간)이 폴링 타임아웃(60초)보다 훨씬 길어
+        // 같은 요청을 그대로 재사용해도 URL 이 유효합니다.
         try {
-            answerPoller.pollAndDeliver(sessionId, taskId);
+            answerPoller.pollAndDeliver(sessionId, taskId, aiRequest);
         } catch (RuntimeException e) {
             log.warn("답변 폴링 시작에 실패해 세션을 정리합니다 sessionId={}", sessionId, e);
             abortAiSessionQuietly(sessionId, e);
             markSessionAbortedQuietly(sessionId, e);
             throw e;
         }
+    }
+
+    /**
+     * 사용자가 진행 중인 면접을 중단합니다. (Issue #25)
+     *
+     * <p>소유자 기준으로 세션을 조회한 뒤, AI 세션을 중단하고 우리 세션을
+     * {@code ABORTED} 로 정리합니다. <b>AI 중단 호출이 실패해도 로컬 상태 정리는
+     * 반드시 수행</b>해, AI 서버가 죽었을 때 세션이 {@code IN_PROGRESS} 로 영구
+     * 잔류하지 않게 합니다.
+     *
+     * <ul>
+     *   <li>소유하지 않은/없는 세션 → {@code SESSION_NOT_FOUND}</li>
+     *   <li>이미 {@code ABORTED} → 멱등 no-op (AI·로컬 재정리 안 함)</li>
+     *   <li>{@code COMPLETED} → {@code SESSION_ENDED}. 완료된 세션을 중단으로
+     *       역전시키지 않습니다(상태 가드도 이를 막지만, 사용자에게 명확히 알립니다).</li>
+     * </ul>
+     */
+    public void abort(String userId, String sessionId) {
+        InterviewSession session = sessionRepository
+                .findBySessionIdAndUser_UserId(sessionId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND));
+
+        SessionStatus status = session.getStatus();
+        if (status == SessionStatus.ABORTED) {
+            // 이미 중단됨. 재중단은 멱등하게 아무 것도 하지 않는다.
+            return;
+        }
+        if (status != SessionStatus.IN_PROGRESS) {
+            // COMPLETED 등 종료된 세션은 중단으로 되돌리지 않는다.
+            throw new BusinessException(ErrorCode.SESSION_ENDED);
+        }
+
+        // AI 세션을 먼저 중단한다. 실패해도(예: AI 서버 다운) 로컬 정리는 이어서 수행한다.
+        try {
+            aiClient.abortSession(sessionId);
+        } catch (RuntimeException e) {
+            log.warn("사용자 abort 중 AI 세션 중단 실패 sessionId={}. 로컬 정리는 계속합니다.",
+                    sessionId, e);
+        }
+        sessionWriter.markAborted(sessionId);
     }
 
     /** AI 세션 중단을 시도하되, 실패해도 원인 예외({@code cause})를 덮지 않습니다. */

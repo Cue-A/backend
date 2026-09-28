@@ -270,7 +270,7 @@ class InterviewAnswerServiceTest {
                 QUESTION_ID, "sessions/sess_1/answers/q_1.webm", null, false));
 
         // 폴링/다음 질문 저장은 이 서비스가 직접 하지 않고 폴러에 위임한다.
-        verify(answerPoller).pollAndDeliver(SESSION_ID, "task_ans_1");
+        verify(answerPoller).pollAndDeliver(eq(SESSION_ID), eq("task_ans_1"), any());
         verify(sessionWriter, never()).saveNextQuestion(anyString(), any());
         verify(sessionWriter, never()).completeSession(anyString());
     }
@@ -288,7 +288,7 @@ class InterviewAnswerServiceTest {
         // task_id 미수신은 계약 위반. AI/Backend 상태 동기화 보장 불가라 세션 정리.
         verify(aiClient).abortSession(SESSION_ID);
         verify(sessionWriter).markAborted(SESSION_ID);
-        verify(answerPoller, never()).pollAndDeliver(anyString(), anyString());
+        verify(answerPoller, never()).pollAndDeliver(anyString(), anyString(), any());
     }
 
     @Test
@@ -304,7 +304,7 @@ class InterviewAnswerServiceTest {
                 .extracting("errorCode").isEqualTo(ErrorCode.SESSION_ENDED);
 
         verify(aiClient, never()).submitAnswer(anyString(), any());
-        verify(answerPoller, never()).pollAndDeliver(anyString(), anyString());
+        verify(answerPoller, never()).pollAndDeliver(anyString(), anyString(), any());
     }
 
     @Test
@@ -386,7 +386,7 @@ class InterviewAnswerServiceTest {
         service.submit(USER_ID, SESSION_ID, new AnswerSubmitRequest(
                 QUESTION_ID, "sessions/sess_1/answers/q_1.webm", null, false));
 
-        verify(answerPoller).pollAndDeliver(SESSION_ID, "task_ans_1");
+        verify(answerPoller).pollAndDeliver(eq(SESSION_ID), eq("task_ans_1"), any());
     }
 
     // ── C2: upload-urls questionId 소속 검증 ─────────────────────
@@ -457,7 +457,7 @@ class InterviewAnswerServiceTest {
         when(aiClient.submitAnswer(eq(SESSION_ID), any())).thenReturn("task_ans_1");
         // @Async 태스크 제출 자체가 거부되는(종료 중 등) 경우. AI task 는 이미 수락됐다.
         doThrow(new org.springframework.core.task.TaskRejectedException("executor shutting down"))
-                .when(answerPoller).pollAndDeliver(SESSION_ID, "task_ans_1");
+                .when(answerPoller).pollAndDeliver(eq(SESSION_ID), eq("task_ans_1"), any());
 
         assertThatThrownBy(() -> service.submit(USER_ID, SESSION_ID, new AnswerSubmitRequest(
                 QUESTION_ID, "sessions/sess_1/answers/q_1.webm", null, false)))
@@ -468,8 +468,79 @@ class InterviewAnswerServiceTest {
         verify(sessionWriter).markAborted(SESSION_ID);
     }
 
-    // ── C7: isTimeout 필수 (bean validation) ─────────────────────
+    // ── 사용자 면접 중단 (Issue #25) ─────────────────────────────
 
+    @Test
+    void 사용자_abort_는_AI세션을_중단하고_세션을_ABORTED_로_정리한다() {
+        // IN_PROGRESS 세션을 사용자가 중단. AI abort → 로컬 markAborted 순서로 정리한다.
+        service.abort(USER_ID, SESSION_ID);
+
+        var order = inOrder(aiClient, sessionWriter);
+        order.verify(aiClient).abortSession(SESSION_ID);
+        order.verify(sessionWriter).markAborted(SESSION_ID);
+    }
+
+    @Test
+    void 소유하지_않은_세션은_중단할_수_없다() {
+        when(sessionRepository.findBySessionIdAndUser_UserId(SESSION_ID, "other"))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.abort("other", SESSION_ID))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.SESSION_NOT_FOUND);
+
+        // 남의 세션이면 AI 도 로컬도 건드리지 않는다.
+        verify(aiClient, never()).abortSession(anyString());
+        verify(sessionWriter, never()).markAborted(anyString());
+    }
+
+    @Test
+    void 이미_ABORTED_인_세션의_abort_는_멱등이며_다시_정리하지_않는다() {
+        InterviewSession aborted = inProgressSession();
+        aborted.abort();
+        when(sessionRepository.findBySessionIdAndUser_UserId(SESSION_ID, USER_ID))
+                .thenReturn(Optional.of(aborted));
+
+        // 예외 없이 조용히 반환한다(멱등).
+        service.abort(USER_ID, SESSION_ID);
+
+        // 이미 중단된 세션은 AI abort 나 재정리를 하지 않는다.
+        verify(aiClient, never()).abortSession(anyString());
+        verify(sessionWriter, never()).markAborted(anyString());
+    }
+
+    @Test
+    void COMPLETED_세션은_ABORTED_로_역전시키지_않는다() {
+        InterviewSession completed = inProgressSession();
+        completed.complete();
+        when(sessionRepository.findBySessionIdAndUser_UserId(SESSION_ID, USER_ID))
+                .thenReturn(Optional.of(completed));
+
+        // 완료된 세션은 중단할 수 없다(SESSION_ENDED). 상태는 COMPLETED 로 유지.
+        assertThatThrownBy(() -> service.abort(USER_ID, SESSION_ID))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.SESSION_ENDED);
+
+        verify(aiClient, never()).abortSession(anyString());
+        verify(sessionWriter, never()).markAborted(anyString());
+        assertThat(completed.getStatus()).isEqualTo(SessionStatus.COMPLETED);
+    }
+
+    @Test
+    void AI_abort_가_실패해도_로컬_세션_정리는_수행한다() {
+        // AI 서버가 죽었어도(예: abort 호출이 예외) 우리 DB 세션은 ABORTED 로 정리해야
+        // 세션이 IN_PROGRESS 로 영구 잔류하지 않는다.
+        doThrow(new BusinessException(ErrorCode.AI_UNAVAILABLE))
+                .when(aiClient).abortSession(SESSION_ID);
+
+        service.abort(USER_ID, SESSION_ID);
+
+        verify(aiClient).abortSession(SESSION_ID);
+        // AI 실패와 무관하게 로컬 정리는 반드시 수행.
+        verify(sessionWriter).markAborted(SESSION_ID);
+    }
+
+    // ── C7: isTimeout 필수 (bean validation) ─────────────────────
     @Test
     void isTimeout_이_null_이면_bean_validation_이_거부한다() {
         // 컨트롤러의 @Valid 가 적용하는 것과 동일한 검증. JSON 에서 is_timeout 누락 시

@@ -125,6 +125,13 @@ public class InterviewFirstQuestionPoller {
     }
 
     private void pushFirstQuestion(String sessionId, Question question, Integer questionTotal) {
+        // 사용자 abort 등으로 세션이 이미 종료됐으면 saveFirstQuestion 이 저장하지 않고
+        // null 을 돌려줍니다(#25). 그 경우 첫 질문 push 도 하지 않고 조용히 무시합니다.
+        // (세션은 사용자 abort 로 이미 ABORTED 라 여기서 추가 정리·error push 는 하지 않습니다.)
+        if (question == null) {
+            log.info("이미 종료된 세션에 늦게 도착한 첫 질문이라 저장·push 하지 않습니다 sessionId={}", sessionId);
+            return;
+        }
         int delivered = socketHandler.push(sessionId, QuestionPushMessage.of(new QuestionPushMessage(
                 question.getQuestionId(),
                 question.getType().name(),
@@ -150,10 +157,15 @@ public class InterviewFirstQuestionPoller {
 
     private void pushError(String sessionId, BusinessException e) {
         ErrorCode errorCode = e.getErrorCode();
+        // 세션 시작 폴러의 error push 는 항상 cleanup + ABORTED 이후의 최종 오류다.
+        // 세션 시작 LLM_FAILED 는 AI 내부 1회 재시도까지 실패한 상태이고 Backend 는
+        // startSession 을 재전송하지 않는다. 즉 여기서 Backend 가 자동 재시도할 여지가
+        // 없으므로 retryable=false 로 내보낸다. errorCode(LLM_FAILED 등)로 retryable 을
+        // 정하지 않는다.
         socketHandler.push(sessionId, ErrorPushMessage.of(new ErrorPushMessage(
                 errorCode.name(),
                 e.getMessage(),
-                errorTranslator.isRetryable(errorCode),
+                false,
                 errorTranslator.needsRerecord(errorCode)
         )));
     }

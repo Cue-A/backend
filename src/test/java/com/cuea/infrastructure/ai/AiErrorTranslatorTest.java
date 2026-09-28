@@ -44,4 +44,44 @@ class AiErrorTranslatorTest {
         assertThat(translator.isRetryable("TTS_FAILED")).isFalse();
         assertThat(translator.isRetryable((String) null)).isFalse();
     }
+
+    // ── cleanup 정책 분류 (Issue #25) ────────────────────────────
+
+    @Test
+    void 세션_정리가_필요한_코드는_복구_불가_계열이다() {
+        // 세션을 ABORTED 로 내려야 하는(AI·Backend 상태 동기화 보장 불가) 코드들.
+        assertThat(translator.requiresSessionAbort(ErrorCode.SESSION_NOT_FOUND)).isTrue();
+        assertThat(translator.requiresSessionAbort(ErrorCode.RESUME_PARSE_FAILED)).isTrue();
+        assertThat(translator.requiresSessionAbort(ErrorCode.AI_TIMEOUT)).isTrue();
+        assertThat(translator.requiresSessionAbort(ErrorCode.AI_UNAVAILABLE)).isTrue();
+        assertThat(translator.requiresSessionAbort(ErrorCode.UNEXPECTED_AI_RESPONSE)).isTrue();
+    }
+
+    @Test
+    void 재시도_대상과_중복제출_클라이언트버그_는_세션_정리_대상이_아니다() {
+        // LLM/STT 는 재시도·재녹음 대상이라 세션을 유지한다.
+        assertThat(translator.requiresSessionAbort(ErrorCode.LLM_FAILED)).isFalse();
+        assertThat(translator.requiresSessionAbort(ErrorCode.STT_FAILED)).isFalse();
+        // TTS 는 텍스트로 진행하므로 실패가 아니다.
+        assertThat(translator.requiresSessionAbort(ErrorCode.TTS_FAILED)).isFalse();
+        // 중복 제출·클라이언트 버그는 세션을 abort 하지 않는다.
+        assertThat(translator.requiresSessionAbort(ErrorCode.SESSION_ENDED)).isFalse();
+        assertThat(translator.requiresSessionAbort(ErrorCode.INVALID_QUESTION_ID)).isFalse();
+        assertThat(translator.requiresSessionAbort(ErrorCode.INVALID_CATEGORY)).isFalse();
+    }
+
+    @Test
+    void SESSION_ENDED_는_중복_제출로_무시_대상이다() {
+        assertThat(translator.isDuplicateSubmit(ErrorCode.SESSION_ENDED)).isTrue();
+        assertThat(translator.isDuplicateSubmit(ErrorCode.SESSION_NOT_FOUND)).isFalse();
+        assertThat(translator.isDuplicateSubmit(ErrorCode.STT_FAILED)).isFalse();
+    }
+
+    @Test
+    void INVALID_QUESTION_ID_와_INVALID_CATEGORY_는_클라이언트_계약_오류다() {
+        assertThat(translator.isClientContractError(ErrorCode.INVALID_QUESTION_ID)).isTrue();
+        assertThat(translator.isClientContractError(ErrorCode.INVALID_CATEGORY)).isTrue();
+        assertThat(translator.isClientContractError(ErrorCode.STT_FAILED)).isFalse();
+        assertThat(translator.isClientContractError(ErrorCode.SESSION_NOT_FOUND)).isFalse();
+    }
 }

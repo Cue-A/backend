@@ -62,6 +62,51 @@ public class AiErrorTranslator {
         return "SESSION_NOT_FOUND".equals(aiErrorCode);
     }
 
+    /**
+     * {@link ErrorCode} 기준 세션 정리 필요 여부. (Issue #25)
+     *
+     * <p>AI 원본 문자열이 사라진 폴링 흐름에서 쓰는 오버로드입니다. AI·Backend 세션
+     * 상태 동기화를 보장할 수 없어 세션을 {@code ABORTED} 로 정리해야 하는 코드들:
+     * <ul>
+     *   <li>{@code SESSION_NOT_FOUND} — AI 쪽 세션이 사라짐(재배포 등). 복구 불가.</li>
+     *   <li>{@code RESUME_PARSE_FAILED} — 이력서를 읽지 못해 진행 불가.</li>
+     *   <li>{@code AI_TIMEOUT} / {@code AI_UNAVAILABLE} — 응답을 못 받아 상태 불명.</li>
+     *   <li>{@code UNEXPECTED_AI_RESPONSE} — 계약 위반 응답. 상태 동기화 보장 불가.</li>
+     * </ul>
+     *
+     * <p>재시도 대상({@code LLM_FAILED}·{@code STT_FAILED})·TTS·중복 제출
+     * ({@code SESSION_ENDED})·클라이언트 계약 오류({@code INVALID_QUESTION_ID}·
+     * {@code INVALID_CATEGORY})는 세션을 유지합니다.
+     */
+    public boolean requiresSessionAbort(ErrorCode errorCode) {
+        return errorCode == ErrorCode.SESSION_NOT_FOUND
+                || errorCode == ErrorCode.RESUME_PARSE_FAILED
+                || errorCode == ErrorCode.AI_TIMEOUT
+                || errorCode == ErrorCode.AI_UNAVAILABLE
+                || errorCode == ErrorCode.UNEXPECTED_AI_RESPONSE;
+    }
+
+    /**
+     * 중복 제출로 간주해 <b>무시</b>할 코드. (Issue #25)
+     *
+     * <p>{@code SESSION_ENDED} 는 AI 가 이미 종료된 세션에 답변이 또 들어온 상황입니다.
+     * 계약상 중복 제출이므로 세션을 abort 하거나 error 를 push 하지 않고 로그만 남깁니다.
+     */
+    public boolean isDuplicateSubmit(ErrorCode errorCode) {
+        return errorCode == ErrorCode.SESSION_ENDED;
+    }
+
+    /**
+     * 클라이언트·조립 버그 계열. (Issue #25)
+     *
+     * <p>{@code INVALID_QUESTION_ID}(클라이언트 버그)·{@code INVALID_CATEGORY}(재연습
+     * 조립 버그)는 세션을 abort 하지 않고, 경고 로그를 남긴 뒤 오류만 전달합니다.
+     */
+    public boolean isClientContractError(ErrorCode errorCode) {
+        return errorCode == ErrorCode.INVALID_QUESTION_ID
+                || errorCode == ErrorCode.INVALID_CATEGORY;
+    }
+
     public ErrorCode toErrorCode(String aiErrorCode) {
         if (aiErrorCode == null) {
             return ErrorCode.AI_UNAVAILABLE;

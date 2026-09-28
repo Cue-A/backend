@@ -37,9 +37,14 @@ URL 발급 → 답변 제출 → AI 폴링(최대 60초) → 다음 질문·꼬�
 처리 → DB 반영 → WebSocket push 가 동작합니다. 2~4 단계(세션 시작·첫 질문 수신)는
 Issue #23 에서 구현했습니다.
 
+> **Issue #25 에서 구현했습니다:** 사용자 세션 abort API
+> (`POST /api/interviews/{sessionId}/abort`), 세션 상태 역전 방지(IN_PROGRESS 에서만
+> COMPLETED·ABORTED 로 전이), AI error_code 별 재시도·정리 정책. 상세 AI 계약 문서
+> 정합화는 Issue #42 에서 정리합니다.
+>
 > 아직 구현하지 않은 것(후속): 동일 질문 중복 제출 방지·in-flight idempotency,
-> AI error_code 별 재시도 정책, 사용자 세션 abort API 는 Issue #25 범위입니다.
-> WebSocket 핸드셰이크 인증·연결 전 push 유실은 Issue #3 범위입니다.
+> 세션 시작 `LLM_FAILED` 의 session_id 유지 재시도(현재는 AI 내부 재시도 실패 시
+> 바로 정리). WebSocket 핸드셰이크 인증·연결 전 push 유실은 Issue #3/#35 범위입니다.
 
 ---
 

@@ -112,7 +112,10 @@ public class AuthService {
                 String nickname = info.nickname() != null
                         ? info.nickname()
                         : User.fallbackNickname(UUID.randomUUID().toString());
-                user = User.create(info.linkable() ? info.email() : null, nickname);
+                // alreadyLinkedToOtherKakao 면 info.email() 은 이미 byEmail 계정이 쓰고
+                // 있어서, 그대로 넣으면 users.email unique 위반으로 500 이 납니다.
+                boolean canLinkEmail = info.linkable() && !alreadyLinkedToOtherKakao;
+                user = User.create(canLinkEmail ? info.email() : null, nickname);
                 isNewUser = true;
             }
             user.link(Provider.KAKAO, info.providerId(), null);

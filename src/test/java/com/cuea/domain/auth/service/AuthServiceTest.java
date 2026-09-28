@@ -179,6 +179,8 @@ class AuthServiceTest {
      * 카카오 이메일은 나중에 바뀔 수 있어, "검증된 이메일이 같은 기존 계정"이 사실은
      * 이미 다른 카카오 계정과 연결돼 있을 수 있습니다. 그대로 연결하면
      * uk_user_auth_user_provider 위반으로 500이 나므로 새 계정을 만들어야 합니다.
+     * 이때 새 계정에 그 이메일을 그대로 넣으면 이번엔 users.email unique 위반으로
+     * 500이 나므로, 새 계정의 email은 비워야 합니다.
      */
     @Test
     void 이메일이_같아도_이미_다른_카카오_계정과_연결됐으면_새로_만든다() {
@@ -195,6 +197,7 @@ class AuthServiceTest {
         TokenResponse response = authService.loginWithKakao(new KakaoLoginRequest("code", "redirect"));
 
         assertThat(response.isNewUser()).isTrue();
+        assertThat(response.user().email()).isNull();
         verify(userRepository, org.mockito.Mockito.never()).save(existing);
         verify(userRepository).save(org.mockito.ArgumentMatchers.argThat(u -> u != existing));
     }

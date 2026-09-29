@@ -87,6 +87,21 @@ class ReportStatusServiceTest {
         assertThat(response.progress()).isNull();
     }
 
+    @Test
+    void PARTIAL_에도_남은_진행_단계가_붙지_않는다() {
+        givenReport(report(ReportStatus.PARTIAL, null));
+        progressStore.save(PUBLIC_ID.toString(),
+                new ReportProgress(ReportProgressStage.COMPOSING, 0.9), null);
+
+        ReportStatusResponse response = service.getStatus(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.status()).isEqualTo(ReportStatus.PARTIAL);
+        assertThat(response.stage()).isNull();
+        assertThat(response.progress()).isNull();
+        assertThat(response.errorCode()).isNull();
+        assertThat(response.retryable()).isNull();
+    }
+
     /** FAILED 도 끝난 상태라 진행 단계가 남아 있어도 비웁니다. */
     @Test
     void 실패한_리포트에도_남은_진행_단계가_붙지_않는다() {

@@ -63,8 +63,10 @@ public class ReportController {
                     FAILED 면 errorCode · retryable 이 들어갑니다.
                     COMPLETED · PARTIAL 이면 리포트 조회로 넘어가면 됩니다.
 
-                    본인 리포트가 아니거나 없으면 404 REPORT_NOT_FOUND 입니다.""")
+                    본인 리포트가 아니거나 없으면 404 REPORT_NOT_FOUND 입니다.
+                    폴링하지 않도록 분당 30회로 제한합니다.""")
     @GetMapping("/reports/{reportId}/status")
+    @RateLimit(key = "report-status", limit = 30, windowSeconds = 60)
     public Result<ReportStatusResponse> status(@CurrentUser String userId,
                                                @PathVariable String reportId) {
         return Result.ok(reportStatusService.getStatus(userId, reportId));

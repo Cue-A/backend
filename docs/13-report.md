@@ -37,7 +37,7 @@ DB 에는 0~100 점수만 컬럼으로 꺼내고, 나머지는 원본(`report_da
 ```
 POST /api/interviews/{sessionId}/reports     → 202 { reportId, sessionId, status, createdAt }
 WS   /ws/reports/{reportId}                  → progress · report · error
-GET  /api/reports/{reportId}/status          → { reportId, status, stage, progress, errorCode, retryable }
+GET  /api/reports/{reportId}/status          → { reportId, sessionId, status, stage, progress, errorCode, retryable, createdAt, completedAt }
 ```
 
 ### 동기 구간 (HTTP 요청 스레드, 1초 이내)
@@ -135,8 +135,9 @@ WS 메시지는 붙어 있는 연결에만 갑니다. 소켓에 늦게 붙거나
 되돌아가 오지 않을 메시지를 기다리게 됩니다.
 
 ```json
-{ "reportId": "...", "status": "PROCESSING", "stage": "ANALYZING_CONTENT", "progress": 0.6,
-  "errorCode": null, "retryable": null }
+{ "reportId": "...", "sessionId": "sess_...", "status": "PROCESSING",
+  "stage": "ANALYZING_CONTENT", "progress": 0.6, "errorCode": null, "retryable": null,
+  "createdAt": "2026-09-23T12:34:56Z", "completedAt": null }
 ```
 
 | status | stage · progress | errorCode · retryable |
@@ -145,6 +146,14 @@ WS 메시지는 붙어 있는 연결에만 갑니다. 소켓에 늦게 붙거나
 | `COMPLETED` · `PARTIAL` | null | null |
 | `FAILED` | null | DB `error_code`, `retryable` 은 WS `error` 와 같은 규칙 |
 
+- `sessionId` 는 FAILED 재요청(`POST /api/interviews/{sessionId}/reports`)에 씁니다. 새로고침으로
+  들어온 프론트는 reportId 만 알 수 있습니다
+- `createdAt` 은 최초 요청 시각이라 재요청해도 바뀌지 않습니다. `completedAt` 은 끝난 시각(완료 또는
+  실패)이고 재요청하면 null 로 돌아갑니다
+- `progress` 는 명세에 없지만 WS `progress` 와 같은 값이라 함께 내려줍니다
+- 점수와 리포트 본문은 내려주지 않습니다. 가벼운 조회용이고 본문은 상세 조회 API 몫입니다
+- 명세의 `report.stage` 컬럼 대신 Redis 에 둡니다. 단계마다 행을 갱신할 이유가 없고 끝나면 쓸모없는
+  값입니다. 끝난 리포트(COMPLETED · PARTIAL · FAILED)는 Redis 값이 남아 있어도 stage 가 null 입니다
 - 본인 리포트만. 없는 것 · 남의 것 · UUID 가 아닌 값 모두 404 `REPORT_NOT_FOUND`
 - 폴링용이 아니라 분당 30회로 제한합니다(`@RateLimit`)
 - **상태는 DB 기준**입니다. stage · progress 만 Redis `report:progress:{reportId}` 에서 붙입니다

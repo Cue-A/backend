@@ -2,6 +2,7 @@ package com.cuea.domain.report.service;
 
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
+import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.report.dto.response.ReportStatusResponse;
 import com.cuea.domain.report.entity.Report;
 import com.cuea.domain.report.entity.ReportStatus;
@@ -11,6 +12,7 @@ import com.cuea.infrastructure.websocket.message.ReportProgressStage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.time.OffsetDateTime;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -30,6 +32,9 @@ class ReportStatusServiceTest {
 
     private static final String USER_ID = "user-1";
     private static final UUID PUBLIC_ID = UUID.randomUUID();
+    private static final String SESSION_ID = "sess_01";
+    private static final OffsetDateTime CREATED_AT = OffsetDateTime.parse("2026-09-23T12:34:56Z");
+    private static final OffsetDateTime COMPLETED_AT = OffsetDateTime.parse("2026-09-23T12:40:00Z");
 
     private ReportRepository reportRepository;
     private FakeReportProgressStore progressStore;
@@ -80,6 +85,42 @@ class ReportStatusServiceTest {
         assertThat(response.status()).isEqualTo(ReportStatus.COMPLETED);
         assertThat(response.stage()).isNull();
         assertThat(response.progress()).isNull();
+    }
+
+    /** FAILED 도 끝난 상태라 진행 단계가 남아 있어도 비웁니다. */
+    @Test
+    void 실패한_리포트에도_남은_진행_단계가_붙지_않는다() {
+        givenReport(report(ReportStatus.FAILED, "AI_TIMEOUT"));
+        progressStore.save(PUBLIC_ID.toString(),
+                new ReportProgress(ReportProgressStage.ANALYZING_GAZE, 0.4), null);
+
+        ReportStatusResponse response = service.getStatus(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.stage()).isNull();
+        assertThat(response.progress()).isNull();
+    }
+
+    /** 새로고침으로 들어온 프론트가 FAILED 재요청 경로를 만들 수 있어야 합니다. */
+    @Test
+    void sessionId_와_요청_시각을_준다() {
+        givenReport(report(ReportStatus.PROCESSING, null));
+
+        ReportStatusResponse response = service.getStatus(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.sessionId()).isEqualTo(SESSION_ID);
+        assertThat(response.createdAt()).isEqualTo(CREATED_AT);
+        assertThat(response.completedAt()).isNull();
+    }
+
+    @Test
+    void 끝난_리포트는_completedAt_을_준다() {
+        givenReport(report(ReportStatus.PARTIAL, null, COMPLETED_AT));
+
+        ReportStatusResponse response = service.getStatus(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.status()).isEqualTo(ReportStatus.PARTIAL);
+        assertThat(response.createdAt()).isEqualTo(CREATED_AT);
+        assertThat(response.completedAt()).isEqualTo(COMPLETED_AT);
     }
 
     @Test
@@ -150,7 +191,13 @@ class ReportStatusServiceTest {
     }
 
     private Report report(ReportStatus status, String errorCode) {
-        return Report.builder().reportId(10L).publicId(PUBLIC_ID)
-                .status(status).attempt(1).errorCode(errorCode).build();
+        return report(status, errorCode, status == ReportStatus.PROCESSING ? null : COMPLETED_AT);
+    }
+
+    private Report report(ReportStatus status, String errorCode, OffsetDateTime completedAt) {
+        InterviewSession session = InterviewSession.builder().sessionId(SESSION_ID).build();
+        return Report.builder().reportId(10L).publicId(PUBLIC_ID).session(session)
+                .status(status).attempt(1).errorCode(errorCode)
+                .createdAt(CREATED_AT).completedAt(completedAt).build();
     }
 }

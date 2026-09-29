@@ -4,9 +4,9 @@ import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.report.dto.response.ReportStatusResponse;
 import com.cuea.domain.report.entity.Report;
-import com.cuea.domain.report.entity.ReportStatus;
 import com.cuea.domain.report.repository.ReportRepository;
 import com.cuea.domain.report.service.ReportProgressStore.ReportProgress;
+import com.cuea.infrastructure.websocket.message.ReportProgressStage;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 
@@ -20,7 +20,10 @@ import java.util.UUID;
  * 메시지를 놓칩니다. 프론트는 소켓 연결 직후 이걸 한 번 불러 상태를 맞춥니다.
  *
  * <p>상태는 DB 기준이고, PROCESSING 일 때만 {@link ReportProgressStore} 에서 마지막 단계를
- * 붙입니다. 끝난 리포트에 지우지 못한 진행 단계가 남아 있어도 새지 않습니다.
+ * 붙입니다. 끝난 리포트에 지우지 못한 진행 단계가 남아 있어도 새지 않습니다. 분석이
+ * 끝나면(COMPLETED · PARTIAL · FAILED) stage · progress 는 항상 null 입니다.
+ *
+ * <p>점수와 본문은 내려주지 않습니다. 상세 조회 API 몫입니다.
  *
  * <p>조회 한 번이라 트랜잭션을 걸지 않습니다. 지연 로딩 연관을 건드리지 않고, Redis 조회
  * 동안 DB 커넥션을 붙들 이유가 없습니다.
@@ -39,22 +42,30 @@ public class ReportStatusService {
         // UUID.fromString 은 대문자·축약형도 받으므로 응답과 Redis 키는 저장된 값으로 씁니다.
         String publicId = report.getPublicId().toString();
         return switch (report.getStatus()) {
-            case PROCESSING -> processing(publicId);
-            case COMPLETED, PARTIAL -> new ReportStatusResponse(
-                    publicId, report.getStatus(), null, null, null, null);
-            case FAILED -> new ReportStatusResponse(
-                    publicId, report.getStatus(), null, null, report.getErrorCode(),
+            case PROCESSING -> {
+                Optional<ReportProgress> progress = progressStore.find(publicId);
+                yield response(report, publicId,
+                        progress.map(ReportProgress::stage).orElse(null),
+                        progress.map(ReportProgress::progress).orElse(null),
+                        null, null);
+            }
+            case COMPLETED, PARTIAL -> response(report, publicId, null, null, null, null);
+            case FAILED -> response(report, publicId, null, null, report.getErrorCode(),
                     ReportFailurePolicy.isUserRetryable(report.getErrorCode()));
         };
     }
 
-    private ReportStatusResponse processing(String publicId) {
-        Optional<ReportProgress> progress = progressStore.find(publicId);
+    /**
+     * {@code getSession().getSessionId()} 는 지연 로딩 프록시의 식별자라 세션을 읽지 않습니다.
+     * 트랜잭션 밖이어도 괜찮습니다.
+     */
+    private ReportStatusResponse response(Report report, String publicId,
+                                          ReportProgressStage stage, Double progress,
+                                          String errorCode, Boolean retryable) {
         return new ReportStatusResponse(
-                publicId, ReportStatus.PROCESSING,
-                progress.map(ReportProgress::stage).orElse(null),
-                progress.map(ReportProgress::progress).orElse(null),
-                null, null);
+                publicId, report.getSession().getSessionId(), report.getStatus(),
+                stage, progress, errorCode, retryable,
+                report.getCreatedAt(), report.getCompletedAt());
     }
 
     /** UUID 가 아닌 값도 없는 리포트와 같은 404 입니다. 400 으로 구별해 줄 이유가 없습니다. */

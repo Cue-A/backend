@@ -20,6 +20,7 @@ import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
+import org.mockito.invocation.InvocationOnMock;
 
 import java.time.Duration;
 import java.util.List;
@@ -30,6 +31,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doAnswer;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.times;
@@ -205,8 +207,11 @@ class ReportPollerTest {
 
     @Test
     void 완료되면_남긴_진행_단계를_지운다() throws Exception {
-        progressStore.save(PUBLIC_ID.toString(), new ReportProgress(ReportProgressStage.COMPOSING, 0.9), null);
-        givenPollResults(done("complete", 68, null));
+        AiReportTaskStatusResponse done = done("complete", 68, null);
+        when(aiPoller.await(anyString(), any(), any(), any())).thenAnswer(invocation -> {
+            progress(invocation, "composing", 0.8);
+            return done;
+        });
         when(reportWriter.finish(eq(REPORT_ID), any())).thenReturn(finished(ReportStatus.COMPLETED, 68));
 
         poller.onRequested(event());
@@ -214,15 +219,69 @@ class ReportPollerTest {
         assertThat(progressStore.find(PUBLIC_ID.toString())).isEmpty();
     }
 
+    /**
+     * FAILED 가 커밋된 직후 재요청이 들어와 새 폴러가 진행 단계를 남길 수 있습니다.
+     * 이전 폴러가 그 뒤에 지우면 새 단계가 사라지므로, DB 쓰기 전에 지워야 합니다.
+     */
     @Test
-    void 실패해도_남긴_진행_단계를_지운다() {
-        progressStore.save(PUBLIC_ID.toString(), new ReportProgress(ReportProgressStage.TRANSCRIBING, 0.1), null);
-        when(aiPoller.await(anyString(), any(), any(), any()))
-                .thenThrow(new BusinessException(ErrorCode.STT_FAILED));
+    void 실패하면_FAILED_를_쓰기_전에_진행_단계를_지운다() {
+        when(aiPoller.await(anyString(), any(), any(), any())).thenAnswer(invocation -> {
+            progress(invocation, "transcribing", 0.1);
+            throw new BusinessException(ErrorCode.STT_FAILED);
+        });
+        doAnswer(invocation -> {
+            assertThat(progressStore.find(PUBLIC_ID.toString())).isEmpty();
+            return null;
+        }).when(reportWriter).fail(REPORT_ID, ErrorCode.STT_FAILED);
 
         poller.onRequested(event());
 
+        verify(reportWriter).fail(REPORT_ID, ErrorCode.STT_FAILED);
         assertThat(progressStore.find(PUBLIC_ID.toString())).isEmpty();
+    }
+
+    /** 재요청은 같은 reportId 라 키가 같습니다. 이전 시도에서 못 지운 값이 새 시도에 보이면 안 됩니다. */
+    @Test
+    void 시작할_때_이전_시도의_진행_단계를_지운다() throws Exception {
+        progressStore.save(PUBLIC_ID.toString(), new ReportProgress(ReportProgressStage.COMPOSING, 0.9), null);
+        AiReportTaskStatusResponse done = done("complete", 68, null);
+        when(aiPoller.await(anyString(), any(), any(), any())).thenAnswer(invocation -> {
+            assertThat(progressStore.find(PUBLIC_ID.toString())).isEmpty();
+            return done;
+        });
+        when(reportWriter.finish(eq(REPORT_ID), any())).thenReturn(finished(ReportStatus.COMPLETED, 68));
+
+        poller.onRequested(event());
+
+        verify(reportWriter).finish(eq(REPORT_ID), any());
+    }
+
+    /** 자동 재시도는 새 task 가 transcribing 부터 다시 돕니다. 첫 시도의 composing 이 남으면 안 됩니다. */
+    @Test
+    void 자동_재시도하면_첫_시도의_진행_단계를_지운다() throws Exception {
+        AiReportTaskStatusResponse done = done("complete", 75, null);
+        when(aiPoller.await(anyString(), any(), any(), any()))
+                .thenAnswer(invocation -> {
+                    progress(invocation, "composing", 0.8);
+                    throw new BusinessException(ErrorCode.CONTENT_FAILED);
+                })
+                .thenAnswer(invocation -> {
+                    assertThat(progressStore.find(PUBLIC_ID.toString())).isEmpty();
+                    return done;
+                });
+        when(aiClient.requestReport(eq(SESSION_ID), anyString(), any())).thenReturn("task_r2");
+        when(reportWriter.finish(eq(REPORT_ID), any())).thenReturn(finished(ReportStatus.COMPLETED, 75));
+
+        poller.onRequested(event());
+
+        verify(reportWriter).finish(eq(REPORT_ID), any());
+        verify(reportWriter, never()).fail(any(), any());
+    }
+
+    /** aiPoller 가 단계가 바뀔 때 부르는 콜백을 흉내 냅니다. */
+    private void progress(InvocationOnMock invocation, String stage, double progress) {
+        Consumer<AiReportTaskStatusResponse> onStageChange = invocation.getArgument(3);
+        onStageChange.accept(new AiReportTaskStatusResponse("processing", stage, progress, null, null, null));
     }
 
     private void givenPollResults(AiReportTaskStatusResponse response) {

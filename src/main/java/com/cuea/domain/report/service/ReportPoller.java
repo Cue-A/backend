@@ -40,7 +40,12 @@ import org.springframework.transaction.event.TransactionalEventListener;
  *
  * <h2>진행 단계 저장</h2>
  * WebSocket 으로 보내는 progress 를 {@link ReportProgressStore} 에도 남깁니다. 소켓에 늦게
- * 붙은 프론트가 상태 조회 API 로 마지막 단계를 알 수 있게 하려는 것입니다. 끝나면 지웁니다.
+ * 붙은 프론트가 상태 조회 API 로 마지막 단계를 알 수 있게 하려는 것입니다.
+ *
+ * <p>시도가 시작될 때마다 지웁니다. 재요청은 같은 reportId(같은 키)를 쓰고, 자동 재시도는
+ * 새 task 가 처음부터 돌기 때문에 지우지 않으면 이전 시도의 마지막 단계가 보입니다.
+ * 끝날 때는 <b>DB 에 결과를 쓰기 전에</b> 지웁니다. FAILED 가 커밋된 뒤 바로 들어온
+ * 재요청의 진행 단계를 이 스레드가 늦게 지우지 않게 하려는 것입니다.
  */
 @Slf4j
 @Component
@@ -62,6 +67,7 @@ public class ReportPoller {
         String taskId = event.aiTaskId();
         int attempt = event.attempt();
         boolean retried = false;
+        progressStore.delete(reportId);
 
         while (true) {
             try {
@@ -81,6 +87,7 @@ public class ReportPoller {
                         event.sessionId(), e.getErrorCode(), attempt);
                 try {
                     taskId = requestAgain(event, attempt);
+                    progressStore.delete(reportId);
                 } catch (BusinessException retryError) {
                     fail(event, retryError);
                     return;
@@ -104,8 +111,8 @@ public class ReportPoller {
     }
 
     private void finish(ReportRequestedEvent event, ReportResult result) {
-        Report report = reportWriter.finish(event.reportId(), result);
         progressStore.delete(event.reportPublicId().toString());
+        Report report = reportWriter.finish(event.reportId(), result);
         log.info("리포트 생성 완료 sessionId={} status={}", event.sessionId(), report.getStatus());
         int delivered = socketHandler.push(event.reportPublicId().toString(), ReportPushMessage.of(
                 new ReportPushMessage(event.reportPublicId().toString(),
@@ -123,12 +130,14 @@ public class ReportPoller {
     private void fail(ReportRequestedEvent event, BusinessException cause) {
         ErrorCode errorCode = cause.getErrorCode();
         log.warn("리포트 생성 실패 sessionId={} errorCode={}", event.sessionId(), errorCode);
+        progressStore.delete(event.reportPublicId().toString());
         try {
             reportWriter.fail(event.reportId(), errorCode);
         } catch (RuntimeException e) {
+            // 행이 PROCESSING 으로 남습니다. 상태 조회도 PROCESSING 이라 답하며, 고아 정리
+            // 작업이 생기기 전까지 풀리지 않습니다. docs/13-report.md 의 알아둘 제약 참고.
             log.error("리포트 FAILED 처리 실패 reportId={}", event.reportId(), e);
         }
-        progressStore.delete(event.reportPublicId().toString());
         socketHandler.push(event.reportPublicId().toString(), ReportErrorPushMessage.of(
                 new ReportErrorPushMessage(errorCode.name(), cause.getMessage(),
                         ReportFailurePolicy.isUserRetryable(errorCode))));

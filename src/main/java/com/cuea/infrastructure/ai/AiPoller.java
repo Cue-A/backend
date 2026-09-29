@@ -2,6 +2,7 @@ package com.cuea.infrastructure.ai;
 
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
+import com.cuea.infrastructure.ai.dto.AiTaskStatus;
 import com.cuea.infrastructure.ai.dto.AiTaskStatusResponse;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -10,14 +11,16 @@ import org.springframework.stereotype.Component;
 import java.time.Duration;
 import java.time.Instant;
 import java.util.function.Consumer;
+import java.util.function.Function;
 
 /**
  * task_id 를 1초 간격으로 물어보고 결과가 나올 때까지 기다립니다.
  *
- * <p>작업 종류를 모르게 설계했습니다. 리포트 계약이 도착하면 그대로 재사용합니다.
- * docs/13-report.md 참고.
+ * <p>작업 종류를 모르게 설계했습니다. 질문 생성과 리포트 생성이 같은 경로로 폴링하되
+ * 결과 모양이 달라서, 조회 함수를 받아 {@link AiTaskStatus} 로만 종료를 판단합니다.
  *
- * <p><b>트랜잭션 안에서 호출하지 마세요.</b> 최대 90초 동안 DB 커넥션을 붙듭니다.
+ * <p><b>트랜잭션 안에서 호출하지 마세요.</b> 최대 대기 시간(질문 90초, 리포트 10분)
+ * 동안 DB 커넥션을 붙듭니다.
  * 가상 스레드가 켜져 있으므로 블로킹으로 기다려도 됩니다.
  */
 @Slf4j
@@ -30,18 +33,40 @@ public class AiPoller {
     private final AiErrorTranslator errorTranslator;
 
     /**
+     * 질문 생성 작업을 기다립니다.
+     *
      * @param onProgress 폴링 중 stage 가 바뀔 때마다 호출됩니다. WebSocket push 용.
      * @throws BusinessException 타임아웃({@code AI_TIMEOUT})이거나 AI 가 실패를 알려준 경우
      */
     public AiTaskStatusResponse await(String taskId,
                                       Duration timeout,
                                       Consumer<String> onProgress) {
+        return await(taskId, timeout, aiClient::getTask,
+                onProgress == null ? null : status -> onProgress.accept(status.stage()));
+    }
+
+    public AiTaskStatusResponse await(String taskId, Duration timeout) {
+        return await(taskId, timeout, (Consumer<String>) null);
+    }
+
+    /**
+     * 결과 타입과 무관하게 작업을 기다립니다.
+     *
+     * @param fetcher      task 한 번 조회. 예: {@code aiClient::getReportTask}
+     * @param onStageChange stage 가 바뀔 때마다 그 시점의 응답을 받습니다. stage 외 값
+     *                      (리포트의 {@code progress} 등)도 함께 쓰려고 응답 전체를 넘깁니다
+     * @throws BusinessException 타임아웃({@code AI_TIMEOUT})이거나 AI 가 실패를 알려준 경우
+     */
+    public <T extends AiTaskStatus> T await(String taskId,
+                                            Duration timeout,
+                                            Function<String, T> fetcher,
+                                            Consumer<T> onStageChange) {
         Instant startedAt = Instant.now();
         Instant deadline = startedAt.plus(timeout);
         String lastStage = null;
 
         while (Instant.now().isBefore(deadline)) {
-            AiTaskStatusResponse status = aiClient.getTask(taskId);
+            T status = fetcher.apply(taskId);
 
             if (status.isDone()) {
                 log.info("AI 작업 완료 taskId={} elapsedMs={}",
@@ -55,9 +80,9 @@ public class AiPoller {
                 throw errorTranslator.toException(status.errorCode(), status.message());
             }
 
-            if (onProgress != null && status.stage() != null && !status.stage().equals(lastStage)) {
+            if (onStageChange != null && status.stage() != null && !status.stage().equals(lastStage)) {
                 lastStage = status.stage();
-                onProgress.accept(lastStage);
+                onStageChange.accept(status);
             }
 
             sleep(properties.pollInterval());
@@ -65,10 +90,6 @@ public class AiPoller {
 
         log.error("AI 작업 타임아웃 taskId={} timeoutMs={}", taskId, timeout.toMillis());
         throw new BusinessException(ErrorCode.AI_TIMEOUT);
-    }
-
-    public AiTaskStatusResponse await(String taskId, Duration timeout) {
-        return await(taskId, timeout, null);
     }
 
     private void sleep(Duration interval) {

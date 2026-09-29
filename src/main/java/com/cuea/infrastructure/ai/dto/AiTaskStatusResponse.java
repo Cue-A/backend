@@ -1,7 +1,7 @@
 package com.cuea.infrastructure.ai.dto;
 
 /**
- * GET /ai/tasks/{taskId}
+ * GET /ai/tasks/{taskId} — 질문 생성 작업. 리포트 작업은 {@link AiReportTaskStatusResponse}.
  *
  * @param status processing | done | error — 최신 AI 계약의 실패 상태는 {@code error} 입니다.
  *               레거시/mock 호환을 위해 {@code failed} 도 실패로 인식합니다.
@@ -15,20 +15,5 @@ public record AiTaskStatusResponse(
         AiQuestionResult result,
         String errorCode,
         String message
-) {
-
-    public static final String STATUS_PROCESSING = "processing";
-    public static final String STATUS_DONE = "done";
-    /** 최신 계약의 실패 상태. */
-    public static final String STATUS_ERROR = "error";
-    /** 레거시/mock 호환용 실패 상태. */
-    public static final String STATUS_FAILED = "failed";
-
-    public boolean isDone() {
-        return STATUS_DONE.equals(status);
-    }
-
-    public boolean isFailed() {
-        return STATUS_ERROR.equals(status) || STATUS_FAILED.equals(status);
-    }
+) implements AiTaskStatus {
 }

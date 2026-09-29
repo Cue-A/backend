@@ -61,9 +61,18 @@ public enum ErrorCode {
     // AI 서버 errorCode 가 아니라, AI 응답이 계약과 다를 때 Backend 가 내는 코드입니다.
     // 예: 첫 질문 자리에 session_end / 알 수 없는 type 이 온 경우.
     UNEXPECTED_AI_RESPONSE(HttpStatus.BAD_GATEWAY, "AI 응답을 해석할 수 없습니다"),
+    // 리포트 계약의 AI 코드입니다. 이름이 AI error_code 와 같아야 AiErrorTranslator 가
+    // 옮길 수 있고, 없으면 AI_UNAVAILABLE 로 뭉개져 재시도 분기를 탈 수 없습니다.
+    CONTENT_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "답변 내용 분석에 실패했습니다"),
+    MEDIA_FETCH_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "답변 녹음을 가져오지 못했습니다"),
+    // AI 는 400 으로 주지만 원인은 Backend 의 answers[] 조립 버그라 사용자에게는 서버 오류입니다.
+    INVALID_ANSWERS(HttpStatus.INTERNAL_SERVER_ERROR, "분석 요청을 만들지 못했습니다"),
 
     // ── 리포트 ──────────────────────────────────────────────
-    // 계약 도착 전이라 아직 채우지 않았습니다. docs/13-report.md 참고.
+    SESSION_NOT_COMPLETED(HttpStatus.CONFLICT, "아직 진행 중인 세션입니다"),
+    REPORT_ALREADY_EXISTS(HttpStatus.CONFLICT, "이미 분석을 요청한 세션입니다"),
+    // AI 계약 코드와 같은 이름입니다. 되묻기를 뺀 답변이 2문항 미만이면 AI 가 422 로 거절합니다.
+    REPORT_TOO_SHORT(HttpStatus.UNPROCESSABLE_ENTITY, "답변이 부족해 리포트를 만들 수 없습니다"),
     REPORT_NOT_READY(HttpStatus.ACCEPTED, "리포트를 생성하고 있습니다");
 
     private final HttpStatus status;

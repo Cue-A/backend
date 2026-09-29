@@ -17,6 +17,12 @@ public interface QuestionRepository extends Repository<Question, QuestionId> {
     List<Question> findAllBySessionId(String sessionId);
 
     /**
+     * 세션의 질문을 나간 순서대로. 되묻기는 원 질문 뒤에 옵니다.
+     * {@code question_number} 는 되묻기에서 올라가지 않아 순서 기준으로 쓸 수 없습니다.
+     */
+    List<Question> findAllBySessionIdOrderByCreatedAtAsc(String sessionId);
+
+    /**
      * 세션 스코프 복합키로 질문 하나를 찾습니다. 답변 제출 시 대상 질문에 answer
      * object key 를 붙이기 위해 씁니다. 소유권은 세션으로 먼저 확인한 뒤 호출하세요.
      */

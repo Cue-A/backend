@@ -99,6 +99,10 @@ app:
     mock:
       enabled: ${APP_AI_MOCK_ENABLED:true}
 
+  report:
+    # AI 리포트 계약 권장값. 영상 다운로드 + 시선 분석이 포함돼 질문 생성보다 훨씬 깁니다.
+    poll-timeout: 10m
+
   storage:
     endpoint: ${APP_STORAGE_ENDPOINT:http://localhost:9000}
     bucket: ${APP_STORAGE_BUCKET:cue-a-media}

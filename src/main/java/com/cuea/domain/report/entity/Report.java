@@ -4,6 +4,8 @@ import com.cuea.common.entity.BaseCreatedEntity;
 import com.cuea.domain.interview.entity.InterviewSession;
 import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
+import jakarta.persistence.EnumType;
+import jakarta.persistence.Enumerated;
 import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
@@ -20,23 +22,26 @@ import org.hibernate.annotations.OnDelete;
 import org.hibernate.annotations.OnDeleteAction;
 import org.hibernate.type.SqlTypes;
 
-import java.util.List;
+import java.time.OffsetDateTime;
 import java.util.Map;
 import java.util.UUID;
 
 /**
  * 세션 하나의 결과 리포트. {@link InterviewSession} 과 1:1 입니다.
  *
- * <p><b>이 엔티티는 계약 확정 전 상태입니다.</b> docs/90-open-questions.md 는
- * 리포트 계약이 도착하기 전에 만들지 말라고 하고, docs/13-report.md 는 점수
- * 스케일(0~100 인지 1~5 인지)조차 미확정이라고 적혀 있습니다.
- * ERD 초안 기준으로 먼저 잡아둔 것이며 계약 도착 시 갈아엎을 수 있습니다.
+ * <p>외부로 나가는 식별자는 {@code publicId}(응답의 {@code reportId})입니다.
+ * {@code reportId} 는 연속된 정수라 노출하지 않습니다.
  *
- * <p>점수 4개가 전부 nullable 인 것은 <b>부분 실패</b> 때문입니다.
- * 음성·시선 분석이 실패해도 리포트 자체는 생성되고 그 축만 비어 있습니다.
- * 단 내용 분석({@code scoreContent})이 실패하면 총점을 낼 수 없어
- * 전체 실패로 처리합니다. 주제를 벗어난 유창한 답변이 음성·시선 점수만으로
- * 높은 총점을 받는 것을 막는 장치입니다.
+ * <h2>세션당 한 행</h2>
+ * {@code session_id} 가 UNIQUE 입니다. 실패({@code FAILED})한 리포트를 다시 요청하면
+ * 새 행을 만들지 않고 이 행을 {@code PROCESSING} 으로 되돌리며 {@code attempt} 를
+ * 올립니다. AI 의 Idempotency-Key 가 {@code rpt_{sessionId}_{attempt}} 라서, 시도
+ * 번호가 같으면 AI 가 실패한 기존 task 를 그대로 돌려주기 때문입니다.
+ *
+ * <h2>점수가 전부 nullable 인 이유</h2>
+ * 말하기·시선 축은 실패해도 리포트가 만들어지고({@code PARTIAL}) 그 축만 빕니다.
+ * 카메라를 안 썼으면 시선은 {@code skipped} 라 역시 null 입니다. 내용 축이 실패하면
+ * 리포트 자체가 {@code FAILED} 입니다. docs/13-report.md 참고.
  */
 @Entity
 @Table(name = "report")
@@ -58,52 +63,89 @@ public class Report extends BaseCreatedEntity {
     @OnDelete(action = OnDeleteAction.CASCADE)
     private InterviewSession session;
 
-    /** 내용 축: 논리성·구체성·질문 관련성. 실패 시 총점을 내지 않습니다. */
-    @Column(name = "score_content")
-    private Integer scoreContent;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private ReportStatus status;
 
-    /** 음성 축: 발화 속도·필러워드·침묵. 실패해도 이 축만 빕니다. */
-    @Column(name = "score_speech")
-    private Integer scoreSpeech;
+    /** 지금 폴링 중인(또는 마지막으로 폴링한) AI task. */
+    @Column(name = "ai_task_id", length = 100)
+    private String aiTaskId;
 
-    /** 시선 축: 화면 응시 비율·이탈 횟수. 실패해도 이 축만 빕니다. */
-    @Column(name = "score_vision")
-    private Integer scoreVision;
+    /** 시도 번호. 1부터. Idempotency-Key {@code rpt_{sessionId}_{attempt}} 에 들어갑니다. */
+    @Column(nullable = false)
+    private int attempt;
 
-    /** 총점. 내용 분석이 실패하면 null 입니다. */
+    /** 총점 0~100. AI {@code overall.score}. 게이트가 적용된 최종값입니다. */
     @Column(name = "score_total")
     private Integer scoreTotal;
 
-    /** 축별 요약. 키 목록은 계약 도착 후 확정됩니다. */
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(columnDefinition = "jsonb")
-    private Map<String, Object> summary;
+    /** 내용 축 0~100. */
+    @Column(name = "score_content")
+    private Integer scoreContent;
 
-    /** 회차를 넘나드는 서술형 총평. */
-    @Column(name = "growth_narrative", columnDefinition = "text")
-    private String growthNarrative;
+    /** 말하기 축 0~100. 실패 시 null. */
+    @Column(name = "score_speech")
+    private Integer scoreSpeech;
 
-    /** 세션 안의 시간 흐름. 배열 형태라 {@code List} 로 받습니다. */
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(columnDefinition = "jsonb")
-    private List<Map<String, Object>> timeline;
-
-    /** 압박·꼬리질문에 대한 회복력 지표. */
-    @JdbcTypeCode(SqlTypes.JSON)
-    @Column(columnDefinition = "jsonb")
-    private Map<String, Object> resilience;
+    /** 시선 축 0~100. 실패하거나 카메라 미사용({@code skipped})이면 null. */
+    @Column(name = "score_gaze")
+    private Integer scoreGaze;
 
     /**
-     * 위 컬럼으로 펴지 않은 나머지 원본 전체.
+     * AI {@code result} 원본 전체.
      *
-     * <p>계약이 확정되기 전까지 AI 응답을 잃지 않기 위한 보관함입니다.
-     * 조회 조건으로 쓰지 마세요. 확정되면 필요한 것만 컬럼으로 승격시킵니다.
+     * <p><b>지우지 마세요.</b> 회차 비교({@code /ai/reports/compare})는 AI 가 리포트를
+     * 보관하지 않아 전체 회차의 원본을 Backend 가 다시 보냅니다. 조회 조건으로도 쓰지
+     * 마세요. 필요한 값은 컬럼으로 꺼내 둡니다.
      */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "report_data", columnDefinition = "jsonb")
     private Map<String, Object> reportData;
 
-    /** 생성 진행 상태. 값 목록은 계약 도착 후 확정이라 문자열로 둡니다. */
-    @Column(nullable = false, length = 20)
-    private String status;
+    /** {@code FAILED} 일 때 원인. AI error_code 또는 Backend 코드({@code AI_TIMEOUT} 등). */
+    @Column(name = "error_code", length = 50)
+    private String errorCode;
+
+    @Column(name = "completed_at")
+    private OffsetDateTime completedAt;
+
+    /** 첫 요청. AI 에 task 를 이미 등록한 뒤에 만듭니다. */
+    public static Report processing(InterviewSession session, String aiTaskId) {
+        return Report.builder()
+                .publicId(UUID.randomUUID())
+                .session(session)
+                .status(ReportStatus.PROCESSING)
+                .aiTaskId(aiTaskId)
+                .attempt(1)
+                .build();
+    }
+
+    /** 자동 재시도로 새 task 를 받았습니다. */
+    public void retryWith(int attempt, String aiTaskId) {
+        this.attempt = attempt;
+        this.aiTaskId = aiTaskId;
+    }
+
+    /** {@code COMPLETED} 또는 {@code PARTIAL}. */
+    public void finish(ReportStatus status,
+                       Integer scoreTotal,
+                       Integer scoreContent,
+                       Integer scoreSpeech,
+                       Integer scoreGaze,
+                       Map<String, Object> reportData) {
+        this.status = status;
+        this.scoreTotal = scoreTotal;
+        this.scoreContent = scoreContent;
+        this.scoreSpeech = scoreSpeech;
+        this.scoreGaze = scoreGaze;
+        this.reportData = reportData;
+        this.errorCode = null;
+        this.completedAt = OffsetDateTime.now();
+    }
+
+    public void fail(String errorCode) {
+        this.status = ReportStatus.FAILED;
+        this.errorCode = errorCode;
+        this.completedAt = OffsetDateTime.now();
+    }
 }

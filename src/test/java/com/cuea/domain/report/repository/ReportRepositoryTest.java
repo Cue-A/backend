@@ -1,0 +1,135 @@
+package com.cuea.domain.report.repository;
+
+import com.cuea.domain.document.entity.DocType;
+import com.cuea.domain.document.entity.Document;
+import com.cuea.domain.document.entity.DocumentStatus;
+import com.cuea.domain.interview.entity.InterviewSession;
+import com.cuea.domain.interview.entity.Persona;
+import com.cuea.domain.interview.entity.SessionStatus;
+import com.cuea.domain.report.entity.Report;
+import com.cuea.domain.report.entity.ReportStatus;
+import com.cuea.domain.user.entity.User;
+import com.cuea.support.PostgresRepositoryTest;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
+import org.springframework.dao.DataIntegrityViolationException;
+
+import java.util.UUID;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+
+/**
+ * 동시 요청 방어의 DB 쪽 절반을 실제 PostgreSQL 로 봅니다.
+ * <ul>
+ *   <li>FAILED 재요청: {@code status = FAILED and attempt = 이전값} 조건부 UPDATE 는 한쪽만 성공</li>
+ *   <li>첫 요청: {@code session_id} UNIQUE 로 두 번째 행이 막힘</li>
+ * </ul>
+ * 서비스 테스트에서는 리포지토리가 mock 이라 이 조건이 검증되지 않습니다.
+ */
+class ReportRepositoryTest extends PostgresRepositoryTest {
+
+    @Autowired
+    private ReportRepository reportRepository;
+
+    @Autowired
+    private TestEntityManager em;
+
+    private InterviewSession session;
+
+    @BeforeEach
+    void setUp() {
+        User user = em.persist(User.create(null, "면접자"));
+        Document resume = em.persist(Document.ofMarkdown(
+                user, UUID.randomUUID(), DocType.RESUME, "이력서", "본문", "docs/resume.txt", DocumentStatus.READY));
+        session = em.persist(InterviewSession.builder()
+                .sessionId("sess_" + UUID.randomUUID()).user(user).document(resume)
+                .mode("PRACTICE").jobRole("백엔드").questionCount(6)
+                .persona(Persona.FRIENDLY).hideQuestionText(false)
+                .status(SessionStatus.COMPLETED).build());
+    }
+
+    @Test
+    void FAILED_이고_attempt_가_같으면_1건을_PROCESSING_으로_되돌린다() {
+        Report failed = failedReport(1, "AI_TIMEOUT");
+
+        int updated = reopen(failed, 1, "task_2");
+
+        assertThat(updated).isEqualTo(1);
+        Report reopened = reload(failed);
+        assertThat(reopened.getStatus()).isEqualTo(ReportStatus.PROCESSING);
+        assertThat(reopened.getAttempt()).isEqualTo(2);
+        assertThat(reopened.getAiTaskId()).isEqualTo("task_2");
+        assertThat(reopened.getErrorCode()).isNull();
+        assertThat(reopened.getCompletedAt()).isNull();
+    }
+
+    /** 재요청을 두 번 누른 경우. 먼저 도착한 쪽이 attempt 를 올려 두 번째는 조건에 맞지 않습니다. */
+    @Test
+    void 같은_이전_attempt_로_두_번_되돌리면_두_번째는_0건() {
+        Report failed = failedReport(1, "AI_TIMEOUT");
+
+        int first = reopen(failed, 1, "task_2");
+        int second = reopen(failed, 1, "task_2");
+
+        assertThat(first).isEqualTo(1);
+        assertThat(second).isZero();
+        assertThat(reload(failed).getAttempt()).isEqualTo(2);
+    }
+
+    @Test
+    void attempt_가_다르면_0건이고_그대로_둔다() {
+        Report failed = failedReport(2, "AI_TIMEOUT");
+
+        int updated = reopen(failed, 1, "task_x");
+
+        assertThat(updated).isZero();
+        Report unchanged = reload(failed);
+        assertThat(unchanged.getStatus()).isEqualTo(ReportStatus.FAILED);
+        assertThat(unchanged.getAttempt()).isEqualTo(2);
+        assertThat(unchanged.getErrorCode()).isEqualTo("AI_TIMEOUT");
+    }
+
+    @Test
+    void FAILED_가_아니면_attempt_가_같아도_0건() {
+        Report processing = em.persistFlushFind(Report.processing(session, "task_1"));
+
+        int updated = reopen(processing, 1, "task_2");
+
+        assertThat(updated).isZero();
+        Report unchanged = reload(processing);
+        assertThat(unchanged.getStatus()).isEqualTo(ReportStatus.PROCESSING);
+        assertThat(unchanged.getAiTaskId()).isEqualTo("task_1");
+    }
+
+    @Test
+    void 같은_세션에_리포트를_두_번_만들면_UNIQUE_에_걸린다() {
+        reportRepository.save(Report.processing(session, "task_1"));
+        em.flush();
+
+        assertThatThrownBy(() -> {
+            reportRepository.save(Report.processing(session, "task_1"));
+            em.flush();
+        }).isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    private Report failedReport(int attempt, String errorCode) {
+        Report report = Report.processing(session, "task_" + attempt);
+        report.retryWith(attempt, "task_" + attempt);
+        report.fail(errorCode);
+        return em.persistFlushFind(report);
+    }
+
+    private int reopen(Report report, int previousAttempt, String aiTaskId) {
+        return reportRepository.reopenFailed(report.getReportId(), previousAttempt, previousAttempt + 1,
+                aiTaskId, ReportStatus.PROCESSING, ReportStatus.FAILED);
+    }
+
+    /** 조건부 UPDATE 는 영속성 컨텍스트를 거치지 않으므로 DB 에서 다시 읽습니다. */
+    private Report reload(Report report) {
+        em.clear();
+        return em.find(Report.class, report.getReportId());
+    }
+}

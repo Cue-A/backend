@@ -45,6 +45,10 @@ final class ReportFailurePolicy {
      * 내려주려고 씁니다. 지금 {@link ErrorCode} 에 없는 옛 코드는 재시도 불가로 봅니다.
      */
     static boolean isUserRetryable(String errorCode) {
-        return USER_RETRYABLE.stream().anyMatch(code -> code.name().equals(errorCode));
+        try {
+            return errorCode != null && isUserRetryable(ErrorCode.valueOf(errorCode));
+        } catch (IllegalArgumentException e) {
+            return false;
+        }
     }
 }

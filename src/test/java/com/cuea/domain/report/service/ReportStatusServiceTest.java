@@ -108,6 +108,13 @@ class ReportStatusServiceTest {
     }
 
     @Test
+    void errorCode_가_null_이어도_터지지_않고_retryable_false() {
+        givenReport(report(ReportStatus.FAILED, null));
+
+        assertThat(service.getStatus(USER_ID, PUBLIC_ID.toString()).retryable()).isFalse();
+    }
+
+    @Test
     void 대문자로_넣어도_응답의_reportId_는_저장된_값() {
         givenReport(report(ReportStatus.COMPLETED, null));
 

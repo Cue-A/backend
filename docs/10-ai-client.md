@@ -307,6 +307,26 @@ app:
 `@ConditionalOnProperty` 로 갈아끼웁니다. 목이 없으면 AI 서버가 나올 때까지
 폴링·WebSocket·로그 저장을 전혀 검증할 수 없습니다.
 
+### 리포트 실패 재현
+
+목의 리포트는 AI 저장소 더미 서버(`ai/report_dummy.py`)와 **같은 규칙**으로 실패합니다.
+요청의 URL 은 답변의 object key 로 만들므로, 리포트를 요청하기 전에 key 를 바꾸면 됩니다.
+목과 더미 서버에서 같은 결과가 납니다.
+
+| 조건 (대소문자 무시) | 결과 |
+|---|---|
+| `answer_audio_object_key` 에 `content_fail` | processing 뒤 `error` `CONTENT_FAILED` → 자동 재시도 1회 → `FAILED` |
+| `answer_audio_object_key` 에 `fail` | 말하기 축 `failed` → `PARTIAL` |
+| `answer_video_object_key` 에 `fail` | 시선 축 `failed` → `PARTIAL` |
+| 영상 key 가 전부 없음 | 시선 `skipped`, `COMPLETED` (실패 아님) |
+
+```sql
+update question set answer_audio_object_key = 'audio/test/content_fail.webm'
+ where session_id = '{sessionId}' and question_id = '{questionId}';
+```
+
+URL 이 그대로면 새 Idempotency-Key 로 다시 요청해도 또 실패합니다(더미 서버와 같음).
+
 ---
 
 ## 리포트 생성

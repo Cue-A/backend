@@ -258,6 +258,9 @@ log.info("AI 작업 완료 sessionId={} taskId={} elapsedMs={}", sessionId, task
   없습니다. 같은 이메일로 행을 두 개 만드는 코드도 mock 테스트에서는 초록불이고
   실제로는 500 이 납니다. `users.email` 이나 `user_auth` 의 UNIQUE 를 건드리는
   코드가 여기 해당합니다.
+- `@DataJpaTest` 는 `com.cuea.support.PostgresRepositoryTest` 를 상속합니다. Testcontainers 로
+  PostgreSQL 16 을 띄우며, **Docker 가 없으면 실패하지 않고 건너뜁니다.** H2 는 `jsonb` 컬럼 때문에
+  쓰지 않습니다. 예: `ReportRepositoryTest`
 
 ```java
 @Test

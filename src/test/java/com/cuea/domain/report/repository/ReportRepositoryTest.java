@@ -115,6 +115,21 @@ class ReportRepositoryTest extends PostgresRepositoryTest {
         }).isInstanceOf(DataIntegrityViolationException.class);
     }
 
+    /** 상태 조회 API 의 소유자 스코프. 남의 리포트는 존재 여부도 드러나지 않게 빈 값입니다. */
+    @Test
+    void reportId_로_찾을_때_본인_것만_나온다() {
+        Report report = em.persistFlushFind(Report.processing(session, "task_1"));
+        User other = em.persist(User.create(null, "다른 사람"));
+        String ownerId = session.getUser().getUserId();
+
+        assertThat(reportRepository.findByPublicIdAndSession_User_UserId(report.getPublicId(), ownerId))
+                .map(Report::getReportId).contains(report.getReportId());
+        assertThat(reportRepository.findByPublicIdAndSession_User_UserId(report.getPublicId(), other.getUserId()))
+                .isEmpty();
+        assertThat(reportRepository.findByPublicIdAndSession_User_UserId(UUID.randomUUID(), ownerId))
+                .isEmpty();
+    }
+
     private Report failedReport(int attempt, String errorCode) {
         Report report = Report.processing(session, "task_" + attempt);
         report.retryWith(attempt, "task_" + attempt);

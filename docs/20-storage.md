@@ -2,6 +2,14 @@
 
 로컬은 MinIO, 배포는 S3. 코드는 AWS S3 SDK로 통일하고 엔드포인트만 바꿉니다.
 
+| 항목 | 값 |
+|---|---|
+| 버킷 | `cue-a-media` |
+| 리전 | `ap-northeast-2` (서울) |
+| 퍼블릭 액세스 | **모두 차단.** 프론트·AI 는 presigned URL 로만 접근 |
+
+실제 AI 연동 테스트는 로컬에서도 S3 를 씁니다. 학과 서버가 MinIO 에 닿지 못합니다.
+
 ---
 
 ## 버킷 구조
@@ -65,7 +73,55 @@ AI에 발급하는 자격증명은 **질문 오디오 경로에만** 쓰기 권�
 전체 버킷 쓰기 권한을 주지 않습니다.
 
 로컬 개발에서는 MinIO 계정(`minioadmin`)을 공유해도 무방하지만,
-배포 시에는 IAM 정책으로 경로를 제한합니다.
+S3 에서는 IAM 사용자를 나눠 경로를 제한합니다.
+
+### IAM 사용자
+
+| 사용자 | 쓰는 곳 | 정책 |
+|---|---|---|
+| `cue-a-backend` | Spring `APP_STORAGE_ACCESS_KEY` | `cue-a-backend-s3` |
+| `cue-a-ai` | AI 서버 (AI 팀장에게 전달) | `cue-a-ai-tts-upload` |
+
+키 값은 저장소에 남기지 않고 DM 으로만 주고받습니다.
+
+`cue-a-backend-s3`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::cue-a-media/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::cue-a-media"
+    }
+  ]
+}
+```
+
+`s3:ListBucket` 이 없으면 없는 객체의 `headObject` 가 404 대신 403 을 받습니다.
+
+`cue-a-ai-tts-upload`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::cue-a-media/sessions/*/questions/*"
+    }
+  ]
+}
+```
+
+AI 는 읽기를 presigned GET 으로 하므로 쓰기 권한만 줍니다.
 
 ---
 
@@ -109,14 +165,16 @@ AI 파트는 `Access-Control-Allow-Origin: *` 를 요청했으나,
 **프론트 도메인만 허용하는 것을 권장**합니다. 기능은 동일하고 버킷을 전 세계에
 열어둘 이유가 없습니다.
 
+현재 적용된 값입니다. 프론트 도메인이 정해지면 추가합니다.
+
 ```json
 [
   {
     "AllowedOrigins": [
       "http://localhost:5173",
-      "https://cue-a.example.com"
+      "http://localhost:3000"
     ],
-    "AllowedMethods": ["GET", "PUT"],
+    "AllowedMethods": ["GET", "PUT", "HEAD"],
     "AllowedHeaders": ["*"],
     "ExposeHeaders": ["ETag"],
     "MaxAgeSeconds": 3000

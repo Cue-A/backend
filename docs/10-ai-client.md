@@ -216,7 +216,8 @@ public enum ProgressStage {
 X-Cueanda-Secret: ${APP_AI_SECRET}
 ```
 
-AI 서버는 내부망에 두고 외부 노출을 막습니다.
+AI 서버는 학과 GPU 서버에 공개 `https` 주소로 열려 있어 **이 시크릿이 유일한
+보호 수단입니다.** 값이 AI 쪽과 다르면 모든 요청이 401 입니다.
 
 ---
 

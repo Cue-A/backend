@@ -85,9 +85,11 @@ public class ReportPoller {
                 attempt++;
                 log.warn("리포트 자동 재시도 sessionId={} errorCode={} attempt={}",
                         event.sessionId(), e.getErrorCode(), attempt);
+                // 재요청하는 동안 이전 시도의 단계가 조회되지 않게 먼저 지웁니다.
+                // 재요청이 실패하면 fail() 이 어차피 지우므로 잃는 것이 없습니다.
+                progressStore.delete(reportId);
                 try {
                     taskId = requestAgain(event, attempt);
-                    progressStore.delete(reportId);
                 } catch (BusinessException retryError) {
                     fail(event, retryError);
                     return;

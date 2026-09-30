@@ -256,9 +256,12 @@ class ReportPollerTest {
         verify(reportWriter).finish(eq(REPORT_ID), any());
     }
 
-    /** 자동 재시도는 새 task 가 transcribing 부터 다시 돕니다. 첫 시도의 composing 이 남으면 안 됩니다. */
+    /**
+     * 자동 재시도는 새 task 가 transcribing 부터 다시 돕니다. 첫 시도의 composing 이 남으면 안 됩니다.
+     * 재요청(본문 조립 · AI 등록 · DB 갱신)하는 동안에도 보이면 안 되므로 재요청 전에 지웁니다.
+     */
     @Test
-    void 자동_재시도하면_첫_시도의_진행_단계를_지운다() throws Exception {
+    void 자동_재시도하면_재요청_전에_첫_시도의_진행_단계를_지운다() throws Exception {
         AiReportTaskStatusResponse done = done("complete", 75, null);
         when(aiPoller.await(anyString(), any(), any(), any()))
                 .thenAnswer(invocation -> {
@@ -269,7 +272,11 @@ class ReportPollerTest {
                     assertThat(progressStore.find(PUBLIC_ID.toString())).isEmpty();
                     return done;
                 });
-        when(aiClient.requestReport(eq(SESSION_ID), anyString(), any())).thenReturn("task_r2");
+        when(aiClient.requestReport(eq(SESSION_ID), anyString(), any()))
+                .thenAnswer(invocation -> {
+                    assertThat(progressStore.find(PUBLIC_ID.toString())).isEmpty();
+                    return "task_r2";
+                });
         when(reportWriter.finish(eq(REPORT_ID), any())).thenReturn(finished(ReportStatus.COMPLETED, 75));
 
         poller.onRequested(event());

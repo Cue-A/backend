@@ -70,6 +70,17 @@ public class User {
         return "면접자" + userId.replace("-", "").substring(0, 6);
     }
 
+    /**
+     * 가입 당시엔 이메일 동의를 안 받았다가, 이후(카카오 비즈앱 전환 등) 재로그인에서
+     * 검증된 이메일이 생겼을 때만 채웁니다. 이미 값이 있으면 덮어쓰지 않습니다 —
+     * 다른 값으로 바뀌면 {@code users.email} UNIQUE 제약과 계정 연동 규칙이 꼬입니다.
+     */
+    public void fillEmailIfAbsent(String email) {
+        if (this.email == null) {
+            this.email = email;
+        }
+    }
+
     /** 이 사람에게 로그인 수단을 하나 연결합니다. */
     public UserAuth link(Provider provider, String providerId, String password) {
         UserAuth auth = UserAuth.of(this, provider, providerId, password);

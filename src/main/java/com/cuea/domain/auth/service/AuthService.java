@@ -92,6 +92,14 @@ public class AuthService {
         if (linked.isPresent()) {
             user = linked.get().getUser();
             isNewUser = false;
+            // 가입 당시(비즈앱 전환 전 등)엔 이메일 동의를 못 받았다가, 이후 재로그인에서
+            // 검증된 이메일이 생긴 경우를 채웁니다. 다른 사용자가 이미 쓰는 이메일이면
+            // users.email UNIQUE 위반이라 건너뜁니다 — 그 경우는 매우 드물고, 값을
+            // 강제로 덮어쓰기보다 null 로 남겨두는 쪽이 안전합니다.
+            if (info.linkable() && user.getEmail() == null
+                    && !userRepository.existsByEmail(info.email())) {
+                user.fillEmailIfAbsent(info.email());
+            }
         } else {
             Optional<User> byEmail = info.linkable()
                     ? userRepository.findByEmail(info.email())

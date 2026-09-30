@@ -24,7 +24,7 @@ AI 서버는 AI 파트가 운영합니다. 우리가 준비하는 것은 S3 와 
 | 2 | IAM 사용자 `cue-a-backend` · `cue-a-ai` | ✅ |
 | 3 | S3 CORS | ✅ localhost 만. 프론트 도메인 추가 필요 |
 | 4 | AI 에 버킷·리전·`cue-a-ai` 키 전달 | |
-| 5 | 질문 음성 presigned GET (Issue #41) | |
+| 5 | 질문 음성 presigned GET (Issue #54) | ✅ push 때 presigned GET 발급 |
 | 6 | 실제 AI 연동 테스트 (로컬 백엔드 + S3) | |
 | 7 | DB (백엔드에서만 접근) | |
 | 8 | 백엔드 배포 (1대) | |

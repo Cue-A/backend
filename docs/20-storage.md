@@ -123,6 +123,30 @@ S3 에서는 IAM 사용자를 나눠 경로를 제한합니다.
 
 AI 는 읽기를 presigned GET 으로 하므로 쓰기 권한만 줍니다.
 
+### 질문 음성은 push 때 presigned GET 으로 내려줍니다 (Issue #54)
+
+AI 는 질문 TTS 음성을 위 `sessions/{sessionId}/questions/{questionId}.mp3` 에 직접
+올리고, task 결과의 `audio_url` 로 **서명 없는** S3 URL 을 돌려줍니다. 버킷이 private
+이라 프론트가 그 URL 을 그대로 GET 하면 403 이므로, Backend 는 그 값을 프론트에 그대로
+노출하지 않습니다. 대신 **WebSocket 질문 push 시점에** 같은 object 에 대한 presigned
+GET URL 을 발급해 내려줍니다.
+
+- object key 는 AI 가 준 URL 을 parsing 하지 않고 계약상 고정 규칙
+  (`ObjectKeys.questionAudio(sessionId, questionId)`)으로 만듭니다. 엔드포인트·custom
+  domain·path-style 차이로 URL parsing 이 취약하기 때문입니다
+- 만료는 `question-audio-get`(15분). 사용자가 한 문항을 듣는 시간입니다
+- `audio_url == null`(TTS 없음)이면 presign 을 시도하지 않고 텍스트만 내려줍니다
+- **presign 발급이 실패해도 세션을 중단하지 않습니다.** 질문 text 는 이미 저장돼 있고
+  음성은 optional 이라, TTS 없음과 같은 모양(음성 URL 없음)으로 텍스트만 진행합니다.
+  AWS SDK 예외는 인프라 계층(`PresignedUrlIssuer`)이 캡슐화하고 도메인에는 발급 성공
+  여부(`Optional`)만 전달합니다
+- **presigned URL 은 DB 에 저장하지 않습니다.** `question.audio_url` 에는 AI 가 준
+  안정적인 원본 URL 을 두고, 서명 URL 은 push 때만 만듭니다
+  ([`02-database.md`](./02-database.md))
+
+프론트 관점의 WebSocket 필드(`audioUrl`·`audioAvailable`)는
+[`11-interview.md`](./11-interview.md) 를 봅니다.
+
 ---
 
 ## Presigned URL 만료
@@ -132,6 +156,7 @@ AI 는 읽기를 presigned GET 으로 하므로 쓰기 권한만 줍니다.
 | 이력서 GET (AI 전달용) | **15분** | Celery 큐 지연 대비 |
 | 업로드 PUT | 10분 | |
 | 녹음 다운로드 GET | 1시간 | 사용자가 리포트 보며 재생 |
+| 질문 음성 GET | **15분** | 사용자가 한 문항을 듣는 시간 (`question-audio-get`) |
 
 ### ★ 이력서 URL 만료에 여유를 두는 이유
 
@@ -195,16 +220,35 @@ mc admin config set local api cors_allow_origin="http://localhost:5173"
 
 ## 업로드 흐름
 
+### 문서(이력서·포트폴리오) — Spring 을 통과 (Issue #28)
+
+문서는 presigned 2단계가 아니라 **`POST /api/documents` 로 파일을 Spring 에
+통과시킵니다.**
+
 ```
-1. 프론트: POST /api/documents/presigned  (파일명, 크기, MIME)
-2. Spring: 검증 후 Presigned PUT URL + documentId 반환
-3. 프론트: 해당 URL로 S3에 직접 PUT
-4. 프론트: POST /api/documents/{id}/complete
-5. Spring: object_key 확정, DB 저장
+1. 프론트: POST /api/documents  (multipart: 파일 + 메타)
+2. Spring: 검증 → S3 에 PUT → DB 저장 → 즉시 READY
 ```
 
-**4번을 빼먹지 마세요.** 3번만으로는 Spring이 업로드 성공 여부를 모릅니다.
-`complete` 호출 시 S3에 객체가 실제로 있는지 `headObject` 로 확인합니다.
+자소서는 최대 10MB 라 통과가 감당되고, presigned 로 나누면 PUT 은 성공했는데 확정 전에
+브라우저가 닫힐 때 버킷에 고아 객체가 남기 때문입니다. 마크다운 문서도 본문을 `.txt`
+사본으로 이 경로에서 함께 올립니다(Issue #36). 판단 근거는
+[`02-database.md`](./02-database.md) 의 문서 절 참고.
+
+### 답변 미디어 — Presigned PUT
+
+녹화·녹음은 크기가 커 계속 presigned 로 갑니다.
+
+```
+1. 프론트: POST /api/interviews/{sessionId}/answers/upload-urls  (questionId 등)
+2. Spring: (sessionId, questionId) 질문 존재 확인 → Presigned PUT URL 발급
+3. 프론트: 해당 URL 로 S3 에 직접 PUT (오디오·영상)
+4. 프론트: POST /api/interviews/{sessionId}/answers  (제출)
+5. Spring: 제출된 key 가 정규 namespace 인지 + S3 에 실제 있는지(headObject) 확인
+```
+
+object key 는 서버가 `sessionId`·`questionId` 로 만들므로, 프론트가 임의 key 로 다른
+경로의 URL 을 얻을 수 없습니다.
 
 ### 파일 검증
 

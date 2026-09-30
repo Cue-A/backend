@@ -43,6 +43,7 @@ public class InterviewFirstQuestionPoller {
     private final AiErrorTranslator errorTranslator;
     private final SessionSocketHandler socketHandler;
     private final InterviewSessionWriter sessionWriter;
+    private final QuestionPushFactory questionPushFactory;
 
     /**
      * task_id 를 폴링해 첫 질문을 받아 저장하고 WebSocket 으로 밀어줍니다.
@@ -132,17 +133,8 @@ public class InterviewFirstQuestionPoller {
             log.info("이미 종료된 세션에 늦게 도착한 첫 질문이라 저장·push 하지 않습니다 sessionId={}", sessionId);
             return;
         }
-        int delivered = socketHandler.push(sessionId, QuestionPushMessage.of(new QuestionPushMessage(
-                question.getQuestionId(),
-                question.getType().name(),
-                question.getText(),
-                question.getAudioUrl(),
-                question.getAudioUrl() != null,
-                question.getCategory(),
-                question.getDifficulty(),
-                question.getQuestionNumber(),
-                questionTotal
-        )));
+        int delivered = socketHandler.push(sessionId,
+                QuestionPushMessage.of(questionPushFactory.create(question, questionTotal)));
         // WebSocket 핸드셰이크가 폴링보다 늦으면 수신자가 없어 첫 질문 push 가 드롭됩니다.
         // 질문 자체는 DB 에 저장돼 있으므로 세션은 유효하지만, 프론트는 첫 질문을 못 받습니다.
         // pending 버퍼/catch-up 은 후속 작업으로 분리했고, 여기서는 유실을 추적할 수 있게

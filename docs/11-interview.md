@@ -73,6 +73,12 @@ Backend 이며 `verified=false` 기업은 조회 자체에서 제외합니다.
 필수라 문서 없는 세션은 성립하지 않습니다. 면접 자료는 기존 `PORTFOLIO` 문서
 타입을 그대로 쓰며, 별도 `RESUME` 타입은 추가하지 않습니다.
 
+> 위 표는 Backend → AI(`POST /ai/sessions`)로 나가는 필드입니다. **프론트 → Backend
+> REST 요청(`POST /api/interviews`)의 문서 필드명은 `documentId`** 입니다(Issue #46,
+> 문서 API 와 통일. 이전 이름 `documentPublicId` 는 더 이상 쓰지 않습니다). 값은 문서의
+> `public_id`(UUID 문자열)이며 필수입니다. Backend 가 이 문서로 `resume_file_url`
+> presigned GET 을 발급해 AI 에 넘깁니다.
+
 토픽 수는 보내지 않습니다. `question_count` 에서 자동 결정됩니다.
 
 ```
@@ -114,6 +120,22 @@ Backend 이며 `verified=false` 기업은 조회 자체에서 제외합니다.
 
 꼬리질문이 생략되어 문항 수가 모자랄 때 채우기용으로 투입되는 토픽의 질문.
 정상 동작이며 사용자에게는 일반 질문과 구분되지 않습니다.
+
+### 질문 WebSocket 페이로드 (프론트 관점)
+
+새 질문은 `type: "question"` 으로 push 되며, 음성 관련 두 필드가 함께 옵니다.
+
+| 필드 | 의미 |
+|---|---|
+| `audioUrl` | 재생 가능한 질문 음성이 있으면 Backend 가 발급한 **presigned GET URL**. 음성이 없거나 URL 발급에 실패하면 `null` |
+| `audioAvailable` | 현재 재생 가능한 질문 음성 URL 이 있는지 여부 |
+
+- `audioAvailable=true` 면 `audioUrl` 로 바로 재생할 수 있습니다(만료 15분).
+- `audioAvailable=false` (`audioUrl=null`) 면 **텍스트만으로 진행**합니다. TTS 가 없거나
+  음성 URL 발급이 실패한 경우이며, 세션은 계속됩니다. 프론트는 음성 없이 질문 텍스트를
+  보여주면 됩니다.
+- 주질문·꼬리질문 모두 같은 규칙입니다. 저장·경로·발급 정책은
+  [`20-storage.md`](./20-storage.md), AI 계약은 [`10-ai-client.md`](./10-ai-client.md).
 
 ---
 
@@ -163,9 +185,17 @@ Java enum으로 만들지 않습니다. 이유는 [`02-database.md`](./02-databa
 
 `aborted` 세션은 리포트를 생성하지 않습니다.
 
-사용자가 중간에 나가 세션을 정리하는 abort API(`POST /ai/sessions/{id}/abort` 를 호출해
-AI 쪽 상태도 정리)는 Issue #25 에서 구현할 예정입니다. 현재는 폴링 타임아웃·복구 불가
-오류 등 Backend 내부 정리 경로에서만 `aborted` 로 전이합니다.
+사용자가 중간에 나가 세션을 정리하는 **abort API `POST /api/interviews/{sessionId}/abort`
+는 Issue #25(PR #43)에서 구현했습니다.** 소유자 세션을 조회해 AI abort 를 best-effort
+로 호출하고 Backend 세션을 `ABORTED` 로 정리합니다. **AI abort 호출이 실패해도 로컬
+`ABORTED` 정리는 반드시 수행**해, AI 서버가 죽어도 세션이 `IN_PROGRESS` 로 영구
+잔류하지 않습니다.
+
+- 이미 `ABORTED` 인 세션 재중단은 멱등 no-op
+- `COMPLETED` 세션 중단은 `SESSION_ENDED` 로 거부(완료를 중단으로 역전하지 않음)
+- 상태 전이는 `IN_PROGRESS` 일 때만 일어나, abort 후 늦게 도착한 폴링 결과가 세션을
+  완료로 되돌리거나 새 질문을 저장·push 하지 않습니다
+- 폴링 타임아웃·복구 불가 오류 등 Backend 내부 정리 경로에서도 `aborted` 로 전이합니다
 
 ---
 

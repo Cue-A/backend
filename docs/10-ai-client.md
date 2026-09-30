@@ -70,7 +70,8 @@ company_profile_override  기업을 선택했으면 반드시 채웁니다. Comp
                            가 company.core_values 로 조립합니다. 미선택이면 null
 question_count            선택. 3 | 6 | 9. 기본값 6
 retry_of_session_id       선택. 재연습이면 최초 세션 ID
-doc_id                    예약 필드. 항상 null
+doc_id                    예약 필드. 항상 null (RAG/인덱스 id 아님. 향후 이력서 파싱
+                           캐시 재사용용. 지금은 Backend 가 저장·전달하지 않음)
 ```
 
 **질문 생성용 기업 정보는 `company_id` 가 아니라 `company_profile_override` 로
@@ -160,7 +161,27 @@ Front  ──POST /api/interviews──▶  Spring
 - `is_spare_topic`, `is_replay` 는 **항상 포함**됩니다. nullable 처리 불필요
 - `reask` 는 `category`, `difficulty` 만 null이고 나머지는 채워지며, `reask_of` 로
   원 질문의 `question_id` 를 알려줍니다. 그 외 타입은 `reask_of` 가 없습니다
-- `audio_url` 은 `TTS_FAILED` 시 null입니다
+- `audio_url` 은 AI 가 질문 TTS 음성을 올린 **서명 없는** S3 URL 이며, TTS 실패·비활성
+  시 null 입니다. Backend 는 이 URL 을 프론트에 그대로 노출하지 않고, WebSocket 질문
+  push 시점에 같은 object 에 대한 presigned GET 을 발급해 내려줍니다(아래 "질문 음성"
+  절, [`20-storage.md`](./20-storage.md))
+
+### 질문 음성 (audio_url)
+
+AI 는 질문 TTS 음성을 private 버킷의
+`sessions/{sessionId}/questions/{questionId}.mp3` 에 직접 올리고, task 결과의
+`audio_url` 로 **서명 없는** S3 URL 을 돌려줍니다. 버킷이 private 이라 프론트가 그
+URL 을 그대로 GET 하면 403 이므로, Backend 는 그 값을 프론트에 그대로 넘기지 않습니다.
+
+- `audio_url != null` 이면 Backend 가 AI URL 을 parsing 하지 않고 계약상 고정 key
+  규칙으로 object key 를 만들어 presigned GET 을 발급합니다. DB(`question.audio_url`)에는
+  AI 가 준 안정적인 원본 URL 을 그대로 두고, presigned URL 은 저장하지 않습니다
+- `audio_url == null`(TTS 없음)이거나 presign 발급이 실패하면 음성 없이 텍스트로
+  진행합니다(세션은 유지, 중단하지 않음)
+
+프론트 관점의 WebSocket 필드(`audioUrl`·`audioAvailable`)는
+[`11-interview.md`](./11-interview.md), 저장·경로·TTL 은 [`20-storage.md`](./20-storage.md)
+를 봅니다.
 
 ---
 
@@ -185,39 +206,75 @@ public enum ProgressStage {
 }
 ```
 
+실제 모드에서 stage 순서는 단계마다 다릅니다.
+
+```
+세션 시작   generating → tts        (stt 없음)
+답변 처리   stt → generating → tts
+```
+
+1초 간격 폴링 사이에 stage 가 지나가면 일부 단계는 관측되지 않을 수 있으니, 특정
+stage 가 반드시 보인다고 가정하지 마세요. 더미(mock) 세션 시작에서는 `stt` 가 보일 수
+있는데, 이는 실제 모드와 다른 더미 동작입니다.
+
 ---
 
 ## 에러 처리
 
-### 재시도 분류
+### 실패는 HTTP 상태가 아니라 폴링 결과로 옵니다
 
-| errorCode | HTTP | 재시도 | 처리 |
-|---|---|---|---|
-| `LLM_FAILED` | 500 | 1회 | 같은 요청 재전송 |
-| `STT_FAILED` | 500 | 1회 | **실패 시 즉시 재녹음 안내** |
-| `TTS_FAILED` | 500 | ❌ | `audio_url: null` 로 텍스트만 진행 |
-| `SESSION_NOT_FOUND` | 404 | ❌ | 세션 `aborted` |
-| `SESSION_ENDED` | 409 | ❌ | 무시 (중복 제출) |
-| `INVALID_QUESTION_ID` | 400 | ❌ | 클라이언트 버그. 로그 후 오류 응답 |
-| `INVALID_CATEGORY` | 400 | ❌ | 재연습 조립 버그. 로그 후 오류 응답 |
-| `RESUME_PARSE_FAILED` | 422 | ❌ | 다른 파일 안내 |
+`startSession`·`submitAnswer` 는 `202` + `task_id` 를 돌려주고, 생성 실패는 **폴링
+결과의 `status: "error"` + `error_code`** 로 내려옵니다. HTTP 500 으로 오는 동기
+오류가 아닙니다(`SESSION_NOT_FOUND` 처럼 요청 자체가 거부되는 일부만 4xx/5xx 로 올
+수 있고, `RealAiClient` 가 같은 `AiErrorTranslator` 로 옮겨 동일하게 처리합니다).
 
-`STT_FAILED` 는 무음·잡음·파일 손상이 원인인 경우가 많아 같은 오디오를 다시 넣어도
-결과가 같습니다. 1회만 시도하고 바로 재녹음 흐름으로 넘깁니다.
+### error_code 별 처리 (질문 생성·답변)
 
-`TTS_FAILED` 는 질문 텍스트가 이미 생성된 상태일 수 있습니다. 음성 없이 텍스트로
-진행할 수 있어야 하며, **프론트에도 이 케이스를 알려야 합니다.**
+| error_code | 재시도 | 처리 |
+|---|---|---|
+| `LLM_FAILED` (답변 처리) | Backend 1회 재전송 | 재전송도 실패하면 `ABORTED` |
+| `LLM_FAILED` (세션 시작) | Backend 재시도 없음 | AI 내부 1회 재시도까지 실패한 최종 상태. cleanup + `ABORTED` |
+| `STT_FAILED` (답변 처리) | Backend 1회 재전송 | 재전송도 실패하면 재녹음 안내(`needsRerecord=true`), 세션 `IN_PROGRESS` 유지 |
+| `SESSION_NOT_FOUND` | ❌ | 세션 `ABORTED` |
+| `RESUME_PARSE_FAILED` | ❌ | 세션 `ABORTED`. 다른 파일 안내 |
+| `SESSION_ENDED` | ❌ | 답변 처리 중이면 중복 제출로 무시 / 첫 질문 생성 중이면 cleanup + `ABORTED` |
+| `INVALID_QUESTION_ID` | ❌ | 최초엔 세션 유지·통지 / 재전송 이후면 `ABORTED` |
+| `INVALID_CATEGORY` | ❌ | 세션 유지·통지 (재연습 조립 버그) |
+| `AI_TIMEOUT` · `AI_UNAVAILABLE` | ❌ | cleanup + `ABORTED` |
+
+**`LLM_FAILED` 는 단계에 따라 다릅니다.** 세션 시작에서는 AI 가 같은 task 안에서 1회
+재시도하므로 Backend 가 받는 `LLM_FAILED` 는 이미 최종 실패이고 재전송하지 않습니다.
+답변 처리에서만 Backend 가 동일 요청을 폴링 `status:error` 확인 후 1회 재전송하며,
+재전송하면 새 `task_id` 가 발급됩니다(`processing` 중에는 재전송하지 않음). 세션·재시도
+흐름의 사용자 관점 정리는 [`11-interview.md`](./11-interview.md)(Issue #25) 참고.
+
+### TTS 실패·비활성은 error 가 아닙니다
+
+**`TTS_FAILED` 라는 task error 는 실제로 발생하지 않습니다.** TTS 가 실패하거나 비활성
+이거나 더미면 task 는 정상 완료됩니다.
+
+```json
+{ "status": "done", "result": { "text": "...", "audio_url": null } }
+```
+
+`result.text` 는 채워지고 `audio_url` 만 `null` 입니다. Backend 는 이를 **음성 없는
+텍스트 질문**으로 정상 처리합니다(WebSocket 질문 push 의 `audioAvailable=false`).
+질문 음성이 있을 때 프론트로 내려가는 `audio_url` 의 의미는 아래 "질문 음성" 절과
+[`20-storage.md`](./20-storage.md) 를 봅니다.
 
 ### 인증
 
-내부 통신이므로 JWT를 쓰지 않습니다. 공유 시크릿 헤더를 씁니다.
+내부 통신이지만 실제 AI 서버는 학과 GPU 서버에 공개 `https` 주소로 열려 있어, JWT
+대신 요청마다 공유 시크릿 헤더로 인증합니다.
 
 ```
 X-Cueanda-Secret: ${APP_AI_SECRET}
 ```
 
-AI 서버는 학과 GPU 서버에 공개 `https` 주소로 열려 있어 **이 시크릿이 유일한
-보호 수단입니다.** 값이 AI 쪽과 다르면 모든 요청이 401 입니다.
+이 시크릿이 유일한 보호 수단이라 값이 AI 쪽과 다르면 모든 요청이 거부됩니다. AI
+서버 쪽에서 `/health`·`/ready` 만 이 검증의 예외이고, 나머지 실제 엔드포인트는 모두
+헤더를 요구합니다. Backend 는 `RealAiClient` 가 모든 나가는 요청에 이 헤더를 붙입니다
+(`app.ai.secret`, 값은 문서에 적지 않습니다).
 
 ---
 

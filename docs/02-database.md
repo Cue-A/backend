@@ -183,9 +183,11 @@ READY               →  COMPLETED
 FAILED              →  FAILED
 ```
 
-**지금은 AI 인덱싱이 없어 등록 즉시 `READY` 입니다**(Issue #28). 그래서 `UPLOADED`·
-`PARSING` 은 현재 도달하지 않는 상태입니다. AI 에 문서 인덱싱 엔드포인트가 생기면
-등록 직후 상태를 `UPLOADED` 로 바꾸고 인덱싱 호출을 붙입니다.
+**등록하면 즉시 `READY` 입니다**(Issue #28). 문서 등록 때 AI 를 호출하지 않기
+때문입니다. 그래서 `UPLOADED`·`PARSING` 은 현재 도달하지 않는 상태입니다. 초기 설계의
+RAG·벡터 인덱싱 전제는 폐기됐고, **AI 문서 인덱싱 엔드포인트는 없으며 현재 MVP
+계약에서는 만들지 않습니다.** AI 는 이력서를 색인하지 않고 면접 시작 시 전체 내용을
+받아 처리합니다([`10-ai-client.md`](./10-ai-client.md)).
 
 ### ★ ai_doc_ref 를 제거했습니다 (Issue #23)
 
@@ -298,7 +300,7 @@ session_id              VARCHAR(50)   -- PK (복합), FK -> session(session_id)
 question_id             VARCHAR(50)   -- PK (복합). AI 발급
 type                    VARCHAR(20)   NOT NULL  -- QUESTION | FOLLOWUP | REASK
 text                    TEXT          NOT NULL
-audio_url               TEXT          NULL      -- TTS_FAILED 시 null
+audio_url               TEXT          NULL      -- AI가 준 서명없는 원본 URL. TTS 없으면 null. presigned는 저장 안 함(#54)
 category                VARCHAR(20)   NULL      -- REASK는 null
 difficulty              VARCHAR(5)    NULL      -- REASK는 null
 reask_of                VARCHAR(50)   NULL      -- ★ REASK 일 때 원 질문의 question_id

@@ -5,9 +5,7 @@ import com.cuea.infrastructure.file.ObjectKeys;
 import com.cuea.infrastructure.file.PresignedUrlIssuer;
 import com.cuea.infrastructure.websocket.message.QuestionPushMessage;
 import lombok.RequiredArgsConstructor;
-import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
-import software.amazon.awssdk.core.exception.SdkException;
 
 /**
  * 저장된 {@link Question} 을 프론트로 밀어줄 {@link QuestionPushMessage} 로 만드는
@@ -38,21 +36,20 @@ import software.amazon.awssdk.core.exception.SdkException;
  * layer 입니다. 그래서 presigned GET 발급이 실패해도 세션을 중단하지 않고, 해당 질문을
  * TTS_FAILED 와 같은 모양({@code audioUrl=null}, {@code audioAvailable=false})으로
  * 텍스트만 push 합니다. 이는 기존 TTS 실패(text-only) 정책과 동일하며, presign 실패
- * 하나로 전체 면접이 종료되지 않아 MVP/데모 안정성에 유리합니다. 또한 예외를 여기서
- * 흡수해 {@link InterviewFirstQuestionPoller} 의 {@code @Async void} 밖으로 예외가
- * 유실되는 것도 막습니다.
+ * 하나로 전체 면접이 종료되지 않아 MVP/데모 안정성에 유리합니다.
  *
- * <p>catch 범위는 presign 호출 한 줄에 한정하고, AWS SDK 서명 실패 계열인
- * {@link SdkException}(자격증명·설정 오류 등 client-side 실패의 공통 상위 타입)만
- * 잡습니다. 우리 코드의 프로그래밍 오류(NPE 등)까지 삼키지 않습니다. 로그에는
- * {@code sessionId}·{@code questionId}·실패 사실만 남기고, credential·signed URL 은
- * 남기지 않습니다.
+ * <p><b>AWS SDK 예외 처리는 인프라 계층({@link PresignedUrlIssuer})에 있습니다.</b>
+ * 도메인인 이 팩토리는 AWS SDK 타입을 알지 못하며,
+ * {@link PresignedUrlIssuer#issueQuestionAudioDownload(String)} 가 돌려주는
+ * {@link java.util.Optional} 만 봅니다. 값이 있으면 서명 URL, 비어 있으면(음성 없음 또는
+ * presign 실패) text-only 로 진행합니다. "URL 을 얻지 못하면 세션을 유지한 채 text-only
+ * 로 계속한다"는 <b>면접 도메인 정책</b>만 여기 남고, "SdkException 을 감지·로깅한다"는
+ * <b>인프라 관심사</b>는 {@link PresignedUrlIssuer} 가 캡슐화합니다.
  *
  * <p><b>DB 에는 presigned URL 을 저장하지 않습니다.</b> presign 은 만료되므로 push
  * 시점에만 만듭니다. {@link Question#getAudioUrl()} 은 AI 가 준 안정적인 값(음성 존재
  * 여부 판정용)으로 그대로 두고, 저장 스키마는 바꾸지 않습니다.
  */
-@Slf4j
 @Component
 @RequiredArgsConstructor
 public class QuestionPushFactory {
@@ -85,22 +82,18 @@ public class QuestionPushFactory {
     }
 
     /**
-     * 음성이 있으면 계약 key 로 presigned GET 을 발급합니다. 음성이 없으면(TTS 실패)
-     * {@code null}, presign 발급이 실패하면 로그만 남기고 {@code null}(text-only fallback).
+     * 음성이 있으면 계약 key 로 presigned GET 을 요청합니다. 음성이 없으면(TTS 실패)
+     * presign 을 호출하지 않고 {@code null}, presign 발급이 실패하면 인프라가
+     * {@link java.util.Optional#empty()} 를 돌려주므로 여기서도 {@code null}
+     * (text-only fallback). AWS SDK 예외는 이 도메인 코드가 알지 못하며 인프라가
+     * 캡슐화·로깅합니다(중복 로그를 남기지 않습니다).
      */
     private String presignedQuestionAudio(Question question) {
         if (question.getAudioUrl() == null) {
             return null;
         }
-        try {
-            return presignedUrlIssuer.issueQuestionAudioDownload(
-                    ObjectKeys.questionAudio(question.getSessionId(), question.getQuestionId()));
-        } catch (SdkException e) {
-            // 질문 text 는 이미 정상 생성됨. 음성 presign 실패만으로 세션을 중단하지 않고
-            // 텍스트만 내려준다(text-only fallback). credential·signed URL 은 로그에 남기지 않는다.
-            log.warn("질문 음성 presigned URL 발급 실패, 텍스트만 전달합니다 sessionId={} questionId={}",
-                    question.getSessionId(), question.getQuestionId(), e);
-            return null;
-        }
+        return presignedUrlIssuer.issueQuestionAudioDownload(
+                        ObjectKeys.questionAudio(question.getSessionId(), question.getQuestionId()))
+                .orElse(null);
     }
 }

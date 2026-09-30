@@ -6,7 +6,8 @@ import com.cuea.infrastructure.file.PresignedUrlIssuer;
 import com.cuea.infrastructure.websocket.message.QuestionPushMessage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
-import software.amazon.awssdk.core.exception.SdkException;
+
+import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -55,7 +56,8 @@ class QuestionPushFactoryTest {
         // 계약상 고정 key. AI URL parsing 이 아니라 ObjectKeys.questionAudio 로 만든 값.
         String expectedKey = "sessions/sess_1/questions/q_1.mp3";
         when(presignedUrlIssuer.issueQuestionAudioDownload(expectedKey))
-                .thenReturn("https://bucket.s3.amazonaws.com/sessions/sess_1/questions/q_1.mp3?X-Amz-Signature=abc");
+                .thenReturn(Optional.of(
+                        "https://bucket.s3.amazonaws.com/sessions/sess_1/questions/q_1.mp3?X-Amz-Signature=abc"));
 
         QuestionPushMessage message = factory.create(q, 9);
 
@@ -85,16 +87,15 @@ class QuestionPushFactoryTest {
     }
 
     @Test
-    void presign_이_실패하면_예외를_전파하지_않고_text_only_로_fallback_한다() {
-        // Issue #41 정책: 질문 text 는 이미 정상 생성됨. presign 실패만으로 세션을
-        // 중단하지 않고 텍스트만 내려준다(audioUrl=null, audioAvailable=false).
+    void presign_이_실패해_issuer_가_empty_를_돌려주면_예외_없이_text_only_로_fallback_한다() {
+        // Issue #41 정책 + 리뷰 반영: AWS SDK 예외는 인프라(PresignedUrlIssuer)가
+        // 캡슐화해 Optional.empty() 로 돌려준다. 도메인인 팩토리는 AWS 타입을 전혀 모르고
+        // empty 만 보고 text-only 로 진행한다(세션 abort 없음).
         Question q = question("q_3", "https://bucket.s3.amazonaws.com/sessions/sess_1/questions/q_3.mp3");
         String expectedKey = "sessions/sess_1/questions/q_3.mp3";
-        // AWS SDK 서명 실패 계열(자격증명·설정 오류 등)은 SdkException 으로 온다.
         when(presignedUrlIssuer.issueQuestionAudioDownload(expectedKey))
-                .thenThrow(SdkException.builder().message("presign failed").build());
+                .thenReturn(Optional.empty());
 
-        // 예외가 전파되지 않아야 한다(assertThatCode 대신 직접 호출해 통과 여부로 검증).
         QuestionPushMessage message = factory.create(q, 9);
 
         verify(presignedUrlIssuer).issueQuestionAudioDownload(expectedKey);

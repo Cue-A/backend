@@ -139,35 +139,46 @@ class ReportStatusServiceTest {
     }
 
     @Test
-    void FAILED_면_errorCode_와_retryable_을_준다() {
+    void FAILED_면_errorCode_와_message_와_retryable_을_준다() {
         givenReport(report(ReportStatus.FAILED, "AI_TIMEOUT"));
 
         ReportStatusResponse response = service.getStatus(USER_ID, PUBLIC_ID.toString());
 
         assertThat(response.status()).isEqualTo(ReportStatus.FAILED);
         assertThat(response.errorCode()).isEqualTo("AI_TIMEOUT");
+        assertThat(response.message()).isEqualTo(ErrorCode.AI_TIMEOUT.getMessage());
         assertThat(response.retryable()).isTrue();
     }
 
+    /** 기본 문구는 "다시 녹음해 주세요"지만 리포트는 면접이 끝난 뒤라 다시 녹음할 수 없습니다. */
     @Test
-    void STT_FAILED_는_retryable_false() {
+    void STT_FAILED_는_retryable_false_이고_다시_녹음하라고_하지_않는다() {
         givenReport(report(ReportStatus.FAILED, "STT_FAILED"));
 
-        assertThat(service.getStatus(USER_ID, PUBLIC_ID.toString()).retryable()).isFalse();
+        ReportStatusResponse response = service.getStatus(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.retryable()).isFalse();
+        assertThat(response.message()).isNotEqualTo(ErrorCode.STT_FAILED.getMessage());
     }
 
     @Test
     void 지금_없는_옛_errorCode_도_터지지_않고_retryable_false() {
         givenReport(report(ReportStatus.FAILED, "SOMETHING_REMOVED"));
 
-        assertThat(service.getStatus(USER_ID, PUBLIC_ID.toString()).retryable()).isFalse();
+        ReportStatusResponse response = service.getStatus(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.retryable()).isFalse();
+        assertThat(response.message()).isNotBlank();
     }
 
     @Test
     void errorCode_가_null_이어도_터지지_않고_retryable_false() {
         givenReport(report(ReportStatus.FAILED, null));
 
-        assertThat(service.getStatus(USER_ID, PUBLIC_ID.toString()).retryable()).isFalse();
+        ReportStatusResponse response = service.getStatus(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.retryable()).isFalse();
+        assertThat(response.message()).isNotBlank();
     }
 
     @Test

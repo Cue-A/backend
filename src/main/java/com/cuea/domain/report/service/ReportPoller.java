@@ -131,7 +131,8 @@ public class ReportPoller {
      */
     private void fail(ReportRequestedEvent event, BusinessException cause) {
         ErrorCode errorCode = cause.getErrorCode();
-        log.warn("리포트 생성 실패 sessionId={} errorCode={}", event.sessionId(), errorCode);
+        log.warn("리포트 생성 실패 sessionId={} errorCode={} message={}",
+                event.sessionId(), errorCode, cause.getMessage());
         progressStore.delete(event.reportPublicId().toString());
         try {
             reportWriter.fail(event.reportId(), errorCode);
@@ -141,7 +142,7 @@ public class ReportPoller {
             log.error("리포트 FAILED 처리 실패 reportId={}", event.reportId(), e);
         }
         socketHandler.push(event.reportPublicId().toString(), ReportErrorPushMessage.of(
-                new ReportErrorPushMessage(errorCode.name(), cause.getMessage(),
+                new ReportErrorPushMessage(errorCode.name(), ReportFailurePolicy.messageOf(errorCode),
                         ReportFailurePolicy.isUserRetryable(errorCode))));
     }
 

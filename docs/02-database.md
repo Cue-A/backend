@@ -170,22 +170,17 @@ updated_at    TIMESTAMPTZ   NOT NULL
 - 과거 면접 기록과 리포트는 행이 남아 있어 그대로 보입니다
 - 없는 문서 · 남의 문서 · 이미 지운 문서는 모두 `DOCUMENT_NOT_FOUND` 입니다
 
-### ★ status 를 그대로 내보내지 않습니다
+### ★ status 는 프론트로 내보내지 않습니다 (Issue #57)
 
-프론트에는 `IndexStatus`(`PROCESSING` · `COMPLETED` · `FAILED`)로 좁혀서 나갑니다.
-`status` 는 우리 쪽 처리 단계라 단계가 늘면 같이 늘어나는데, 프론트가 알아야 하는 건
-"이 문서로 면접을 시작할 수 있는가" 하나뿐입니다. 내부 단계가 바뀔 때마다 프론트
-분기가 깨지지 않도록 경계에서 줄입니다.
-
-```
-UPLOADED · PARSING  →  PROCESSING
-READY               →  COMPLETED
-FAILED              →  FAILED
-```
+인덱싱은 **문서 등록이 아니라 면접 세션을 만들 때 AI 서버가** 합니다. 문서 쪽에는
+프론트가 기다릴 비동기 단계가 없으므로 문서 응답에 인덱싱 상태(`indexStatus` ·
+`indexedAt` · `indexError`)를 두지 않습니다. 등록에 성공한 문서는 곧바로 면접에 쓸 수
+있습니다.
 
 **등록하면 즉시 `READY` 입니다**(Issue #28). 문서 등록 때 AI 를 호출하지 않기
-때문입니다. 그래서 `UPLOADED`·`PARSING` 은 현재 도달하지 않는 상태입니다. 초기 설계의
-RAG·벡터 인덱싱 전제는 폐기됐고, **AI 문서 인덱싱 엔드포인트는 없으며 현재 MVP
+때문입니다. 그래서 `UPLOADED`·`PARSING` 은 현재 도달하지 않는 상태입니다. `status`
+컬럼은 세션 생성 가능 여부(`Document.isUsableForSession()`)를 판단하는 내부 값으로만
+남깁니다. 초기 설계의 RAG·벡터 인덱싱 전제는 폐기됐고, **AI 문서 인덱싱 엔드포인트는 없으며 현재 MVP
 계약에서는 만들지 않습니다.** AI 는 이력서를 색인하지 않고 면접 시작 시 전체 내용을
 받아 처리합니다([`10-ai-client.md`](./10-ai-client.md)).
 

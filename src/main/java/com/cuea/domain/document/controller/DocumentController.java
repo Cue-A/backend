@@ -36,8 +36,8 @@ import org.springframework.web.multipart.MultipartFile;
  * 직접 작성이 사용자에게는 같은 행동("자소서를 올렸다")이라 엔드포인트를 나누지
  * 않았습니다. 판단 근거는 Issue #28 참고.
  *
- * <p>인덱싱 상태 조회 엔드포인트는 따로 두지 않습니다. {@code indexStatus} 를
- * 문서의 속성으로 보면 목록·상세에 이미 들어 있습니다. Issue #30 참고.
+ * <p>인덱싱 상태는 내보내지 않습니다. 인덱싱은 면접 세션을 만들 때 AI 서버가
+ * 하므로 등록한 문서는 곧바로 면접에 쓸 수 있습니다(Issue #57).
  */
 @Tag(name = "문서")
 @RestController
@@ -98,9 +98,7 @@ public class DocumentController {
                     본인 문서만 보입니다. 남의 문서도 404 입니다.
 
                     sourceType=MARKDOWN 이면 content 에 본문이, FILE 이면
-                    downloadUrl 에 1시간짜리 Presigned URL 이 담깁니다.
-
-                    인덱싱 상태 확인도 이 API 로 합니다.""")
+                    downloadUrl 에 1시간짜리 Presigned URL 이 담깁니다.""")
     @GetMapping("/{documentId}")
     public Result<DocumentDetailResponse> detail(
             @CurrentUser String userId,

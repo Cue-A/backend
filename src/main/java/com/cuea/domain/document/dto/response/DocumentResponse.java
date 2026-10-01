@@ -2,7 +2,6 @@ package com.cuea.domain.document.dto.response;
 
 import com.cuea.domain.document.entity.DocType;
 import com.cuea.domain.document.entity.Document;
-import com.cuea.domain.document.entity.IndexStatus;
 import com.cuea.domain.document.entity.SourceType;
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -36,9 +35,6 @@ public record DocumentResponse(
         @Schema(description = "바이트. MARKDOWN 이면 null")
         Long fileSize,
 
-        @Schema(description = "면접 시작 가능 여부. COMPLETED 여야 시작할 수 있습니다")
-        IndexStatus indexStatus,
-
         OffsetDateTime createdAt
 ) {
 
@@ -50,7 +46,6 @@ public record DocumentResponse(
                 document.getDocTitle(),
                 document.getFileName(),
                 document.getFileSize(),
-                document.indexStatus(),
                 document.getCreatedAt());
     }
 }

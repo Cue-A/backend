@@ -33,11 +33,9 @@ import java.util.UUID;
  * 업로드는 외부 호출이라 트랜잭션 안에 두면 그 시간만큼 DB 커넥션을 붙듭니다.
  * DB 쓰기만 {@link DocumentWriter} 로 넘겨 짧게 끊습니다.
  *
- * <h2>인덱싱은 아직 없습니다</h2>
- * 원 설계는 등록 직후 AI 가 RAG 인덱싱을 시작하는 그림이었지만, AI 계약에 문서
- * 인덱싱 엔드포인트가 없습니다(Issue #28). 그래서 등록 즉시 {@code READY} 로
- * 둡니다. 엔드포인트가 생기면 {@link #initialStatus} 를 {@code UPLOADED} 로
- * 바꾸고 업로드 뒤에 인덱싱 호출만 붙이면 됩니다.
+ * <h2>등록 때 인덱싱하지 않습니다</h2>
+ * 인덱싱은 면접 세션을 만들 때 AI 서버가 합니다(Issue #28, #57). 문서 쪽에는
+ * 기다릴 단계가 없어 등록 즉시 {@code READY} 로 둡니다.
  */
 @Slf4j
 @Service
@@ -178,9 +176,7 @@ public class DocumentRegisterService {
     /**
      * 등록 직후 상태.
      *
-     * <p>인덱싱이 없으므로 바로 {@code READY} 입니다. AI 인덱싱 엔드포인트가
-     * 생기면 {@code UPLOADED} 로 바꾸세요. 그 한 줄이 프론트에는
-     * {@code indexStatus=PROCESSING} 으로 나갑니다.
+     * <p>인덱싱은 세션 생성 때 AI 서버가 하므로 바로 {@code READY} 입니다.
      */
     private DocumentStatus initialStatus() {
         return DocumentStatus.READY;

@@ -10,6 +10,7 @@ import com.cuea.domain.report.entity.Report;
 import com.cuea.domain.report.entity.ReportStatus;
 import com.cuea.domain.user.entity.User;
 import com.cuea.support.PostgresRepositoryTest;
+import org.hibernate.Hibernate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -113,6 +114,37 @@ class ReportRepositoryTest extends PostgresRepositoryTest {
             reportRepository.save(Report.processing(session, "task_1"));
             em.flush();
         }).isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    /** 상태 조회 API 의 소유자 스코프. 남의 리포트는 존재 여부도 드러나지 않게 빈 값입니다. */
+    @Test
+    void reportId_로_찾을_때_본인_것만_나온다() {
+        Report report = em.persistFlushFind(Report.processing(session, "task_1"));
+        User other = em.persist(User.create(null, "다른 사람"));
+        String ownerId = session.getUser().getUserId();
+
+        assertThat(reportRepository.findByPublicIdAndSession_User_UserId(report.getPublicId(), ownerId))
+                .map(Report::getReportId).contains(report.getReportId());
+        assertThat(reportRepository.findByPublicIdAndSession_User_UserId(report.getPublicId(), other.getUserId()))
+                .isEmpty();
+        assertThat(reportRepository.findByPublicIdAndSession_User_UserId(UUID.randomUUID(), ownerId))
+                .isEmpty();
+    }
+
+    /**
+     * 상태 조회는 트랜잭션 없이(open-in-view 도 꺼짐) 세션 ID 를 꺼냅니다. 식별자 접근이
+     * 프록시를 초기화하면 트랜잭션 밖에서 LazyInitializationException 이 납니다.
+     */
+    @Test
+    void 조회한_리포트에서_세션_ID_를_꺼내도_세션을_읽지_않는다() {
+        Report report = em.persistFlushFind(Report.processing(session, "task_1"));
+        em.clear();
+
+        Report found = reportRepository.findByPublicIdAndSession_User_UserId(
+                report.getPublicId(), session.getUser().getUserId()).orElseThrow();
+
+        assertThat(found.getSession().getSessionId()).isEqualTo(session.getSessionId());
+        assertThat(Hibernate.isInitialized(found.getSession())).isFalse();
     }
 
     private Report failedReport(int attempt, String errorCode) {

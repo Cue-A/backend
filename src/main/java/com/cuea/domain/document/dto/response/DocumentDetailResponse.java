@@ -2,7 +2,6 @@ package com.cuea.domain.document.dto.response;
 
 import com.cuea.domain.document.entity.DocType;
 import com.cuea.domain.document.entity.Document;
-import com.cuea.domain.document.entity.IndexStatus;
 import com.cuea.domain.document.entity.SourceType;
 import io.swagger.v3.oas.annotations.media.Schema;
 
@@ -35,14 +34,6 @@ public record DocumentDetailResponse(
         @Schema(description = "Presigned GET. FILE 일 때만 채워지며 1시간 뒤 만료됩니다")
         String downloadUrl,
 
-        IndexStatus indexStatus,
-
-        @Schema(description = "인덱싱 완료 시각. 인덱싱 도입 전이라 항상 null")
-        OffsetDateTime indexedAt,
-
-        @Schema(description = "인덱싱 실패 사유. 인덱싱 도입 전이라 항상 null")
-        String indexError,
-
         OffsetDateTime createdAt,
 
         OffsetDateTime updatedAt
@@ -61,10 +52,6 @@ public record DocumentDetailResponse(
                 document.getDocTitle(),
                 isFile ? null : document.getDocText(),
                 downloadUrl,
-                document.indexStatus(),
-                // 인덱싱이 없어 채울 값이 없습니다. 응답 모양만 미리 맞춰둡니다.
-                null,
-                null,
                 document.getCreatedAt(),
                 document.getUpdatedAt());
     }

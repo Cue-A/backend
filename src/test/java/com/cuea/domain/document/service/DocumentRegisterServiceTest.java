@@ -6,7 +6,6 @@ import com.cuea.domain.document.dto.request.DocumentCreateCommand;
 import com.cuea.domain.document.dto.response.DocumentResponse;
 import com.cuea.domain.document.entity.DocType;
 import com.cuea.domain.document.entity.Document;
-import com.cuea.domain.document.entity.IndexStatus;
 import com.cuea.domain.document.entity.SourceType;
 import com.cuea.domain.document.repository.DocumentRepository;
 import com.cuea.domain.user.entity.User;
@@ -15,6 +14,7 @@ import com.cuea.infrastructure.file.FileValidator;
 import com.cuea.infrastructure.file.UploadedFile;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 
 import java.io.ByteArrayInputStream;
 import java.nio.charset.StandardCharsets;
@@ -26,6 +26,7 @@ import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -78,15 +79,14 @@ class DocumentRegisterServiceTest {
         assertThat(response.documentId()).isNotBlank();
     }
 
-    /**
-     * 인덱싱이 없으므로 등록 즉시 면접에 쓸 수 있습니다. AI 인덱싱이 붙으면
-     * 이 테스트가 깨지고, 그때 PROCESSING 으로 바꾸는 게 맞습니다.
-     */
+    /** 인덱싱은 세션 생성 때 AI 서버가 하므로 등록 즉시 면접에 쓸 수 있습니다. */
     @Test
-    void 인덱싱이_없으므로_등록_즉시_COMPLETED_다() {
-        DocumentResponse response = service.register(user.getUserId(), fileCommand("resume.pdf", PDF, 1_024));
+    void 등록_즉시_면접에_쓸_수_있다() {
+        service.register(user.getUserId(), fileCommand("resume.pdf", PDF, 1_024));
 
-        assertThat(response.indexStatus()).isEqualTo(IndexStatus.COMPLETED);
+        ArgumentCaptor<Document> saved = ArgumentCaptor.forClass(Document.class);
+        verify(documentWriter).save(saved.capture());
+        assertThat(saved.getValue().isUsableForSession()).isTrue();
     }
 
     @Test

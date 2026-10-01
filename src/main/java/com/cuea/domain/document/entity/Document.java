@@ -191,11 +191,6 @@ public class Document extends BaseTimeEntity {
                 .build();
     }
 
-    /** 프론트에 나가는 인덱싱 상태. 내부 단계를 그대로 노출하지 않습니다. */
-    public IndexStatus indexStatus() {
-        return status.toIndexStatus();
-    }
-
     public void markParsing() {
         this.status = DocumentStatus.PARSING;
     }

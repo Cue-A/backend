@@ -8,7 +8,6 @@ import com.cuea.domain.document.entity.DocType;
 import com.cuea.domain.document.entity.Document;
 import com.cuea.domain.document.entity.DocumentStatus;
 import com.cuea.domain.document.entity.FileFormat;
-import com.cuea.domain.document.entity.IndexStatus;
 import com.cuea.domain.document.repository.DocumentRepository;
 import com.cuea.domain.user.entity.User;
 import com.cuea.infrastructure.file.PresignedUrlIssuer;
@@ -190,19 +189,6 @@ class DocumentQueryServiceTest {
                 .hasFieldOrPropertyWithValue("errorCode", ErrorCode.DOCUMENT_NOT_FOUND);
 
         verify(documentRepository, never()).findByPublicIdAndUser_UserId(any(UUID.class), anyString());
-    }
-
-    @Test
-    void 인덱싱_필드는_아직_비어_있다() {
-        Document document = markdown("본문");
-        when(documentRepository.findByPublicIdAndUser_UserId(any(UUID.class), eq(USER_ID)))
-                .thenReturn(Optional.of(document));
-
-        DocumentDetailResponse response = service.detail(USER_ID, document.getPublicId().toString());
-
-        assertThat(response.indexStatus()).isEqualTo(IndexStatus.COMPLETED);
-        assertThat(response.indexedAt()).isNull();
-        assertThat(response.indexError()).isNull();
     }
 
     private Pageable capturePageable() {

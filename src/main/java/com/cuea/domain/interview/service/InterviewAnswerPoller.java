@@ -262,12 +262,9 @@ public class InterviewAnswerPoller {
     }
 
     /**
-     * 계약 위반·예상치 못한 실패 정리: 세션 종료(AI abort 시도 → 우리 세션 ABORTED
-     * 정리)를 {@link InterviewSessionTerminator} 에 위임한 뒤 error push 합니다. Backend 와
-     * AI 상태 동기화를 보장할 수 없을 때 세션이 {@code IN_PROGRESS} 로 잔류하지 않도록
-     * 합니다. cleanup 예외는 원본 원인({@code error})을 덮지 않도록 suppressed 로 붙고
-     * 삼켜집니다(Terminator 정책). 사용자 통지(error push)는 세션 종료와 분리해 여기서
-     * 별도로 수행합니다(#53).
+     * 계약 위반·예상치 못한 실패를 정리합니다. 세션을 종료한 뒤 error push 합니다.
+     * Backend 와 AI 상태 동기화를 보장할 수 없을 때 세션이 {@code IN_PROGRESS} 로
+     * 잔류하지 않도록 합니다.
      */
     private void cleanupAndPushError(String sessionId, String context, BusinessException error) {
         log.warn("{} sessionId={} errorCode={}", context, sessionId, error.getErrorCode());
@@ -329,10 +326,8 @@ public class InterviewAnswerPoller {
     }
 
     private void pushError(String sessionId, BusinessException e) {
-        // error push 는 항상 최종 지점이다. 답변 처리의 STT/LLM 자동 재전송(1회)은 이미
-        // 소진됐거나(재시도 이후 실패) 대상이 아니므로, 여기서 Backend 가 추가 자동 재시도를
-        // 하지 않는다(retryable=false). 사용자 다음 행동(STT 최종 실패 시 재녹음)은
-        // needsRerecord 로 알린다. 최종 오류 메시지 조립 규칙은 ErrorPushMessage 가 가진다.
+        // error push 는 항상 최종 지점이라 Backend 추가 자동 재시도가 없다(retryable=false).
+        // 사용자 다음 행동(STT 최종 실패 시 재녹음)은 needsRerecord 로 알린다.
         socketHandler.push(sessionId,
                 ErrorPushMessage.finalFailure(e.getErrorCode(), e.getMessage()));
     }

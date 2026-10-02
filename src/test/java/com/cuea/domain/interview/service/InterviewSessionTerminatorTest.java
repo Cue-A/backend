@@ -13,7 +13,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.verify;
 
 /**
- * 세션 종료 공용 컴포넌트를 검증합니다. (Issue #53)
+ * 세션 종료 공용 컴포넌트를 검증합니다.
  *
  * <p>핵심: AI abort 는 best-effort(실패해도 로컬 정리 보장), 로컬 {@code ABORTED}
  * 정리는 항상 수행, {@code terminateQuietly} 는 정리 실패를 원인 예외에 suppressed 로

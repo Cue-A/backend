@@ -29,14 +29,11 @@ public record ErrorPushMessage(
     }
 
     /**
-     * 최종 오류 push 메시지를 만듭니다. 세션 시작·답변 폴링 양쪽이 동일한 규칙으로
-     * 최종 오류를 내려주도록 조립 책임을 여기 모읍니다(error push 자체의 계약). (Issue #53)
+     * 최종 오류 push 메시지를 만듭니다.
      *
-     * <p>이 메시지는 <b>항상 최종 지점</b>이므로 {@code retryable=false} 로 고정합니다
-     * (Backend 자동 재시도는 이미 끝났거나 대상이 아님). 사용자 다음 행동이 필요한지는
-     * {@code needsRerecord} 로만 알리며, {@code STT_FAILED}(같은 오디오로는 결과가 같아
-     * 재녹음 필요)일 때 {@code true} 입니다. 이 규칙은 특정 흐름(답변/세션 시작)의 정책이
-     * 아니라 <b>error push 메시지 자체의 성질</b>이라 여기 둡니다.
+     * <p>항상 최종 지점이라 {@code retryable=false} 로 고정합니다(Backend 자동 재시도는
+     * 이미 끝났거나 대상이 아님). {@code STT_FAILED}(같은 오디오로는 결과가 같아 재녹음
+     * 필요)일 때만 {@code needsRerecord=true} 입니다.
      */
     public static SocketMessage<ErrorPushMessage> finalFailure(ErrorCode errorCode, String message) {
         return of(new ErrorPushMessage(

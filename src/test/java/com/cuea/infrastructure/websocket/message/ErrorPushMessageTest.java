@@ -6,10 +6,8 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 최종 오류 push 메시지 조립 규칙을 검증합니다. (Issue #53)
+ * 최종 오류 push 메시지 조립 규칙을 검증합니다.
  *
- * <p>이 규칙은 특정 흐름(답변/세션 시작)의 정책이 아니라 <b>error push 메시지 자체의
- * 성질</b>입니다. 세션 시작·답변 폴링 양쪽이 같은 규칙으로 최종 오류를 내려줍니다.
  * <ul>
  *   <li>항상 최종 지점이라 {@code retryable=false}.</li>
  *   <li>{@code STT_FAILED} 만 {@code needsRerecord=true}(같은 오디오로는 결과가 같음).</li>

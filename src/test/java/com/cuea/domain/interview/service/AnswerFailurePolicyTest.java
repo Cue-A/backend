@@ -6,11 +6,9 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 답변 처리 흐름의 AI 실패 정책을 검증합니다. (Issue #53)
+ * 답변 처리 흐름의 AI 실패 정책을 검증합니다.
  *
- * <p>이 판정들은 {@code AiErrorTranslator} 에서 분리돼 이 도메인 정책으로 옮겨졌습니다.
- * 판정은 모두 우리 {@link ErrorCode} 기준입니다(AI 원본 문자열은 {@code AiPoller} 가
- * {@code BusinessException} 으로 옮기며 사라짐). timeout·unexpected 같은 Backend 자체
+ * <p>판정은 모두 우리 {@link ErrorCode} 기준입니다. timeout·unexpected 같은 Backend 자체
  * 코드를 재시도 대상으로 잘못 분류하지 않는지도 함께 봅니다.
  */
 class AnswerFailurePolicyTest {
@@ -29,7 +27,7 @@ class AnswerFailurePolicyTest {
 
     @Test
     void 최대_재전송은_1회다() {
-        // #25 확정 정책. 늘리지 않는다.
+        // 1회 고정 정책. 늘리지 않는다.
         assertThat(AnswerFailurePolicy.MAX_RETRY).isEqualTo(1);
     }
 

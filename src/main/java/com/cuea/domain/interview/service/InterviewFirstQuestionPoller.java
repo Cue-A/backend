@@ -123,10 +123,7 @@ public class InterviewFirstQuestionPoller {
     }
 
     private void pushError(String sessionId, BusinessException e) {
-        // 세션 시작 폴러의 error push 는 항상 cleanup + ABORTED 이후의 최종 오류다.
-        // Backend 는 startSession 을 재전송하지 않으므로 자동 재시도 여지가 없다
-        // (retryable=false). 최종 오류 메시지 조립 규칙(needsRerecord 포함)은
-        // ErrorPushMessage 가 가지며, 답변 흐름과 동일한 규칙을 공유한다.
+        // Backend 는 startSession 을 재전송하지 않아 자동 재시도 여지가 없다(retryable=false).
         socketHandler.push(sessionId,
                 ErrorPushMessage.finalFailure(e.getErrorCode(), e.getMessage()));
     }

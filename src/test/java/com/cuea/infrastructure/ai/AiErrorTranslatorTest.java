@@ -7,11 +7,7 @@ import org.junit.jupiter.api.Test;
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * AI 표현 → Backend 표현 <b>변환</b>을 검증합니다. (Issue #53)
- *
- * <p>재시도·세션 정리·재녹음·중복 제출 같은 도메인 정책 판정은 이 변환기에서 빠졌고,
- * {@code AnswerFailurePolicy}(답변 흐름)로 옮겼습니다. 여기서는 코드 매핑·예외 생성만
- * 봅니다.
+ * AI 표현 → Backend 표현 변환을 검증합니다. 코드 매핑·예외 생성만 봅니다.
  */
 class AiErrorTranslatorTest {
 

@@ -192,9 +192,7 @@ public class InterviewAnswerService {
             throw new BusinessException(ErrorCode.SESSION_ENDED);
         }
 
-        // 소유권·상태 가드를 통과한 진행 중 세션만 실제 종료한다. AI abort(best-effort)
-        // → 로컬 ABORTED 정리는 세션 종료 공용 컴포넌트에 위임한다(#53). AI abort 가
-        // 실패해도(예: AI 서버 다운) 로컬 정리는 반드시 수행된다.
+        // 소유권·상태 가드를 통과한 진행 중 세션만 종료한다.
         sessionTerminator.terminate(sessionId);
     }
 

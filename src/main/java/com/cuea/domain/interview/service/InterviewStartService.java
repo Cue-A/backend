@@ -125,11 +125,9 @@ public class InterviewStartService {
     }
 
     /**
-     * AI 세션 중단을 시도하되, 실패해도 원인 예외({@code cause})를 덮지 않습니다.
-     *
-     * <p>로컬 세션 저장이 실패한 경우 전용입니다. 이때는 우리 DB 에 세션 행이 아직
+     * 로컬 세션 저장이 실패한 경우 전용 보상입니다. 이때는 우리 DB 에 세션 행이 아직
      * 없으므로 {@link InterviewSessionTerminator}(로컬 {@code ABORTED} 정리 포함)를 쓰지
-     * 않고 AI 세션만 보상 abort 합니다.
+     * 않고 AI 세션만 abort 합니다. 실패해도 원인 예외({@code cause})를 덮지 않습니다.
      */
     private void abortAiSessionQuietly(String sessionId, RuntimeException cause) {
         try {

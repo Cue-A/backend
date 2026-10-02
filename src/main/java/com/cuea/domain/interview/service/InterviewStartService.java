@@ -63,6 +63,7 @@ public class InterviewStartService {
     private final AiClient aiClient;
     private final InterviewSessionWriter sessionWriter;
     private final InterviewFirstQuestionPoller firstQuestionPoller;
+    private final InterviewSessionTerminator sessionTerminator;
 
     /**
      * 세션을 시작하고 즉시 반환합니다. 첫 질문은 백그라운드 폴링 후 WebSocket 으로
@@ -116,31 +117,24 @@ public class InterviewStartService {
                     aiResponse.sessionId(), aiResponse.taskId(), aiResponse.questionTotal());
         } catch (RuntimeException e) {
             log.warn("첫 질문 폴링 시작에 실패해 세션을 정리합니다 sessionId={}", aiResponse.sessionId(), e);
-            abortAiSessionQuietly(aiResponse.sessionId(), e);
-            markSessionAbortedQuietly(aiResponse.sessionId(), e);
+            sessionTerminator.terminateQuietly(aiResponse.sessionId(), e);
             throw e;
         }
 
         return new InterviewStartResponse(aiResponse.sessionId(), aiResponse.questionTotal());
     }
 
-    /** AI 세션 중단을 시도하되, 실패해도 원인 예외({@code cause})를 덮지 않습니다. */
+    /**
+     * 로컬 세션 저장이 실패한 경우 전용 보상입니다. 이때는 우리 DB 에 세션 행이 아직
+     * 없으므로 {@link InterviewSessionTerminator}(로컬 {@code ABORTED} 정리 포함)를 쓰지
+     * 않고 AI 세션만 abort 합니다. 실패해도 원인 예외({@code cause})를 덮지 않습니다.
+     */
     private void abortAiSessionQuietly(String sessionId, RuntimeException cause) {
         try {
             aiClient.abortSession(sessionId);
         } catch (RuntimeException cleanupError) {
             cause.addSuppressed(cleanupError);
             log.warn("AI 세션 중단 실패 sessionId={}", sessionId, cleanupError);
-        }
-    }
-
-    /** 우리 세션을 ABORTED 로 정리하되, 실패해도 원인 예외({@code cause})를 덮지 않습니다. */
-    private void markSessionAbortedQuietly(String sessionId, RuntimeException cause) {
-        try {
-            sessionWriter.markAborted(sessionId);
-        } catch (RuntimeException cleanupError) {
-            cause.addSuppressed(cleanupError);
-            log.warn("세션 ABORTED 처리 실패 sessionId={}", sessionId, cleanupError);
         }
     }
 

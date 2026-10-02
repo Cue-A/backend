@@ -5,7 +5,6 @@ import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.entity.Question;
 import com.cuea.infrastructure.ai.AiClient;
-import com.cuea.infrastructure.ai.AiErrorTranslator;
 import com.cuea.infrastructure.ai.AiPoller;
 import com.cuea.infrastructure.ai.AiProperties;
 import com.cuea.infrastructure.ai.dto.AiQuestionResult;
@@ -68,10 +67,10 @@ public class InterviewAnswerPoller {
     private final AiClient aiClient;
     private final AiPoller aiPoller;
     private final AiProperties aiProperties;
-    private final AiErrorTranslator errorTranslator;
     private final SessionSocketHandler socketHandler;
     private final InterviewSessionWriter sessionWriter;
     private final QuestionPushFactory questionPushFactory;
+    private final InterviewSessionTerminator sessionTerminator;
 
     /**
      * 답변 처리 task 를 폴링해 결과 타입별로 저장·전달합니다.
@@ -82,8 +81,8 @@ public class InterviewAnswerPoller {
      *
      * <h3>STT/LLM 1회 자동 재시도 (Issue #25, Option 1)</h3>
      * <p>폴링 결과가 {@code status=error} 이고 {@code LLM_FAILED}·{@code STT_FAILED}
-     * 이면({@link AiErrorTranslator#isRetryable(ErrorCode)}), <b>같은 {@code request} 를 1회</b>
-     * 재전송해 새 taskId 를 받아 다시 폴링합니다({@link AiErrorTranslator#MAX_RETRY}).
+     * 이면({@link AnswerFailurePolicy#isRetryable(ErrorCode)}), <b>같은 {@code request} 를 1회</b>
+     * 재전송해 새 taskId 를 받아 다시 폴링합니다({@link AnswerFailurePolicy#MAX_RETRY}).
      * <ul>
      *   <li><b>processing 동안에는 재전송하지 않습니다.</b> 재전송은 {@link AiPoller#await}
      *       가 {@code status=error} 를 실제로 확인해 예외를 던진 뒤에만 일어납니다.</li>
@@ -110,8 +109,8 @@ public class InterviewAnswerPoller {
             } catch (BusinessException e) {
                 // AI 가 알려준 실패·타임아웃. status=error 를 실제로 확인한 시점이다.
                 // LLM/STT 이고 재시도 여유가 있으면 같은 request 를 1회 재전송한다.
-                if (retries < AiErrorTranslator.MAX_RETRY
-                        && errorTranslator.isRetryable(e.getErrorCode())) {
+                if (retries < AnswerFailurePolicy.MAX_RETRY
+                        && AnswerFailurePolicy.isRetryable(e.getErrorCode())) {
                     String retryTaskId;
                     try {
                         retryTaskId = resubmitForRetry(sessionId, request, e);
@@ -230,11 +229,11 @@ public class InterviewAnswerPoller {
     private void handlePollingFailure(String sessionId, BusinessException e, boolean retried) {
         ErrorCode code = e.getErrorCode();
 
-        if (errorTranslator.isDuplicateSubmit(code)) {
+        if (AnswerFailurePolicy.isDuplicateSubmit(code)) {
             log.info("답변이 이미 종료된 세션에 도착해 무시합니다(중복 제출) sessionId={}", sessionId);
             return;
         }
-        if (errorTranslator.requiresSessionAbort(code)) {
+        if (AnswerFailurePolicy.requiresSessionAbort(code)) {
             cleanupAndPushError(sessionId, "답변 폴링 실패로 세션을 정리합니다", e);
             return;
         }
@@ -244,7 +243,7 @@ public class InterviewAnswerPoller {
             cleanupAndPushError(sessionId, "재시도 이후에도 실패해 세션을 정리합니다", e);
             return;
         }
-        if (errorTranslator.isClientContractError(code)) {
+        if (AnswerFailurePolicy.isClientContractError(code)) {
             log.warn("답변 폴링에서 클라이언트/조립 계약 오류 sessionId={} errorCode={}", sessionId, code);
             pushError(sessionId, e);
             return;
@@ -263,25 +262,13 @@ public class InterviewAnswerPoller {
     }
 
     /**
-     * 계약 위반·예상치 못한 실패 정리: AI 세션 abort 시도 → 우리 세션 ABORTED 정리
-     * 시도 → error push. Backend 와 AI 상태 동기화를 보장할 수 없을 때 세션이
-     * {@code IN_PROGRESS} 로 잔류하지 않도록 합니다. cleanup 예외는 원본 원인을 덮지
-     * 않도록 suppressed 로 붙이고 삼킵니다.
+     * 계약 위반·예상치 못한 실패를 정리합니다. 세션을 종료한 뒤 error push 합니다.
+     * Backend 와 AI 상태 동기화를 보장할 수 없을 때 세션이 {@code IN_PROGRESS} 로
+     * 잔류하지 않도록 합니다.
      */
     private void cleanupAndPushError(String sessionId, String context, BusinessException error) {
         log.warn("{} sessionId={} errorCode={}", context, sessionId, error.getErrorCode());
-        try {
-            aiClient.abortSession(sessionId);
-        } catch (RuntimeException cleanupError) {
-            error.addSuppressed(cleanupError);
-            log.warn("AI 세션 중단 실패 sessionId={}", sessionId, cleanupError);
-        }
-        try {
-            sessionWriter.markAborted(sessionId);
-        } catch (RuntimeException cleanupError) {
-            error.addSuppressed(cleanupError);
-            log.warn("세션 ABORTED 처리 실패 sessionId={}", sessionId, cleanupError);
-        }
+        sessionTerminator.terminateQuietly(sessionId, error);
         pushError(sessionId, error);
     }
 
@@ -339,17 +326,9 @@ public class InterviewAnswerPoller {
     }
 
     private void pushError(String sessionId, BusinessException e) {
-        ErrorCode errorCode = e.getErrorCode();
-        // error push 는 항상 최종 지점이다. 답변 처리의 STT/LLM 자동 재전송(1회)은 이미
-        // 소진됐거나(재시도 이후 실패) 대상이 아니므로, 여기서 Backend 가 추가 자동 재시도를
-        // 하지 않는다. 따라서 retryable=false 로 내보낸다. 사용자 다음 행동은 needsRerecord
-        // (STT 최종 실패 시 재녹음) 로 알린다. errorCode 자체(LLM_FAILED 등)로 retryable 을
-        // 정하지 않는다 — 그건 내부 재전송 판정용이다.
-        socketHandler.push(sessionId, ErrorPushMessage.of(new ErrorPushMessage(
-                errorCode.name(),
-                e.getMessage(),
-                false,
-                errorTranslator.needsRerecord(errorCode)
-        )));
+        // error push 는 항상 최종 지점이라 Backend 추가 자동 재시도가 없다(retryable=false).
+        // 사용자 다음 행동(STT 최종 실패 시 재녹음)은 needsRerecord 로 알린다.
+        socketHandler.push(sessionId,
+                ErrorPushMessage.finalFailure(e.getErrorCode(), e.getMessage()));
     }
 }

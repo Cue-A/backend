@@ -3,7 +3,6 @@ package com.cuea.domain.interview.service;
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.infrastructure.ai.AiClient;
-import com.cuea.infrastructure.ai.AiErrorTranslator;
 import com.cuea.infrastructure.ai.AiPoller;
 import com.cuea.infrastructure.ai.AiProperties;
 import com.cuea.infrastructure.ai.dto.AiQuestionResult;
@@ -63,8 +62,9 @@ class InterviewFirstQuestionPollerTest {
                 new AiProperties.Mock(false));
 
         poller = new InterviewFirstQuestionPoller(
-                aiClient, aiPoller, aiProperties, new AiErrorTranslator(),
-                socketHandler, sessionWriter, questionPushFactory);
+                aiPoller, aiProperties,
+                socketHandler, sessionWriter, questionPushFactory,
+                new InterviewSessionTerminator(aiClient, sessionWriter));
     }
 
     private AiQuestionResult firstQuestion() {

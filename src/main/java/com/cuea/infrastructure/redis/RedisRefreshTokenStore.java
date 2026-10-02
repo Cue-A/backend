@@ -59,6 +59,11 @@ public class RedisRefreshTokenStore implements RefreshTokenStore {
         redisTemplate.opsForHash().delete(key(userId), jti);
     }
 
+    @Override
+    public void revokeAll(String userId) {
+        redisTemplate.delete(key(userId));
+    }
+
     private String key(String userId) {
         return KEY_PREFIX + userId;
     }

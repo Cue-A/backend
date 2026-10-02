@@ -37,7 +37,7 @@ DB 에는 0~100 점수만 컬럼으로 꺼내고, 나머지는 원본(`report_da
 ```
 POST /api/interviews/{sessionId}/reports     → 202 { reportId, sessionId, status, createdAt }
 WS   /ws/reports/{reportId}                  → progress · report · error
-GET  /api/reports/{reportId}/status          → { reportId, sessionId, status, stage, progress, errorCode, retryable, createdAt, completedAt }
+GET  /api/reports/{reportId}/status          → { reportId, sessionId, status, stage, progress, errorCode, message, retryable, createdAt, completedAt }
 ```
 
 ### 동기 구간 (HTTP 요청 스레드, 1초 이내)
@@ -91,7 +91,7 @@ GET  /api/reports/{reportId}/status          → { reportId, sessionId, status, 
 ```json
 { "type": "progress", "payload": { "stage": "ANALYZING_CONTENT", "progress": 0.6 } }
 { "type": "report",   "payload": { "reportId": "...", "status": "COMPLETED", "scoreTotal": 68 } }
-{ "type": "error",    "payload": { "errorCode": "STT_FAILED", "message": "...", "retryable": false } }
+{ "type": "error",    "payload": { "errorCode": "STT_FAILED", "message": "음성 인식에 실패해 리포트를 만들지 못했습니다", "retryable": false } }
 ```
 
 | AI stage | `stage` |
@@ -108,6 +108,19 @@ GET  /api/reports/{reportId}/status          → { reportId, sessionId, status, 
 |---|---|
 | `CONTENT_FAILED` · `MEDIA_FETCH_FAILED` · `AI_TIMEOUT` · `AI_UNAVAILABLE` | true |
 | `STT_FAILED` · 그 외 | false |
+
+### 실패 문구 (`message`)
+
+**WS `error.message` 와 상태 조회 `message` 는 같은 문구입니다**(Issue #59). 둘 다
+`ReportFailurePolicy.messageOf` 로 만듭니다. 프론트는 어느 경로로 실패를 받든 같은
+처리를 쓰면 됩니다.
+
+- 기본은 `ErrorCode` 의 문구입니다
+- `STT_FAILED` 만 리포트용 문구로 바꿉니다. 기본 문구가 "다시 녹음해 주세요"인데 리포트는
+  면접이 끝난 뒤라 다시 녹음할 수 없습니다
+- DB 에 남은 코드가 지금 `ErrorCode` 에 없거나 비어 있으면 "리포트를 만들지 못했습니다"
+- **AI 가 준 문구는 내려주지 않고 로그에만 남깁니다.** 사용자용 문구라는 보장이 없고,
+  내려주면 같은 실패인데 소켓과 상태 조회의 문구가 달라집니다
 
 면접 소켓(`/ws/interviews/{sessionId}`)과 따로 둡니다. 리포트는 면접이 끝난 뒤라 면접
 소켓은 닫혀 있을 가능성이 높습니다.
@@ -136,15 +149,15 @@ WS 메시지는 붙어 있는 연결에만 갑니다. 소켓에 늦게 붙거나
 
 ```json
 { "reportId": "...", "sessionId": "sess_...", "status": "PROCESSING",
-  "stage": "ANALYZING_CONTENT", "progress": 0.6, "errorCode": null, "retryable": null,
+  "stage": "ANALYZING_CONTENT", "progress": 0.6, "errorCode": null, "message": null, "retryable": null,
   "createdAt": "2026-09-23T12:34:56Z", "completedAt": null }
 ```
 
-| status | stage · progress | errorCode · retryable |
+| status | stage · progress | errorCode · message · retryable |
 |---|---|---|
 | `PROCESSING` | 마지막 WS progress 와 같은 값. 첫 progress 전이면 null | null |
 | `COMPLETED` · `PARTIAL` | null | null |
-| `FAILED` | null | DB `error_code`, `retryable` 은 WS `error` 와 같은 규칙 |
+| `FAILED` | null | DB `error_code`. `message` · `retryable` 은 WS `error` 와 같은 값 |
 
 - `sessionId` 는 FAILED 재요청(`POST /api/interviews/{sessionId}/reports`)에 씁니다. 새로고침으로
   들어온 프론트는 reportId 만 알 수 있습니다

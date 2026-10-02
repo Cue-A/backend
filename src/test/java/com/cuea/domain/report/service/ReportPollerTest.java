@@ -132,6 +132,18 @@ class ReportPollerTest {
         assertThat(error.retryable()).isTrue();
     }
 
+    /** 같은 실패를 소켓과 상태 조회가 같은 문구로 보여줘야 합니다. AI 원문은 로그에만 남깁니다. */
+    @Test
+    void error_메시지는_AI_원문이_아니라_상태_조회와_같은_문구다() throws Exception {
+        when(aiPoller.await(anyString(), any(), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.STT_FAILED, "whisper: empty audio segment"));
+
+        poller.onRequested(event());
+
+        ReportErrorPushMessage error = (ReportErrorPushMessage) pushed();
+        assertThat(error.message()).isEqualTo(ReportFailurePolicy.messageOf("STT_FAILED"));
+    }
+
     @Test
     void STT_FAILED_는_재시도_없이_FAILED_이고_retryable_false() throws Exception {
         when(aiPoller.await(anyString(), any(), any(), any()))

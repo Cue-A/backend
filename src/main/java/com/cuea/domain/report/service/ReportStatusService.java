@@ -47,10 +47,11 @@ public class ReportStatusService {
                 yield response(report, publicId,
                         progress.map(ReportProgress::stage).orElse(null),
                         progress.map(ReportProgress::progress).orElse(null),
-                        null, null);
+                        null, null, null);
             }
-            case COMPLETED, PARTIAL -> response(report, publicId, null, null, null, null);
+            case COMPLETED, PARTIAL -> response(report, publicId, null, null, null, null, null);
             case FAILED -> response(report, publicId, null, null, report.getErrorCode(),
+                    ReportFailurePolicy.messageOf(report.getErrorCode()),
                     ReportFailurePolicy.isUserRetryable(report.getErrorCode()));
         };
     }
@@ -61,10 +62,10 @@ public class ReportStatusService {
      */
     private ReportStatusResponse response(Report report, String publicId,
                                           ReportProgressStage stage, Double progress,
-                                          String errorCode, Boolean retryable) {
+                                          String errorCode, String message, Boolean retryable) {
         return new ReportStatusResponse(
                 publicId, report.getSession().getSessionId(), report.getStatus(),
-                stage, progress, errorCode, retryable,
+                stage, progress, errorCode, message, retryable,
                 report.getCreatedAt(), report.getCompletedAt());
     }
 

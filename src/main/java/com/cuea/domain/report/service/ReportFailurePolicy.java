@@ -2,6 +2,8 @@ package com.cuea.domain.report.service;
 
 import com.cuea.common.exception.ErrorCode;
 
+import java.util.Map;
+import java.util.Optional;
 import java.util.Set;
 
 /**
@@ -25,6 +27,16 @@ final class ReportFailurePolicy {
             ErrorCode.AI_TIMEOUT,
             ErrorCode.AI_UNAVAILABLE);
 
+    /**
+     * 기본 문구가 리포트에 맞지 않는 코드. {@code STT_FAILED} 의 기본 문구는 "다시 녹음해
+     * 주세요"인데, 리포트는 면접이 끝난 뒤라 다시 녹음할 수 없습니다.
+     */
+    private static final Map<ErrorCode, String> MESSAGE_OVERRIDES = Map.of(
+            ErrorCode.STT_FAILED, "음성 인식에 실패해 리포트를 만들지 못했습니다");
+
+    /** 지금 {@link ErrorCode} 에 없는 옛 코드이거나 코드가 비어 있을 때. */
+    private static final String UNKNOWN_FAILURE_MESSAGE = "리포트를 만들지 못했습니다";
+
     private ReportFailurePolicy() {
     }
 
@@ -45,10 +57,33 @@ final class ReportFailurePolicy {
      * 내려주려고 씁니다. 지금 {@link ErrorCode} 에 없는 옛 코드는 재시도 불가로 봅니다.
      */
     static boolean isUserRetryable(String errorCode) {
+        return parse(errorCode).map(ReportFailurePolicy::isUserRetryable).orElse(false);
+    }
+
+    /**
+     * 사용자에게 보여줄 실패 문구. WebSocket {@code error.message} 와 상태 조회
+     * {@code message} 가 같은 값을 내려주도록 둘 다 여기를 씁니다.
+     *
+     * <p>AI 가 준 문구는 쓰지 않습니다. 사용자용으로 쓴 문구라는 보장이 없고, 쓰면 같은
+     * 실패인데 소켓과 상태 조회의 문구가 달라집니다. AI 문구는 로그에만 남깁니다.
+     */
+    static String messageOf(ErrorCode errorCode) {
+        return MESSAGE_OVERRIDES.getOrDefault(errorCode, errorCode.getMessage());
+    }
+
+    /** DB 에 남은 {@code error_code} 로 문구를 만듭니다. 모르는 코드는 공통 문구입니다. */
+    static String messageOf(String errorCode) {
+        return parse(errorCode).map(ReportFailurePolicy::messageOf).orElse(UNKNOWN_FAILURE_MESSAGE);
+    }
+
+    private static Optional<ErrorCode> parse(String errorCode) {
+        if (errorCode == null) {
+            return Optional.empty();
+        }
         try {
-            return errorCode != null && isUserRetryable(ErrorCode.valueOf(errorCode));
+            return Optional.of(ErrorCode.valueOf(errorCode));
         } catch (IllegalArgumentException e) {
-            return false;
+            return Optional.empty();
         }
     }
 }

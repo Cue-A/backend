@@ -14,8 +14,8 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.util.LinkedMultiValueMap;
 import org.springframework.util.MultiValueMap;
-import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 
 import java.util.function.Supplier;
 
@@ -129,8 +129,8 @@ public class KakaoOAuthClient implements OAuthClient {
     private <T> T call(Supplier<T> action) {
         try {
             return action.get();
-        } catch (ResourceAccessException e) {
-            log.error("카카오 서버에 연결하지 못했습니다", e);
+        } catch (RestClientException e) {
+            log.error("카카오 API 호출에 실패했습니다", e);
             throw new BusinessException(ErrorCode.OAUTH_FAILED);
         }
     }

@@ -9,13 +9,11 @@ import com.cuea.domain.auth.dto.response.TokenResponse;
 import com.cuea.domain.user.dto.response.UserResponse;
 import com.cuea.domain.user.entity.Provider;
 import com.cuea.domain.user.entity.User;
-import com.cuea.domain.user.repository.UserAuthRepository;
 import com.cuea.domain.user.repository.UserRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.security.crypto.password.PasswordEncoder;
 
-import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -29,21 +27,21 @@ import static org.mockito.Mockito.when;
 class AuthServiceTest {
 
     private UserRepository userRepository;
-    private UserAuthRepository userAuthRepository;
     private PasswordEncoder passwordEncoder;
     private TokenService tokenService;
     private OAuthClient kakaoOAuthClient;
+    private KakaoAccountLinker kakaoAccountLinker;
     private AuthService authService;
 
     @BeforeEach
     void setUp() {
         userRepository = mock(UserRepository.class);
-        userAuthRepository = mock(UserAuthRepository.class);
         passwordEncoder = mock(PasswordEncoder.class);
         tokenService = mock(TokenService.class);
         kakaoOAuthClient = mock(OAuthClient.class);
-        authService = new AuthService(userRepository, userAuthRepository,
-                passwordEncoder, tokenService, kakaoOAuthClient);
+        kakaoAccountLinker = mock(KakaoAccountLinker.class);
+        authService = new AuthService(userRepository, passwordEncoder, tokenService,
+                kakaoOAuthClient, kakaoAccountLinker);
 
         when(tokenService.issue(any(User.class))).thenAnswer(invocation -> {
             User user = invocation.getArgument(0);
@@ -117,102 +115,24 @@ class AuthServiceTest {
                 .extracting("errorCode").isEqualTo(ErrorCode.INVALID_CREDENTIALS);
     }
 
-    @Test
-    void 이미_연결된_카카오_계정이면_로그인만_하고_새로_만들지_않는다() {
-        User user = User.create("kim@example.com", "김취준");
-        user.link(Provider.KAKAO, "kakao-1", null);
-        when(userAuthRepository.findByProviderAndProviderId(Provider.KAKAO, "kakao-1"))
-                .thenReturn(Optional.of(user.authOf(Provider.KAKAO).orElseThrow()));
-        when(kakaoOAuthClient.fetch("code", "redirect"))
-                .thenReturn(new OAuthUserInfo(Provider.KAKAO, "kakao-1", "kim@example.com", true, "김취준"));
-
-        TokenResponse response = authService.loginWithKakao(new KakaoLoginRequest("code", "redirect"));
-
-        assertThat(response.isNewUser()).isFalse();
-        verify(userRepository, org.mockito.Mockito.never()).save(any(User.class));
-    }
-
-    @Test
-    void 검증된_이메일이_같은_기존_계정이_있으면_연결한다() {
-        User existing = User.create("kim@example.com", "김취준");
-        when(userAuthRepository.findByProviderAndProviderId(Provider.KAKAO, "kakao-1"))
-                .thenReturn(Optional.empty());
-        when(kakaoOAuthClient.fetch("code", "redirect"))
-                .thenReturn(new OAuthUserInfo(Provider.KAKAO, "kakao-1", "kim@example.com", true, "김취준"));
-        when(userRepository.findByEmail("kim@example.com")).thenReturn(Optional.of(existing));
-
-        TokenResponse response = authService.loginWithKakao(new KakaoLoginRequest("code", "redirect"));
-
-        assertThat(response.isNewUser()).isFalse();
-        assertThat(existing.providers()).contains(Provider.KAKAO);
-        verify(userRepository).save(existing);
-    }
-
-    @Test
-    void 이메일_미검증이면_기존_계정에_연결하지_않고_새로_만든다() {
-        User existing = User.create("kim@example.com", "김취준");
-        when(userAuthRepository.findByProviderAndProviderId(Provider.KAKAO, "kakao-1"))
-                .thenReturn(Optional.empty());
-        when(kakaoOAuthClient.fetch("code", "redirect"))
-                .thenReturn(new OAuthUserInfo(Provider.KAKAO, "kakao-1", "kim@example.com", false, "김취준"));
-
-        TokenResponse response = authService.loginWithKakao(new KakaoLoginRequest("code", "redirect"));
-
-        assertThat(response.isNewUser()).isTrue();
-        verify(userRepository, org.mockito.Mockito.never()).findByEmail(anyString());
-    }
-
-    @Test
-    void 이메일_미검증이면_새_계정의_이메일은_저장하지_않는다() {
-        when(userAuthRepository.findByProviderAndProviderId(Provider.KAKAO, "kakao-1"))
-                .thenReturn(Optional.empty());
-        when(kakaoOAuthClient.fetch("code", "redirect"))
-                .thenReturn(new OAuthUserInfo(Provider.KAKAO, "kakao-1", "kim@example.com", false, "김취준"));
-
-        TokenResponse response = authService.loginWithKakao(new KakaoLoginRequest("code", "redirect"));
-
-        assertThat(response.isNewUser()).isTrue();
-        assertThat(response.user().email()).isNull();
-    }
-
     /**
-     * 카카오 이메일은 나중에 바뀔 수 있어, "검증된 이메일이 같은 기존 계정"이 사실은
-     * 이미 다른 카카오 계정과 연결돼 있을 수 있습니다. 그대로 연결하면
-     * uk_user_auth_user_provider 위반으로 500이 나므로 새 계정을 만들어야 합니다.
-     * 이때 새 계정에 그 이메일을 그대로 넣으면 이번엔 users.email unique 위반으로
-     * 500이 나므로, 새 계정의 email은 비워야 합니다.
+     * 카카오 계정 연동·생성 분기 자체는 {@link KakaoAccountLinkerTest} 에서 검증합니다.
+     * 여기서는 {@code loginWithKakao} 가 카카오 호출 결과를 {@link KakaoAccountLinker}
+     * 에 그대로 넘기고, 그 결과로 토큰을 발급하는 오케스트레이션만 확인합니다.
      */
     @Test
-    void 이메일이_같아도_이미_다른_카카오_계정과_연결됐으면_새로_만든다() {
-        User existing = User.create("kim@example.com", "김취준");
-        existing.link(Provider.KAKAO, "kakao-old", null);
-        when(userAuthRepository.findByProviderAndProviderId(Provider.KAKAO, "kakao-new"))
-                .thenReturn(Optional.empty());
-        when(userAuthRepository.findByUser_UserIdAndProvider(existing.getUserId(), Provider.KAKAO))
-                .thenReturn(existing.authOf(Provider.KAKAO));
+    void 카카오_로그인은_연동_결과를_그대로_토큰_발급에_넘긴다() {
+        User user = User.create("kim@example.com", "김취준");
+        user.link(Provider.KAKAO, "kakao-1", null);
         when(kakaoOAuthClient.fetch("code", "redirect"))
-                .thenReturn(new OAuthUserInfo(Provider.KAKAO, "kakao-new", "kim@example.com", true, "김취준"));
-        when(userRepository.findByEmail("kim@example.com")).thenReturn(Optional.of(existing));
+                .thenReturn(new OAuthUserInfo(Provider.KAKAO, "kakao-1", "kim@example.com", true, "김취준"));
+        when(kakaoAccountLinker.linkOrCreate(any(OAuthUserInfo.class)))
+                .thenReturn(new KakaoLinkResult(user, true));
 
         TokenResponse response = authService.loginWithKakao(new KakaoLoginRequest("code", "redirect"));
 
         assertThat(response.isNewUser()).isTrue();
-        assertThat(response.user().email()).isNull();
-        verify(userRepository, org.mockito.Mockito.never()).save(existing);
-        verify(userRepository).save(org.mockito.ArgumentMatchers.argThat(u -> u != existing));
-    }
-
-    @Test
-    void 신규_카카오_사용자면_계정을_새로_만든다() {
-        when(userAuthRepository.findByProviderAndProviderId(Provider.KAKAO, "kakao-9"))
-                .thenReturn(Optional.empty());
-        when(kakaoOAuthClient.fetch("code", "redirect"))
-                .thenReturn(new OAuthUserInfo(Provider.KAKAO, "kakao-9", null, false, null));
-
-        TokenResponse response = authService.loginWithKakao(new KakaoLoginRequest("code", "redirect"));
-
-        assertThat(response.isNewUser()).isTrue();
-        assertThat(response.user().nickname()).startsWith("면접자");
-        verify(userRepository).save(any(User.class));
+        assertThat(response.user().email()).isEqualTo("kim@example.com");
+        verify(tokenService).issue(user);
     }
 }

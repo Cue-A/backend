@@ -9,7 +9,6 @@ import com.cuea.domain.auth.dto.response.TokenResponse;
 import com.cuea.domain.user.entity.Provider;
 import com.cuea.domain.user.entity.User;
 import com.cuea.domain.user.entity.UserAuth;
-import com.cuea.domain.user.repository.UserAuthRepository;
 import com.cuea.domain.user.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,17 +16,14 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.Optional;
-import java.util.UUID;
 import java.util.regex.Pattern;
 
 /**
  * 이메일 회원가입·로그인, 카카오 로그인. 토큰 발급 자체는 전부
  * {@link TokenService#issue(User)} 에 맡깁니다 — 여기서 토큰 로직을 다시 만들지 않습니다.
  *
- * <p>계정 연동 규칙은 {@code docs/02-database.md} 대로입니다. 카카오 이메일이
- * 검증됐고 그 이메일로 가입한 계정이 있으면 그 계정에 연결하고, 이메일
- * 회원가입은 기존 계정에 절대 연결하지 않습니다(반대 방향은 계정 탈취 경로).
+ * <p>카카오 계정 연동 규칙({@code docs/02-database.md})은 {@link KakaoAccountLinker}
+ * 가 들고 있습니다 — 여기서는 외부 호출과 토큰 발급만 오케스트레이션합니다.
  */
 @Slf4j
 @Service
@@ -39,10 +35,10 @@ public class AuthService {
             Pattern.compile("^(?=.*[A-Za-z])(?=.*\\d).{8,64}$");
 
     private final UserRepository userRepository;
-    private final UserAuthRepository userAuthRepository;
     private final PasswordEncoder passwordEncoder;
     private final TokenService tokenService;
     private final OAuthClient kakaoOAuthClient;
+    private final KakaoAccountLinker kakaoAccountLinker;
 
     @Transactional
     public TokenResponse signup(SignupRequest request) {
@@ -80,60 +76,18 @@ public class AuthService {
         return tokenService.issue(user);
     }
 
-    @Transactional
+    /**
+     * 카카오 서버 호출(외부 HTTP)은 트랜잭션 밖에서 먼저 끝내고, DB 조회·연결·저장은
+     * {@link KakaoAccountLinker} 의 짧은 트랜잭션에 맡깁니다. 이 메서드 자체는
+     * {@code @Transactional} 이 아닙니다 — {@code docs/01-conventions.md} 참고.
+     */
     public TokenResponse loginWithKakao(KakaoLoginRequest request) {
         OAuthUserInfo info = kakaoOAuthClient.fetch(request.authorizationCode(), request.redirectUri());
 
-        Optional<UserAuth> linked =
-                userAuthRepository.findByProviderAndProviderId(Provider.KAKAO, info.providerId());
+        KakaoLinkResult result = kakaoAccountLinker.linkOrCreate(info);
 
-        User user;
-        boolean isNewUser;
-        if (linked.isPresent()) {
-            user = linked.get().getUser();
-            isNewUser = false;
-            // 가입 당시(비즈앱 전환 전 등)엔 이메일 동의를 못 받았다가, 이후 재로그인에서
-            // 검증된 이메일이 생긴 경우를 채웁니다. 다른 사용자가 이미 쓰는 이메일이면
-            // users.email UNIQUE 위반이라 건너뜁니다 — 그 경우는 매우 드물고, 값을
-            // 강제로 덮어쓰기보다 null 로 남겨두는 쪽이 안전합니다.
-            if (info.linkable() && user.getEmail() == null
-                    && !userRepository.existsByEmail(info.email())) {
-                user.fillEmailIfAbsent(info.email());
-            }
-        } else {
-            Optional<User> byEmail = info.linkable()
-                    ? userRepository.findByEmail(info.email())
-                    : Optional.empty();
-
-            // 이메일이 일치해도 그 계정에 이미 다른 카카오 계정이 연결돼 있으면 붙일 수
-            // 없습니다(uk_user_auth_user_provider 위반). 카카오 이메일은 나중에 바뀔 수
-            // 있어서, 지금 검증된 이 이메일이 예전에 다른 카카오 계정이 쓰던 값과 같은
-            // 상황이 생깁니다. 이 경우는 서로 다른 사람이므로 새 계정을 만듭니다.
-            boolean alreadyLinkedToOtherKakao = byEmail.isPresent()
-                    && userAuthRepository.findByUser_UserIdAndProvider(byEmail.get().getUserId(), Provider.KAKAO)
-                            .isPresent();
-
-            if (byEmail.isPresent() && !alreadyLinkedToOtherKakao) {
-                user = byEmail.get();
-                isNewUser = false;
-            } else {
-                String nickname = info.nickname() != null
-                        ? info.nickname()
-                        : User.fallbackNickname(UUID.randomUUID().toString());
-                // alreadyLinkedToOtherKakao 면 info.email() 은 이미 byEmail 계정이 쓰고
-                // 있어서, 그대로 넣으면 users.email unique 위반으로 500 이 납니다.
-                boolean canLinkEmail = info.linkable() && !alreadyLinkedToOtherKakao;
-                user = User.create(canLinkEmail ? info.email() : null, nickname);
-                isNewUser = true;
-            }
-            user.link(Provider.KAKAO, info.providerId(), null);
-            userRepository.save(user);
-        }
-
-        log.info("카카오 로그인 userId={} isNewUser={}", user.getUserId(), isNewUser);
-
-        TokenResponse issued = tokenService.issue(user);
+        TokenResponse issued = tokenService.issue(result.user());
         return TokenResponse.of(issued.accessToken(), issued.refreshToken(),
-                issued.expiresIn(), issued.user(), isNewUser);
+                issued.expiresIn(), issued.user(), result.isNewUser());
     }
 }

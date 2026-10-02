@@ -60,6 +60,7 @@ public class InterviewAnswerService {
     private final S3StorageService storageService;
     private final AiClient aiClient;
     private final InterviewAnswerPoller answerPoller;
+    private final InterviewSessionTerminator sessionTerminator;
 
     /**
      * 답변 오디오(필수)·영상(선택)의 presigned PUT URL 을 발급합니다. 실제 업로드는
@@ -140,8 +141,7 @@ public class InterviewAnswerService {
             BusinessException e = new BusinessException(ErrorCode.UNEXPECTED_AI_RESPONSE,
                     "AI 가 답변 task_id 를 주지 않았습니다");
             log.warn("AI 가 답변 task_id 를 주지 않아 세션을 정리합니다 sessionId={}", sessionId);
-            abortAiSessionQuietly(sessionId, e);
-            markSessionAbortedQuietly(sessionId, e);
+            sessionTerminator.terminateQuietly(sessionId, e);
             throw e;
         }
 
@@ -157,8 +157,7 @@ public class InterviewAnswerService {
             answerPoller.pollAndDeliver(sessionId, taskId, aiRequest);
         } catch (RuntimeException e) {
             log.warn("답변 폴링 시작에 실패해 세션을 정리합니다 sessionId={}", sessionId, e);
-            abortAiSessionQuietly(sessionId, e);
-            markSessionAbortedQuietly(sessionId, e);
+            sessionTerminator.terminateQuietly(sessionId, e);
             throw e;
         }
     }
@@ -193,34 +192,10 @@ public class InterviewAnswerService {
             throw new BusinessException(ErrorCode.SESSION_ENDED);
         }
 
-        // AI 세션을 먼저 중단한다. 실패해도(예: AI 서버 다운) 로컬 정리는 이어서 수행한다.
-        try {
-            aiClient.abortSession(sessionId);
-        } catch (RuntimeException e) {
-            log.warn("사용자 abort 중 AI 세션 중단 실패 sessionId={}. 로컬 정리는 계속합니다.",
-                    sessionId, e);
-        }
-        sessionWriter.markAborted(sessionId);
-    }
-
-    /** AI 세션 중단을 시도하되, 실패해도 원인 예외({@code cause})를 덮지 않습니다. */
-    private void abortAiSessionQuietly(String sessionId, RuntimeException cause) {
-        try {
-            aiClient.abortSession(sessionId);
-        } catch (RuntimeException cleanupError) {
-            cause.addSuppressed(cleanupError);
-            log.warn("AI 세션 중단 실패 sessionId={}", sessionId, cleanupError);
-        }
-    }
-
-    /** 우리 세션을 ABORTED 로 정리하되, 실패해도 원인 예외({@code cause})를 덮지 않습니다. */
-    private void markSessionAbortedQuietly(String sessionId, RuntimeException cause) {
-        try {
-            sessionWriter.markAborted(sessionId);
-        } catch (RuntimeException cleanupError) {
-            cause.addSuppressed(cleanupError);
-            log.warn("세션 ABORTED 처리 실패 sessionId={}", sessionId, cleanupError);
-        }
+        // 소유권·상태 가드를 통과한 진행 중 세션만 실제 종료한다. AI abort(best-effort)
+        // → 로컬 ABORTED 정리는 세션 종료 공용 컴포넌트에 위임한다(#53). AI abort 가
+        // 실패해도(예: AI 서버 다운) 로컬 정리는 반드시 수행된다.
+        sessionTerminator.terminate(sessionId);
     }
 
     /**

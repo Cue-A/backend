@@ -90,7 +90,8 @@ class InterviewStartServiceTest {
         service = new InterviewStartService(
                 userRepository, documentRepository, companyRepository,
                 new CompanyProfileFormatter(), presignedUrlIssuer,
-                aiClient, sessionWriter, firstQuestionPoller);
+                aiClient, sessionWriter, firstQuestionPoller,
+                new InterviewSessionTerminator(aiClient, sessionWriter));
     }
 
     private Document document(DocumentStatus status) {

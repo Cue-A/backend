@@ -88,7 +88,8 @@ class InterviewAnswerServiceTest {
 
         service = new InterviewAnswerService(
                 sessionRepository, questionRepository, sessionWriter, fileValidator,
-                presignedUrlIssuer, storageService, aiClient, answerPoller);
+                presignedUrlIssuer, storageService, aiClient, answerPoller,
+                new InterviewSessionTerminator(aiClient, sessionWriter));
     }
 
     private Question existingQuestion() {

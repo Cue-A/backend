@@ -4,8 +4,6 @@ import com.cuea.common.config.AsyncConfig;
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.entity.Question;
-import com.cuea.infrastructure.ai.AiClient;
-import com.cuea.infrastructure.ai.AiErrorTranslator;
 import com.cuea.infrastructure.ai.AiPoller;
 import com.cuea.infrastructure.ai.AiProperties;
 import com.cuea.infrastructure.ai.dto.AiTaskStatusResponse;
@@ -37,13 +35,12 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class InterviewFirstQuestionPoller {
 
-    private final AiClient aiClient;
     private final AiPoller aiPoller;
     private final AiProperties aiProperties;
-    private final AiErrorTranslator errorTranslator;
     private final SessionSocketHandler socketHandler;
     private final InterviewSessionWriter sessionWriter;
     private final QuestionPushFactory questionPushFactory;
+    private final InterviewSessionTerminator sessionTerminator;
 
     /**
      * task_id 를 폴링해 첫 질문을 받아 저장하고 WebSocket 으로 밀어줍니다.
@@ -63,7 +60,7 @@ public class InterviewFirstQuestionPoller {
                             ProgressPushMessage.of(ProgressStage.from(stage))));
         } catch (BusinessException e) {
             log.warn("세션 시작 폴링 실패 sessionId={} errorCode={}", sessionId, e.getErrorCode());
-            cleanupFailedSession(sessionId, e);
+            sessionTerminator.terminateQuietly(sessionId, e);
             pushError(sessionId, e);
             return;
         }
@@ -75,7 +72,7 @@ public class InterviewFirstQuestionPoller {
                     sessionId, taskStatus.result() == null ? "null" : taskStatus.result().type());
             BusinessException e = new BusinessException(
                     ErrorCode.UNEXPECTED_AI_RESPONSE, "AI 로부터 첫 질문을 받지 못했습니다");
-            cleanupFailedSession(sessionId, e);
+            sessionTerminator.terminateQuietly(sessionId, e);
             pushError(sessionId, e);
             return;
         }
@@ -87,7 +84,7 @@ public class InterviewFirstQuestionPoller {
             firstQuestion = sessionWriter.saveFirstQuestion(sessionId, taskStatus.result());
         } catch (BusinessException e) {
             log.warn("첫 질문 저장 실패 sessionId={} errorCode={}", sessionId, e.getErrorCode());
-            cleanupFailedSession(sessionId, e);
+            sessionTerminator.terminateQuietly(sessionId, e);
             pushError(sessionId, e);
             return;
         } catch (RuntimeException e) {
@@ -95,34 +92,12 @@ public class InterviewFirstQuestionPoller {
             BusinessException wrapped = new BusinessException(
                     ErrorCode.UNEXPECTED_AI_RESPONSE, "첫 질문 저장에 실패했습니다");
             wrapped.addSuppressed(e);
-            cleanupFailedSession(sessionId, wrapped);
+            sessionTerminator.terminateQuietly(sessionId, wrapped);
             pushError(sessionId, wrapped);
             return;
         }
 
         pushFirstQuestion(sessionId, firstQuestion, questionTotal);
-    }
-
-    /**
-     * 폴링 실패 시 AI 세션과 우리 세션을 정리합니다.
-     *
-     * <p>정리 과정에서 새로 발생한 예외가 원래 폴링 예외를 덮지 않도록, 원인 예외
-     * ({@code cause})에 suppressed 로 붙이고 삼킵니다. 세션 정리 실패보다 원래 실패
-     * 원인을 잃지 않는 것이 중요합니다.
-     */
-    private void cleanupFailedSession(String sessionId, BusinessException cause) {
-        try {
-            aiClient.abortSession(sessionId);
-        } catch (RuntimeException cleanupError) {
-            cause.addSuppressed(cleanupError);
-            log.warn("AI 세션 중단 실패 sessionId={}", sessionId, cleanupError);
-        }
-        try {
-            sessionWriter.markAborted(sessionId);
-        } catch (RuntimeException cleanupError) {
-            cause.addSuppressed(cleanupError);
-            log.warn("세션 ABORTED 처리 실패 sessionId={}", sessionId, cleanupError);
-        }
     }
 
     private void pushFirstQuestion(String sessionId, Question question, Integer questionTotal) {
@@ -148,17 +123,11 @@ public class InterviewFirstQuestionPoller {
     }
 
     private void pushError(String sessionId, BusinessException e) {
-        ErrorCode errorCode = e.getErrorCode();
         // 세션 시작 폴러의 error push 는 항상 cleanup + ABORTED 이후의 최종 오류다.
-        // 세션 시작 LLM_FAILED 는 AI 내부 1회 재시도까지 실패한 상태이고 Backend 는
-        // startSession 을 재전송하지 않는다. 즉 여기서 Backend 가 자동 재시도할 여지가
-        // 없으므로 retryable=false 로 내보낸다. errorCode(LLM_FAILED 등)로 retryable 을
-        // 정하지 않는다.
-        socketHandler.push(sessionId, ErrorPushMessage.of(new ErrorPushMessage(
-                errorCode.name(),
-                e.getMessage(),
-                false,
-                errorTranslator.needsRerecord(errorCode)
-        )));
+        // Backend 는 startSession 을 재전송하지 않으므로 자동 재시도 여지가 없다
+        // (retryable=false). 최종 오류 메시지 조립 규칙(needsRerecord 포함)은
+        // ErrorPushMessage 가 가지며, 답변 흐름과 동일한 규칙을 공유한다.
+        socketHandler.push(sessionId,
+                ErrorPushMessage.finalFailure(e.getErrorCode(), e.getMessage()));
     }
 }

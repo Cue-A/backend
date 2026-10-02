@@ -5,7 +5,6 @@ import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.entity.Question;
 import com.cuea.domain.interview.entity.QuestionType;
 import com.cuea.infrastructure.ai.AiClient;
-import com.cuea.infrastructure.ai.AiErrorTranslator;
 import com.cuea.infrastructure.ai.AiPoller;
 import com.cuea.infrastructure.ai.AiProperties;
 import com.cuea.infrastructure.ai.dto.AiQuestionResult;
@@ -72,8 +71,9 @@ class InterviewAnswerPollerTest {
                 new AiProperties.Mock(false));
 
         poller = new InterviewAnswerPoller(
-                aiClient, aiPoller, aiProperties, new AiErrorTranslator(),
-                socketHandler, sessionWriter, questionPushFactory);
+                aiClient, aiPoller, aiProperties,
+                socketHandler, sessionWriter, questionPushFactory,
+                new InterviewSessionTerminator(aiClient, sessionWriter));
 
         // QuestionPushFactory 는 저장된 질문을 push 메시지로 조립하고 presign 하는 책임을
         // 갖습니다(presign 검증은 QuestionPushFactoryTest). 여기서는 기본 스텁으로 질문

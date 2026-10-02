@@ -1,87 +1,44 @@
 package com.cuea.infrastructure.ai;
 
+import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import org.junit.jupiter.api.Test;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
 /**
- * 재시도·재녹음 판정을 검증합니다.
+ * AI 표현 → Backend 표현 <b>변환</b>을 검증합니다. (Issue #53)
  *
- * <p>AI 원본 errorCode 문자열은 {@code AiPoller} 가 {@link com.cuea.common.exception.BusinessException}
- * 으로 옮기면서 사라지므로, 그 뒤 흐름(WebSocket error push)에서는 우리 {@link ErrorCode}
- * 로만 판정해야 합니다. 이 테스트는 {@code ErrorCode} 기반 오버로드가 timeout·unexpected
- * 같은 Backend 자체 코드를 재시도 대상으로 잘못 분류하지 않는지 봅니다.
+ * <p>재시도·세션 정리·재녹음·중복 제출 같은 도메인 정책 판정은 이 변환기에서 빠졌고,
+ * {@code AnswerFailurePolicy}(답변 흐름)로 옮겼습니다. 여기서는 코드 매핑·예외 생성만
+ * 봅니다.
  */
 class AiErrorTranslatorTest {
 
     private final AiErrorTranslator translator = new AiErrorTranslator();
 
     @Test
-    void ErrorCode_기준_재시도는_LLM_STT_만_true_다() {
-        assertThat(translator.isRetryable(ErrorCode.LLM_FAILED)).isTrue();
-        assertThat(translator.isRetryable(ErrorCode.STT_FAILED)).isTrue();
-
-        // Backend 자체 코드는 AI 원본 코드가 아니므로 재시도 대상이 아니다.
-        assertThat(translator.isRetryable(ErrorCode.AI_TIMEOUT)).isFalse();
-        assertThat(translator.isRetryable(ErrorCode.AI_UNAVAILABLE)).isFalse();
-        assertThat(translator.isRetryable(ErrorCode.UNEXPECTED_AI_RESPONSE)).isFalse();
-        assertThat(translator.isRetryable(ErrorCode.TTS_FAILED)).isFalse();
+    void 알려진_AI_코드는_같은_이름의_ErrorCode_로_옮긴다() {
+        assertThat(translator.toErrorCode("LLM_FAILED")).isEqualTo(ErrorCode.LLM_FAILED);
+        assertThat(translator.toErrorCode("STT_FAILED")).isEqualTo(ErrorCode.STT_FAILED);
+        assertThat(translator.toErrorCode("SESSION_ENDED")).isEqualTo(ErrorCode.SESSION_ENDED);
     }
 
     @Test
-    void ErrorCode_기준_재녹음은_STT_만_true_다() {
-        assertThat(translator.needsRerecord(ErrorCode.STT_FAILED)).isTrue();
-        assertThat(translator.needsRerecord(ErrorCode.LLM_FAILED)).isFalse();
-        assertThat(translator.needsRerecord(ErrorCode.AI_TIMEOUT)).isFalse();
-        assertThat(translator.needsRerecord(ErrorCode.UNEXPECTED_AI_RESPONSE)).isFalse();
+    void 모르는_코드와_null_은_AI_UNAVAILABLE_로_옮긴다() {
+        // 계약에 없는 문자열·null 은 상태 불명으로 보고 AI_UNAVAILABLE 로 수렴시킨다.
+        assertThat(translator.toErrorCode(null)).isEqualTo(ErrorCode.AI_UNAVAILABLE);
+        assertThat(translator.toErrorCode("SOMETHING_NEW")).isEqualTo(ErrorCode.AI_UNAVAILABLE);
     }
 
     @Test
-    void 문자열_기준_판정은_AI_원본_코드를_따른다() {
-        assertThat(translator.isRetryable("LLM_FAILED")).isTrue();
-        assertThat(translator.isRetryable("STT_FAILED")).isTrue();
-        assertThat(translator.isRetryable("TTS_FAILED")).isFalse();
-        assertThat(translator.isRetryable((String) null)).isFalse();
-    }
+    void toException_은_코드를_옮기고_메시지가_null_이면_기본_메시지를_쓴다() {
+        BusinessException withMessage = translator.toException("LLM_FAILED", "질문 생성 실패");
+        assertThat(withMessage.getErrorCode()).isEqualTo(ErrorCode.LLM_FAILED);
+        assertThat(withMessage.getMessage()).isEqualTo("질문 생성 실패");
 
-    // ── cleanup 정책 분류 (Issue #25) ────────────────────────────
-
-    @Test
-    void 세션_정리가_필요한_코드는_복구_불가_계열이다() {
-        // 세션을 ABORTED 로 내려야 하는(AI·Backend 상태 동기화 보장 불가) 코드들.
-        assertThat(translator.requiresSessionAbort(ErrorCode.SESSION_NOT_FOUND)).isTrue();
-        assertThat(translator.requiresSessionAbort(ErrorCode.RESUME_PARSE_FAILED)).isTrue();
-        assertThat(translator.requiresSessionAbort(ErrorCode.AI_TIMEOUT)).isTrue();
-        assertThat(translator.requiresSessionAbort(ErrorCode.AI_UNAVAILABLE)).isTrue();
-        assertThat(translator.requiresSessionAbort(ErrorCode.UNEXPECTED_AI_RESPONSE)).isTrue();
-    }
-
-    @Test
-    void 재시도_대상과_중복제출_클라이언트버그_는_세션_정리_대상이_아니다() {
-        // LLM/STT 는 재시도·재녹음 대상이라 세션을 유지한다.
-        assertThat(translator.requiresSessionAbort(ErrorCode.LLM_FAILED)).isFalse();
-        assertThat(translator.requiresSessionAbort(ErrorCode.STT_FAILED)).isFalse();
-        // TTS 는 텍스트로 진행하므로 실패가 아니다.
-        assertThat(translator.requiresSessionAbort(ErrorCode.TTS_FAILED)).isFalse();
-        // 중복 제출·클라이언트 버그는 세션을 abort 하지 않는다.
-        assertThat(translator.requiresSessionAbort(ErrorCode.SESSION_ENDED)).isFalse();
-        assertThat(translator.requiresSessionAbort(ErrorCode.INVALID_QUESTION_ID)).isFalse();
-        assertThat(translator.requiresSessionAbort(ErrorCode.INVALID_CATEGORY)).isFalse();
-    }
-
-    @Test
-    void SESSION_ENDED_는_중복_제출로_무시_대상이다() {
-        assertThat(translator.isDuplicateSubmit(ErrorCode.SESSION_ENDED)).isTrue();
-        assertThat(translator.isDuplicateSubmit(ErrorCode.SESSION_NOT_FOUND)).isFalse();
-        assertThat(translator.isDuplicateSubmit(ErrorCode.STT_FAILED)).isFalse();
-    }
-
-    @Test
-    void INVALID_QUESTION_ID_와_INVALID_CATEGORY_는_클라이언트_계약_오류다() {
-        assertThat(translator.isClientContractError(ErrorCode.INVALID_QUESTION_ID)).isTrue();
-        assertThat(translator.isClientContractError(ErrorCode.INVALID_CATEGORY)).isTrue();
-        assertThat(translator.isClientContractError(ErrorCode.STT_FAILED)).isFalse();
-        assertThat(translator.isClientContractError(ErrorCode.SESSION_NOT_FOUND)).isFalse();
+        BusinessException nullMessage = translator.toException("STT_FAILED", null);
+        assertThat(nullMessage.getErrorCode()).isEqualTo(ErrorCode.STT_FAILED);
+        assertThat(nullMessage.getMessage()).isEqualTo(ErrorCode.STT_FAILED.getMessage());
     }
 }

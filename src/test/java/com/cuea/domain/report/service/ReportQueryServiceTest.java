@@ -284,12 +284,27 @@ class ReportQueryServiceTest {
     }
 
     @Test
-    void 저장된_원본이_계약_모양이_아니면_UNEXPECTED_AI_RESPONSE() throws Exception {
+    void 저장된_원본을_읽지_못하면_우리_쪽_문제라_INTERNAL_ERROR() throws Exception {
         givenReport(finished(ReportStatus.COMPLETED, """
                 { "report_status": "complete", "questions": "배열이어야 하는 자리" }
                 """));
 
-        assertErrorCode(ErrorCode.UNEXPECTED_AI_RESPONSE);
+        assertErrorCode(ErrorCode.INTERNAL_ERROR);
+    }
+
+    @Test
+    void metrics_안쪽_객체의_키도_camelCase_로_바꾼다() throws Exception {
+        givenReport(finished(ReportStatus.COMPLETED, """
+                { "report_status": "complete",
+                  "axes": { "speech": { "status": "ok",
+                    "metrics": { "per_answer": [ { "filler_count": 2 } ], "rate_detail": { "words_per_min": 120 } } } } }
+                """));
+
+        ReportDetailResponse response = service.getDetail(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.axes().speech().metrics())
+                .containsEntry("perAnswer", List.of(Map.of("fillerCount", 2)))
+                .containsEntry("rateDetail", Map.of("wordsPerMin", 120));
     }
 
     private void assertErrorCode(ErrorCode expected) {

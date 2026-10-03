@@ -87,8 +87,10 @@ public class ReportController {
 
                     아직 분석 중이면 202 REPORT_NOT_READY, 실패한 리포트면 409 REPORT_FAILED 입니다.
                     실패 원인은 상태 조회로 확인합니다.
-                    본인 리포트가 아니거나 없으면 404 REPORT_NOT_FOUND 입니다.""")
+                    본인 리포트가 아니거나 없으면 404 REPORT_NOT_FOUND 입니다.
+                    폴링용이 아니라 분당 60회로 제한합니다. 진행 상황은 WebSocket 과 상태 조회로 봅니다.""")
     @GetMapping("/reports/{reportId}")
+    @RateLimit(key = "report-detail", limit = 60, windowSeconds = 60)
     public Result<ReportDetailResponse> detail(@CurrentUser String userId,
                                                @PathVariable String reportId) {
         return Result.ok(reportQueryService.getDetail(userId, reportId));

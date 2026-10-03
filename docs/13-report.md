@@ -68,6 +68,7 @@ GET  /api/reports/{reportId}                 → 리포트 상세 (COMPLETED · 
 |---|---|
 | `processing` | stage 가 바뀔 때마다 WS `progress`. 같은 값을 Redis 에도 남김(아래 상태 조회) |
 | `done` + `complete` | `COMPLETED`, 점수·원본 저장, WS `report` |
+| `done` 인데 결과가 계약 모양이 아님 | `FAILED` (`UNEXPECTED_AI_RESPONSE`). 상세 조회가 못 읽을 결과를 저장하지 않음 |
 | `done` + `partial` | `PARTIAL`, 실패 축 점수 null, WS `report` |
 | `CONTENT_FAILED` · `MEDIA_FETCH_FAILED` | **새 키로 자동 재시도 1회.** 또 실패하면 `FAILED` |
 | `STT_FAILED` · 그 외 | `FAILED`, WS `error` |
@@ -233,7 +234,12 @@ COMPLETED · PARTIAL 이면 부릅니다.
   키가 있고 해당하지 않으면 null 입니다
 - 배열(`questions` · `evidence` · `improvedAnswers` · `axesUsed` · `axesFailed`)은 키가 빠져도
   빈 배열로 내려줍니다
-- 원본에 모르는 키가 있어도 무시합니다. 원본이 계약 모양이 아니면 502 `UNEXPECTED_AI_RESPONSE`
+- 원본에 모르는 키가 있어도 무시합니다
+- **모양은 저장 전에 확인합니다**(`AiReportResultReader.validate`). 점수만 맞고 나머지가 어긋난 결과를
+  COMPLETED 로 저장하면 상세 조회는 계속 실패하는데 재요청은 FAILED 만 받으므로 빠져나올 길이
+  없습니다. 그래서 폴러가 FAILED(`UNEXPECTED_AI_RESPONSE`)로 남깁니다. 그래도 저장된 원본을 못
+  읽으면 우리 DB 문제라 500 `INTERNAL_ERROR` 입니다
+- 폴링용이 아니라 분당 60회로 제한합니다(`@RateLimit`)
 
 ---
 

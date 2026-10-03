@@ -72,15 +72,27 @@ public record AiReportResult(
          * 지표 키를 camelCase 로 바꿉니다. 값은 건드리지 않습니다.
          *
          * <p>키가 정해지지 않아 레코드로 못 옮기지만, 프론트에 snake_case 를 내보내지 않으려고
-         * 키 이름만 바꿉니다. {@code hesitation_score} → {@code hesitationScore}.
+         * 키 이름만 바꿉니다. {@code hesitation_score} → {@code hesitationScore}. 안쪽 객체의
+         * 키도 같이 바꿉니다. 지금 계약은 한 단계짜리 숫자뿐입니다.
          */
         public Map<String, Object> camelCaseMetrics() {
-            if (metrics == null) {
-                return null;
-            }
+            return metrics == null ? null : camelCaseKeys(metrics);
+        }
+
+        private static Map<String, Object> camelCaseKeys(Map<?, ?> source) {
             Map<String, Object> converted = new LinkedHashMap<>();
-            metrics.forEach((key, value) -> converted.put(toCamelCase(key), value));
+            source.forEach((key, value) -> converted.put(toCamelCase(String.valueOf(key)), camelCaseValue(value)));
             return converted;
+        }
+
+        private static Object camelCaseValue(Object value) {
+            if (value instanceof Map<?, ?> map) {
+                return camelCaseKeys(map);
+            }
+            if (value instanceof List<?> list) {
+                return list.stream().map(Axis::camelCaseValue).toList();
+            }
+            return value;
         }
 
         private static String toCamelCase(String snake) {

@@ -59,7 +59,7 @@ class KakaoAccountLinkerTest {
                 new OAuthUserInfo(Provider.KAKAO, "kakao-1", "kim@example.com", true, "김취준"));
 
         assertThat(result.isNewUser()).isFalse();
-        assertThat(result.user().getEmail()).isEqualTo("kim@example.com");
+        assertThat(result.user().email()).isEqualTo("kim@example.com");
     }
 
     /** 다른 사용자가 이미 그 이메일을 쓰고 있으면 users.email UNIQUE 위반을 피하려고 채우지 않는다. */
@@ -74,7 +74,7 @@ class KakaoAccountLinkerTest {
         KakaoLinkResult result = kakaoAccountLinker.linkOrCreate(
                 new OAuthUserInfo(Provider.KAKAO, "kakao-1", "kim@example.com", true, "김취준"));
 
-        assertThat(result.user().getEmail()).isNull();
+        assertThat(result.user().email()).isNull();
     }
 
     /** 이메일이 미검증이면 기존에 값이 있어도 채우기 로직 자체를 타지 않는다. */
@@ -88,7 +88,7 @@ class KakaoAccountLinkerTest {
         KakaoLinkResult result = kakaoAccountLinker.linkOrCreate(
                 new OAuthUserInfo(Provider.KAKAO, "kakao-1", "kim@example.com", false, "김취준"));
 
-        assertThat(result.user().getEmail()).isNull();
+        assertThat(result.user().email()).isNull();
         verify(userRepository, never()).existsByEmail(anyString());
     }
 
@@ -104,6 +104,7 @@ class KakaoAccountLinkerTest {
 
         assertThat(result.isNewUser()).isFalse();
         assertThat(existing.providers()).contains(Provider.KAKAO);
+        assertThat(result.user().providers()).containsExactly(Provider.KAKAO);
         verify(userRepository).save(existing);
     }
 
@@ -128,7 +129,7 @@ class KakaoAccountLinkerTest {
                 new OAuthUserInfo(Provider.KAKAO, "kakao-1", "kim@example.com", false, "김취준"));
 
         assertThat(result.isNewUser()).isTrue();
-        assertThat(result.user().getEmail()).isNull();
+        assertThat(result.user().email()).isNull();
     }
 
     /**
@@ -152,7 +153,7 @@ class KakaoAccountLinkerTest {
                 new OAuthUserInfo(Provider.KAKAO, "kakao-new", "kim@example.com", true, "김취준"));
 
         assertThat(result.isNewUser()).isTrue();
-        assertThat(result.user().getEmail()).isNull();
+        assertThat(result.user().email()).isNull();
         verify(userRepository, never()).save(existing);
         verify(userRepository).save(org.mockito.ArgumentMatchers.argThat(u -> u != existing));
     }
@@ -166,7 +167,7 @@ class KakaoAccountLinkerTest {
                 new OAuthUserInfo(Provider.KAKAO, "kakao-9", null, false, null));
 
         assertThat(result.isNewUser()).isTrue();
-        assertThat(result.user().getNickname()).startsWith("면접자");
+        assertThat(result.user().nickname()).startsWith("면접자");
         verify(userRepository).save(any(User.class));
     }
 }

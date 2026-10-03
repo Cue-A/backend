@@ -1,5 +1,6 @@
 package com.cuea.domain.auth.service;
 
+import com.cuea.domain.user.dto.response.UserResponse;
 import com.cuea.domain.user.entity.Provider;
 import com.cuea.domain.user.entity.User;
 import com.cuea.domain.user.entity.UserAuth;
@@ -79,6 +80,7 @@ class KakaoAccountLinker {
         }
 
         log.info("카카오 로그인 userId={} isNewUser={}", user.getUserId(), isNewUser);
-        return new KakaoLinkResult(user, isNewUser);
+        // 트랜잭션 안에서 응답을 만들어 둡니다. 밖에서는 auths 를 읽을 수 없습니다.
+        return new KakaoLinkResult(UserResponse.from(user), isNewUser);
     }
 }

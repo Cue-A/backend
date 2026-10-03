@@ -47,6 +47,8 @@ class AuthServiceTest {
             User user = invocation.getArgument(0);
             return TokenResponse.of("access", "refresh", 1800L, UserResponse.from(user));
         });
+        when(tokenService.issue(any(UserResponse.class))).thenAnswer(invocation ->
+                TokenResponse.of("access", "refresh", 1800L, invocation.getArgument(0)));
     }
 
     @Test
@@ -127,12 +129,12 @@ class AuthServiceTest {
         when(kakaoOAuthClient.fetch("code", "redirect"))
                 .thenReturn(new OAuthUserInfo(Provider.KAKAO, "kakao-1", "kim@example.com", true, "김취준"));
         when(kakaoAccountLinker.linkOrCreate(any(OAuthUserInfo.class)))
-                .thenReturn(new KakaoLinkResult(user, true));
+                .thenReturn(new KakaoLinkResult(UserResponse.from(user), true));
 
         TokenResponse response = authService.loginWithKakao(new KakaoLoginRequest("code", "redirect"));
 
         assertThat(response.isNewUser()).isTrue();
         assertThat(response.user().email()).isEqualTo("kim@example.com");
-        verify(tokenService).issue(user);
+        verify(tokenService).issue(UserResponse.from(user));
     }
 }

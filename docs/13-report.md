@@ -38,6 +38,7 @@ DB 에는 0~100 점수만 컬럼으로 꺼내고, 나머지는 원본(`report_da
 POST /api/interviews/{sessionId}/reports     → 202 { reportId, sessionId, status, createdAt }
 WS   /ws/reports/{reportId}                  → progress · report · error
 GET  /api/reports/{reportId}/status          → { reportId, sessionId, status, stage, progress, errorCode, message, retryable, createdAt, completedAt }
+GET  /api/reports/{reportId}                 → 리포트 상세 (COMPLETED · PARTIAL 만)
 ```
 
 ### 동기 구간 (HTTP 요청 스레드, 1초 이내)
@@ -181,6 +182,61 @@ WS 메시지는 붙어 있는 연결에만 갑니다. 소켓에 늦게 붙거나
 
 ---
 
+## 상세 조회 (`GET /api/reports/{reportId}`)
+
+끝난 리포트(COMPLETED · PARTIAL)의 전체 결과입니다. WS `report` 를 받았거나 상태 조회가
+COMPLETED · PARTIAL 이면 부릅니다.
+
+| 상황 | 응답 |
+|---|---|
+| COMPLETED · PARTIAL | 200 리포트 상세 |
+| PROCESSING | 202 `REPORT_NOT_READY` |
+| FAILED | 409 `REPORT_FAILED`. 원인(`errorCode` · `retryable`)은 상태 조회로 봅니다 |
+| 없는 것 · 남의 것 · UUID 가 아닌 값 | 404 `REPORT_NOT_FOUND` |
+
+```json
+{
+  "reportId": "...", "sessionId": "sess_9f2a1c", "status": "PARTIAL",
+  "overall": { "score": 68, "display": 4, "gated": false, "gateReason": null,
+               "partial": true, "axesUsed": ["content", "speech"], "axesFailed": ["gaze"] },
+  "axes": {
+    "content": { "status": "ok", "errorCode": null, "reason": null, "score": 72, "display": 4,
+                 "metrics": {}, "evidence": [ { "questionId": "q_3", "tStart": 12.4, "tEnd": 19.8,
+                 "kind": "weakness", "label": "근거 부족", "comment": "..." } ] },
+    "speech":  { "status": "ok", "score": 61, "display": 4,
+                 "metrics": { "hesitationScore": 32, "speechRateCv": 0.284, "repetitionCount": 3 }, "evidence": [] },
+    "gaze":    { "status": "failed", "errorCode": "GAZE_FAILED", "score": null, "display": null,
+                 "metrics": null, "evidence": [] }
+  },
+  "questions": [
+    { "questionId": "q_1", "questionText": "지원 동기를 말씀해 주세요", "questionNumber": 1,
+      "category": "지원동기", "difficulty": "L1", "isReplay": false, "isSpareTopic": false,
+      "score": 70, "display": 4, "axes": { "content": 74, "speech": 63, "gaze": null },
+      "transcript": "...", "durationSec": 46.2, "wordCount": 138, "wasTimeout": false, "hadReask": true }
+  ],
+  "resilience": { "score": 58, "display": 3, "comment": "..." },
+  "companyComment": "...",
+  "improvedAnswers": [ { "questionId": "q_3", "originalExcerpt": "...", "suggestion": "...",
+                         "tStart": 12.4, "tEnd": 19.8 } ],
+  "generatedAt": "2026-09-05T14:22:31Z", "createdAt": "...", "completedAt": "..."
+}
+```
+
+- **모양은 리포트 계약 13장 그대로**이고 키만 camelCase 로 옮깁니다. AI JSON 을 읽는 곳은
+  `infrastructure/ai` 의 `AiReportResultReader` · `AiReportResult` 뿐입니다
+- `questionText` 만 AI 결과에 없어 우리 `question` 테이블에서 붙입니다. 못 찾으면 null
+- AI 문자열 값(`axes.*.status` · `kind` · `category` · `gateReason` 등)은 enum 으로 바꾸지 않고
+  그대로 내려줍니다
+- `metrics` 는 세부 필드가 미확정이라 레코드로 옮기지 않고 **키 이름만 camelCase 로** 바꿉니다
+  ([`90-open-questions.md`](./90-open-questions.md) 의 리포트 계약 절)
+- AI 는 `error_code`(failed 일 때만) · `reason`(skipped 일 때만)을 키째 빼지만, 응답에는 늘
+  키가 있고 해당하지 않으면 null 입니다
+- 배열(`questions` · `evidence` · `improvedAnswers` · `axesUsed` · `axesFailed`)은 키가 빠져도
+  빈 배열로 내려줍니다
+- 원본에 모르는 키가 있어도 무시합니다. 원본이 계약 모양이 아니면 502 `UNEXPECTED_AI_RESPONSE`
+
+---
+
 ## 알아둘 제약
 
 - **서버가 재시작되면 폴링이 끊깁니다.** 그 리포트는 `PROCESSING` 으로 남고 재요청도
@@ -201,7 +257,6 @@ WS 메시지는 붙어 있는 연결에만 갑니다. 소켓에 늦게 붙거나
 
 | 기능 | 비고 |
 |---|---|
-| 리포트 조회 API | `report_data` 원본을 DTO 로 옮겨 내보냄 |
 | 실패한 축만 재시도 (`/ai/sessions/{id}/report/retry`) | `PARTIAL` 전용. 만들지 팀 확인 필요 |
 | 회차 비교 (`/ai/reports/compare`) | 전체 회차의 `report_data` 를 함께 보냄 |
 

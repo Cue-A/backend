@@ -58,7 +58,7 @@ class ReportRetryServiceTest {
         requestAssembler = mock(ReportRequestAssembler.class);
         reportWriter = mock(ReportWriter.class);
         aiClient = mock(AiClient.class);
-        service = new ReportRetryService(reportRepository, requestAssembler, reportWriter,
+        service = new ReportRetryService(new ReportFinder(reportRepository), requestAssembler, reportWriter,
                 new AiReportResultReader(JsonMapper.builder().findAndAddModules().build()), aiClient);
 
         when(requestAssembler.build(SESSION_ID))

@@ -6,17 +6,14 @@ import com.cuea.domain.report.dto.response.ReportRetryResponse;
 import com.cuea.domain.report.entity.Report;
 import com.cuea.domain.report.entity.ReportRetryStatus;
 import com.cuea.domain.report.entity.ReportStatus;
-import com.cuea.domain.report.repository.ReportRepository;
 import com.cuea.infrastructure.ai.AiClient;
 import com.cuea.infrastructure.ai.AiReportResultReader;
-import com.cuea.infrastructure.ai.dto.AiReportResult;
 import com.cuea.infrastructure.ai.dto.AiReportRetryRequest;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 
 import java.util.List;
-import java.util.UUID;
 
 /**
  * PARTIAL 리포트의 실패한 축만 다시 분석합니다. AI 에 작업을 맡기고 즉시 반환합니다.
@@ -34,15 +31,14 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ReportRetryService {
 
-    private final ReportRepository reportRepository;
+    private final ReportFinder reportFinder;
     private final ReportRequestAssembler requestAssembler;
     private final ReportWriter reportWriter;
     private final AiReportResultReader resultReader;
     private final AiClient aiClient;
 
     public ReportRetryResponse retry(String userId, String reportId) {
-        Report report = reportRepository.findByPublicIdAndSession_User_UserId(parse(reportId), userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.REPORT_NOT_FOUND));
+        Report report = reportFinder.getOwned(userId, reportId);
         if (report.getStatus() != ReportStatus.PARTIAL) {
             throw new BusinessException(ErrorCode.REPORT_NOT_RETRYABLE);
         }
@@ -70,19 +66,10 @@ public class ReportRetryService {
         if (report.getReportData() == null) {
             throw new BusinessException(ErrorCode.REPORT_NOT_RETRYABLE);
         }
-        AiReportResult.Overall overall = resultReader.read(report.getReportData()).overall();
-        if (overall == null || overall.axesFailed() == null || overall.axesFailed().isEmpty()) {
+        List<String> axes = resultReader.read(report.getReportData()).failedAxes();
+        if (axes.isEmpty()) {
             throw new BusinessException(ErrorCode.REPORT_NOT_RETRYABLE);
         }
-        return List.copyOf(overall.axesFailed());
-    }
-
-    /** UUID 가 아닌 값도 없는 리포트와 같은 404 입니다. */
-    private UUID parse(String reportId) {
-        try {
-            return UUID.fromString(reportId);
-        } catch (IllegalArgumentException e) {
-            throw new BusinessException(ErrorCode.REPORT_NOT_FOUND);
-        }
+        return List.copyOf(axes);
     }
 }

@@ -1,15 +1,12 @@
 package com.cuea.domain.report.service;
 
 import com.cuea.common.exception.BusinessException;
-import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.report.dto.response.ReportStatusResponse;
 import com.cuea.domain.report.dto.response.ReportRetryInfo;
 import com.cuea.domain.report.entity.Report;
 import com.cuea.domain.report.entity.ReportRetryStatus;
-import com.cuea.domain.report.repository.ReportRepository;
 import com.cuea.domain.report.service.ReportProgressStore.ReportProgress;
 import com.cuea.infrastructure.ai.AiReportResultReader;
-import com.cuea.infrastructure.ai.dto.AiReportResult;
 import com.cuea.infrastructure.websocket.message.ReportProgressStage;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -17,7 +14,6 @@ import org.springframework.stereotype.Service;
 
 import java.util.List;
 import java.util.Optional;
-import java.util.UUID;
 
 /**
  * 리포트 생성 상태 조회. <b>본인 리포트만 보입니다.</b>
@@ -40,13 +36,12 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class ReportStatusService {
 
-    private final ReportRepository reportRepository;
+    private final ReportFinder reportFinder;
     private final ReportProgressStore progressStore;
     private final AiReportResultReader resultReader;
 
     public ReportStatusResponse getStatus(String userId, String reportId) {
-        Report report = reportRepository.findByPublicIdAndSession_User_UserId(parse(reportId), userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.REPORT_NOT_FOUND));
+        Report report = reportFinder.getOwned(userId, reportId);
 
         // UUID.fromString 은 대문자·축약형도 받으므로 응답과 Redis 키는 저장된 값으로 씁니다.
         String publicId = report.getPublicId().toString();
@@ -82,10 +77,7 @@ public class ReportStatusService {
         List<String> axes = List.of();
         try {
             if (report.getReportData() != null) {
-                AiReportResult.Overall overall = resultReader.read(report.getReportData()).overall();
-                if (overall != null && overall.axesFailed() != null) {
-                    axes = overall.axesFailed();
-                }
+                axes = resultReader.read(report.getReportData()).failedAxes();
             }
         } catch (BusinessException e) {
             log.warn("재시도 축을 읽지 못했습니다 reportId={}", report.getPublicId(), e);
@@ -104,14 +96,5 @@ public class ReportStatusService {
                 publicId, report.getSession().getSessionId(), report.getStatus(),
                 stage, progress, errorCode, message, retryable, retryInfo(report),
                 report.getCreatedAt(), report.getCompletedAt());
-    }
-
-    /** UUID 가 아닌 값도 없는 리포트와 같은 404 입니다. 400 으로 구별해 줄 이유가 없습니다. */
-    private UUID parse(String reportId) {
-        try {
-            return UUID.fromString(reportId);
-        } catch (IllegalArgumentException e) {
-            throw new BusinessException(ErrorCode.REPORT_NOT_FOUND);
-        }
     }
 }

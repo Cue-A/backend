@@ -98,7 +98,7 @@ class ReportQueryServiceTest {
     void setUp() {
         reportRepository = mock(ReportRepository.class);
         sessionQueryService = mock(InterviewSessionQueryService.class);
-        service = new ReportQueryService(reportRepository, sessionQueryService,
+        service = new ReportQueryService(new ReportFinder(reportRepository), sessionQueryService,
                 new AiReportResultReader(objectMapper));
     }
 

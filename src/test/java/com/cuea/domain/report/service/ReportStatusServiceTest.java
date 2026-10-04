@@ -49,7 +49,7 @@ class ReportStatusServiceTest {
     void setUp() {
         reportRepository = mock(ReportRepository.class);
         progressStore = new FakeReportProgressStore();
-        service = new ReportStatusService(reportRepository, progressStore,
+        service = new ReportStatusService(new ReportFinder(reportRepository), progressStore,
                 new AiReportResultReader(JsonMapper.builder().findAndAddModules().build()));
     }
 

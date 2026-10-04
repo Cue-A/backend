@@ -7,6 +7,7 @@ import com.cuea.domain.interview.entity.Question;
 import com.cuea.domain.interview.service.InterviewSessionQueryService;
 import com.cuea.domain.report.dto.response.ReportDetailResponse;
 import com.cuea.domain.report.entity.Report;
+import com.cuea.domain.report.entity.ReportRetryStatus;
 import com.cuea.domain.report.entity.ReportStatus;
 import com.cuea.domain.report.repository.ReportRepository;
 import com.cuea.infrastructure.ai.AiReportResultReader;
@@ -249,6 +250,28 @@ class ReportQueryServiceTest {
         assertThat(response.questions()).isEmpty();
         assertThat(response.improvedAnswers()).isEmpty();
         assertThat(response.overall().axesUsed()).isEmpty();
+    }
+
+    /** 재시도 중에도 리포트는 그대로 200 으로 내려가고, 다시 분석하는 축만 retry 로 알려줍니다. */
+    @Test
+    void 재시도_중에도_리포트를_그대로_주고_retry_에_축을_준다() throws Exception {
+        Report report = finished(ReportStatus.PARTIAL, CONTRACT_RESULT);
+        givenReport(Report.builder().reportId(10L).publicId(PUBLIC_ID).session(report.getSession())
+                .status(ReportStatus.PARTIAL).retryStatus(ReportRetryStatus.PROCESSING).attempt(2)
+                .reportData(report.getReportData()).createdAt(CREATED_AT).completedAt(COMPLETED_AT).build());
+
+        ReportDetailResponse response = service.getDetail(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.overall().score()).isEqualTo(68);
+        assertThat(response.retry().status()).isEqualTo(ReportRetryStatus.PROCESSING);
+        assertThat(response.retry().axes()).containsExactly("gaze");
+    }
+
+    @Test
+    void 재시도한_적이_없으면_retry_는_null() throws Exception {
+        givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
+
+        assertThat(service.getDetail(USER_ID, PUBLIC_ID.toString()).retry()).isNull();
     }
 
     @Test

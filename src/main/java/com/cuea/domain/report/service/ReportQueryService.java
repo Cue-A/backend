@@ -5,6 +5,7 @@ import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.entity.Question;
 import com.cuea.domain.interview.service.InterviewSessionQueryService;
 import com.cuea.domain.report.dto.response.ReportDetailResponse;
+import com.cuea.domain.report.dto.response.ReportRetryInfo;
 import com.cuea.domain.report.entity.Report;
 import com.cuea.domain.report.repository.ReportRepository;
 import com.cuea.infrastructure.ai.AiReportResultReader;
@@ -13,6 +14,7 @@ import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
@@ -44,9 +46,18 @@ public class ReportQueryService {
         return switch (report.getStatus()) {
             case PROCESSING -> throw new BusinessException(ErrorCode.REPORT_NOT_READY);
             case FAILED -> throw new BusinessException(ErrorCode.REPORT_FAILED);
-            case COMPLETED, PARTIAL -> ReportDetailResponse.of(report, readResult(report),
-                    questionTexts(report.getSession().getSessionId()));
+            case COMPLETED, PARTIAL -> {
+                AiReportResult result = readResult(report);
+                yield ReportDetailResponse.of(report, result,
+                        questionTexts(report.getSession().getSessionId()), retryInfo(report, result));
+            }
         };
+    }
+
+    /** 재시도 축은 이 리포트의 실패한 축({@code overall.axes_failed}) 그대로입니다. */
+    private ReportRetryInfo retryInfo(Report report, AiReportResult result) {
+        List<String> axes = result.overall() == null ? null : result.overall().axesFailed();
+        return ReportRetryInfos.of(report, axes);
     }
 
     /**

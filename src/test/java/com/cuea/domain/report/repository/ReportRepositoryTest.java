@@ -7,6 +7,7 @@ import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.interview.entity.Persona;
 import com.cuea.domain.interview.entity.SessionStatus;
 import com.cuea.domain.report.entity.Report;
+import com.cuea.domain.report.entity.ReportRetryStatus;
 import com.cuea.domain.report.entity.ReportStatus;
 import com.cuea.domain.user.entity.User;
 import com.cuea.support.PostgresRepositoryTest;
@@ -17,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.dao.DataIntegrityViolationException;
 
+import java.util.Map;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -145,6 +147,71 @@ class ReportRepositoryTest extends PostgresRepositoryTest {
 
         assertThat(found.getSession().getSessionId()).isEqualTo(session.getSessionId());
         assertThat(Hibernate.isInitialized(found.getSession())).isFalse();
+    }
+
+    /** 재시도 중에도 리포트는 PARTIAL 결과 그대로 보여야 합니다. 상태 · 점수 · 원본을 건드리지 않습니다. */
+    @Test
+    void PARTIAL_재시도를_시작하면_retry_status_만_바뀌고_결과는_그대로다() {
+        Report partial = partialReport(1, null, null);
+
+        int updated = startRetry(partial, 1, "task_2");
+
+        assertThat(updated).isEqualTo(1);
+        Report started = reload(partial);
+        assertThat(started.getStatus()).isEqualTo(ReportStatus.PARTIAL);
+        assertThat(started.getRetryStatus()).isEqualTo(ReportRetryStatus.PROCESSING);
+        assertThat(started.getAttempt()).isEqualTo(2);
+        assertThat(started.getAiTaskId()).isEqualTo("task_2");
+        assertThat(started.getScoreTotal()).isEqualTo(68);
+        assertThat(started.getReportData()).containsEntry("report_status", "partial");
+        assertThat(started.getCompletedAt()).isNotNull();
+    }
+
+    @Test
+    void 재시도를_두_번_누르면_두_번째는_0건() {
+        Report partial = partialReport(1, null, null);
+
+        int first = startRetry(partial, 1, "task_2");
+        int second = startRetry(partial, 1, "task_2");
+
+        assertThat(first).isEqualTo(1);
+        assertThat(second).isZero();
+    }
+
+    /** 이전 재시도가 실패했으면 다시 시작할 수 있고, 남아 있던 실패 원인은 지웁니다. */
+    @Test
+    void 재시도가_실패한_리포트는_다시_시작할_수_있다() {
+        Report partial = partialReport(2, ReportRetryStatus.FAILED, "GAZE_FAILED");
+
+        int updated = startRetry(partial, 2, "task_3");
+
+        assertThat(updated).isEqualTo(1);
+        Report started = reload(partial);
+        assertThat(started.getRetryStatus()).isEqualTo(ReportRetryStatus.PROCESSING);
+        assertThat(started.getErrorCode()).isNull();
+    }
+
+    @Test
+    void PARTIAL_이_아니면_재시도를_시작하지_않는다() {
+        Report failed = failedReport(1, "AI_TIMEOUT");
+
+        assertThat(startRetry(failed, 1, "task_2")).isZero();
+        assertThat(reload(failed).getRetryStatus()).isNull();
+    }
+
+    private Report partialReport(int attempt, ReportRetryStatus retryStatus, String errorCode) {
+        Report report = Report.processing(session, "task_" + attempt);
+        report.retryWith(attempt, "task_" + attempt);
+        report.finish(ReportStatus.PARTIAL, 68, 72, 61, null, Map.of("report_status", "partial"));
+        if (retryStatus == ReportRetryStatus.FAILED) {
+            report.failRetry(errorCode);
+        }
+        return em.persistFlushFind(report);
+    }
+
+    private int startRetry(Report report, int previousAttempt, String aiTaskId) {
+        return reportRepository.startRetry(report.getReportId(), previousAttempt, previousAttempt + 1,
+                aiTaskId, ReportStatus.PARTIAL, ReportRetryStatus.PROCESSING);
     }
 
     private Report failedReport(int attempt, String errorCode) {

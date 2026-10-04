@@ -1,5 +1,6 @@
 package com.cuea.domain.report.service;
 
+import java.util.List;
 import java.util.UUID;
 
 /**
@@ -8,12 +9,20 @@ import java.util.UUID;
  *
  * <p>커밋 뒤에 받아야 합니다({@code AFTER_COMMIT}). 커밋 전에 폴링을 시작하면 백그라운드
  * 스레드가 아직 저장되지 않은 행을 찾지 못할 수 있습니다.
+ *
+ * @param retryAxes 실패 축 재시도면 다시 계산하는 축, 생성이면 null. 폴러가 자동 재시도할 때
+ *                  어느 엔드포인트를 부를지, 실패를 어떻게 정리할지 이걸로 나눕니다
  */
 public record ReportRequestedEvent(
         Long reportId,
         UUID reportPublicId,
         String sessionId,
         String aiTaskId,
-        int attempt
+        int attempt,
+        List<String> retryAxes
 ) {
+
+    public boolean isRetry() {
+        return retryAxes != null;
+    }
 }

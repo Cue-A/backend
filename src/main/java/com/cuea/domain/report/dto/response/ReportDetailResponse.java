@@ -45,6 +45,9 @@ public record ReportDetailResponse(
         @Schema(description = "내용 점수가 낮은 문항 최대 2개. 없으면 빈 배열")
         List<ImprovedAnswer> improvedAnswers,
 
+        @Schema(description = "실패 축 재시도 상태. 재시도한 적이 없거나 성공했으면 null. 재시도 중에도 리포트는 그대로 내려갑니다")
+        ReportRetryInfo retry,
+
         @Schema(description = "AI 가 리포트를 만든 시각")
         OffsetDateTime generatedAt,
 
@@ -156,9 +159,10 @@ public record ReportDetailResponse(
 
     /**
      * @param questionTexts 질문 ID → 질문 원문
+     * @param retry         재시도 상태. 재시도한 적이 없거나 성공했으면 null
      */
     public static ReportDetailResponse of(Report report, AiReportResult result,
-                                          Map<String, String> questionTexts) {
+                                          Map<String, String> questionTexts, ReportRetryInfo retry) {
         return new ReportDetailResponse(
                 report.getPublicId().toString(),
                 report.getSession().getSessionId(),
@@ -170,6 +174,7 @@ public record ReportDetailResponse(
                 result.companyComment(),
                 map(result.improvedAnswers(), a -> new ImprovedAnswer(
                         a.questionId(), a.originalExcerpt(), a.suggestion(), a.tStart(), a.tEnd())),
+                retry,
                 result.generatedAt(),
                 report.getCreatedAt(),
                 report.getCompletedAt());

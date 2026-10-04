@@ -10,6 +10,7 @@ import com.cuea.infrastructure.ai.AiClient;
 import com.cuea.infrastructure.ai.AiPoller;
 import com.cuea.infrastructure.ai.AiReportResultReader;
 import com.cuea.infrastructure.ai.dto.AiReportRequest;
+import com.cuea.infrastructure.ai.dto.AiReportRetryRequest;
 import com.cuea.infrastructure.ai.dto.AiReportTaskStatusResponse;
 import com.cuea.infrastructure.websocket.ReportSocketHandler;
 import com.cuea.infrastructure.websocket.message.ReportErrorPushMessage;
@@ -38,6 +39,15 @@ import org.springframework.transaction.event.TransactionalEventListener;
  * {@code CONTENT_FAILED} · {@code MEDIA_FETCH_FAILED} 는 한 번만 다시 요청합니다.
  * <b>시도 번호를 올린 새 Idempotency-Key 를 씁니다.</b> 같은 키면 AI 가 실패한 기존
  * task_id 를 그대로 돌려줍니다. 요청 본문도 다시 조립해 presigned URL 을 새로 받습니다.
+ *
+ * <h2>실패 축 재시도</h2>
+ * PARTIAL 리포트의 재시도({@link ReportRequestedEvent#isRetry()})도 여기서 폴링합니다. 폴링 ·
+ * 진행 단계 · 결과 저장은 생성과 같습니다. 다른 점은 두 가지입니다.
+ * <ul>
+ *   <li>자동 재시도가 생성 엔드포인트가 아니라 재시도 엔드포인트를 같은 축으로 다시 부릅니다</li>
+ *   <li>실패하면 리포트를 FAILED 로 만들지 않고 원래 PARTIAL 그대로 둔 채 재시도 실패만 남깁니다.
+ *       축 하나 때문에 이미 받은 리포트를 잃지 않게 하려는 것입니다</li>
+ * </ul>
  *
  * <h2>진행 단계 저장</h2>
  * WebSocket 으로 보내는 progress 를 {@link ReportProgressStore} 에도 남깁니다. 소켓에 늦게
@@ -111,8 +121,10 @@ public class ReportPoller {
 
     private String requestAgain(ReportRequestedEvent event, int attempt) {
         AiReportRequest body = requestAssembler.build(event.sessionId());
-        String taskId = aiClient.requestReport(
-                event.sessionId(), ReportRequestService.idempotencyKey(event.sessionId(), attempt), body);
+        String key = ReportRequestService.idempotencyKey(event.sessionId(), attempt);
+        String taskId = event.isRetry()
+                ? aiClient.retryReport(event.sessionId(), key, AiReportRetryRequest.of(event.retryAxes(), body))
+                : aiClient.requestReport(event.sessionId(), key, body);
         reportWriter.recordRetry(event.reportId(), attempt, taskId);
         return taskId;
     }
@@ -120,7 +132,8 @@ public class ReportPoller {
     private void finish(ReportRequestedEvent event, ReportResult result) {
         progressStore.delete(event.reportPublicId().toString());
         Report report = reportWriter.finish(event.reportId(), result);
-        log.info("리포트 생성 완료 sessionId={} status={}", event.sessionId(), report.getStatus());
+        log.info("리포트 {} 완료 sessionId={} status={}",
+                event.isRetry() ? "재시도" : "생성", event.sessionId(), report.getStatus());
         int delivered = socketHandler.push(event.reportPublicId().toString(), ReportPushMessage.of(
                 new ReportPushMessage(event.reportPublicId().toString(),
                         report.getStatus().name(), report.getScoreTotal())));
@@ -131,20 +144,24 @@ public class ReportPoller {
     }
 
     /**
-     * {@code FAILED} 로 정리하고 알립니다. 정리 자체가 실패해도 알림은 보냅니다.
-     * 이 메서드는 예외를 밖으로 내보내지 않습니다.
+     * 생성이면 {@code FAILED} 로, 재시도면 재시도 실패로 정리하고 알립니다. 정리 자체가
+     * 실패해도 알림은 보냅니다. 이 메서드는 예외를 밖으로 내보내지 않습니다.
      */
     private void fail(ReportRequestedEvent event, BusinessException cause) {
         ErrorCode errorCode = cause.getErrorCode();
-        log.warn("리포트 생성 실패 sessionId={} errorCode={} message={}",
-                event.sessionId(), errorCode, cause.getMessage());
+        log.warn("리포트 {} 실패 sessionId={} errorCode={} message={}",
+                event.isRetry() ? "재시도" : "생성", event.sessionId(), errorCode, cause.getMessage());
         progressStore.delete(event.reportPublicId().toString());
         try {
-            reportWriter.fail(event.reportId(), errorCode);
+            if (event.isRetry()) {
+                reportWriter.failRetry(event.reportId(), errorCode);
+            } else {
+                reportWriter.fail(event.reportId(), errorCode);
+            }
         } catch (RuntimeException e) {
-            // 행이 PROCESSING 으로 남습니다. 상태 조회도 PROCESSING 이라 답하며, 고아 정리
+            // 생성이면 행이 PROCESSING, 재시도면 retry_status 가 PROCESSING 으로 남습니다. 고아 정리
             // 작업이 생기기 전까지 풀리지 않습니다. docs/13-report.md 의 알아둘 제약 참고.
-            log.error("리포트 FAILED 처리 실패 reportId={}", event.reportId(), e);
+            log.error("리포트 실패 처리 실패 reportId={} retry={}", event.reportId(), event.isRetry(), e);
         }
         socketHandler.push(event.reportPublicId().toString(), ReportErrorPushMessage.of(
                 new ReportErrorPushMessage(errorCode.name(), ReportFailurePolicy.messageOf(errorCode),

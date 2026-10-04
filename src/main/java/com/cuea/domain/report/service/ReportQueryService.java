@@ -3,7 +3,7 @@ package com.cuea.domain.report.service;
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.entity.Question;
-import com.cuea.domain.interview.repository.QuestionRepository;
+import com.cuea.domain.interview.service.InterviewSessionQueryService;
 import com.cuea.domain.report.dto.response.ReportDetailResponse;
 import com.cuea.domain.report.entity.Report;
 import com.cuea.domain.report.repository.ReportRepository;
@@ -32,7 +32,7 @@ import java.util.stream.Collectors;
 public class ReportQueryService {
 
     private final ReportRepository reportRepository;
-    private final QuestionRepository questionRepository;
+    private final InterviewSessionQueryService sessionQueryService;
     private final AiReportResultReader resultReader;
 
     @Transactional(readOnly = true)
@@ -64,9 +64,12 @@ public class ReportQueryService {
         }
     }
 
-    /** (session_id, question_id) 가 PK 라 ID 가 겹치지 않습니다. */
+    /**
+     * 다른 도메인이라 리포지토리가 아니라 면접 서비스로 읽습니다. 소유권은 위에서 리포트를 본인 것으로
+     * 찾았으므로 확인됐습니다. (session_id, question_id) 가 PK 라 ID 가 겹치지 않습니다.
+     */
     private Map<String, String> questionTexts(String sessionId) {
-        return questionRepository.findAllBySessionId(sessionId).stream()
+        return sessionQueryService.findQuestionsInOrderForInternal(sessionId).stream()
                 .collect(Collectors.toMap(Question::getQuestionId, Question::getText));
     }
 

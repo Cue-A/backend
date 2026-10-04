@@ -4,7 +4,7 @@ import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.interview.entity.Question;
-import com.cuea.domain.interview.repository.QuestionRepository;
+import com.cuea.domain.interview.service.InterviewSessionQueryService;
 import com.cuea.domain.report.dto.response.ReportDetailResponse;
 import com.cuea.domain.report.entity.Report;
 import com.cuea.domain.report.entity.ReportStatus;
@@ -90,14 +90,14 @@ class ReportQueryServiceTest {
             .build();
 
     private ReportRepository reportRepository;
-    private QuestionRepository questionRepository;
+    private InterviewSessionQueryService sessionQueryService;
     private ReportQueryService service;
 
     @BeforeEach
     void setUp() {
         reportRepository = mock(ReportRepository.class);
-        questionRepository = mock(QuestionRepository.class);
-        service = new ReportQueryService(reportRepository, questionRepository,
+        sessionQueryService = mock(InterviewSessionQueryService.class);
+        service = new ReportQueryService(reportRepository, sessionQueryService,
                 new AiReportResultReader(objectMapper));
     }
 
@@ -159,7 +159,7 @@ class ReportQueryServiceTest {
     @Test
     void 질문_원문을_우리_DB_에서_붙인다() throws Exception {
         givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
-        when(questionRepository.findAllBySessionId(SESSION_ID)).thenReturn(List.of(
+        when(sessionQueryService.findQuestionsInOrderForInternal(SESSION_ID)).thenReturn(List.of(
                 Question.builder().sessionId(SESSION_ID).questionId("q_1").text("지원 동기를 말씀해 주세요").build()));
 
         ReportDetailResponse response = service.getDetail(USER_ID, PUBLIC_ID.toString());

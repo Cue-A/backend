@@ -1,6 +1,6 @@
 # PARTIAL 리포트 실패 축 재시도
 
-> 관련 이슈: (생성 전)
+> 관련 이슈: #67
 > 작성일: 2026-10-04
 > 선행: #66 리포트 상세 조회 (`AiReportResultReader` 로 `overall.axes_failed` 를 읽음)
 

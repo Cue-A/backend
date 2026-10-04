@@ -32,10 +32,18 @@ public class AiReportResultReader {
     }
 
     /**
-     * @throws BusinessException 원본이 계약 모양이 아니면 {@code UNEXPECTED_AI_RESPONSE}
+     * 우리 DB 에 저장된 원본을 읽습니다. 저장 전에 {@link #validate} 를 거치므로 정상이라면
+     * 실패하지 않습니다. 실패하면 AI 응답이 아니라 우리 쪽 값의 문제라 500 이고, 다시 불러도
+     * 결과가 같습니다.
+     *
+     * @throws BusinessException 원본이 계약 모양이 아니면 {@code INTERNAL_ERROR}
      */
     public AiReportResult read(Map<String, Object> reportData) {
-        return convert(reportData);
+        try {
+            return convert(reportData);
+        } catch (IllegalArgumentException e) {
+            throw new BusinessException(ErrorCode.INTERNAL_ERROR, "저장된 리포트를 해석할 수 없습니다", e);
+        }
     }
 
     /**
@@ -44,14 +52,14 @@ public class AiReportResultReader {
      * @throws BusinessException 계약 모양이 아니면 {@code UNEXPECTED_AI_RESPONSE}
      */
     public void validate(JsonNode result) {
-        convert(result);
-    }
-
-    private AiReportResult convert(Object source) {
         try {
-            return objectMapper.convertValue(source, AiReportResult.class);
+            convert(result);
         } catch (IllegalArgumentException e) {
             throw new BusinessException(ErrorCode.UNEXPECTED_AI_RESPONSE, "리포트 결과를 해석할 수 없습니다", e);
         }
+    }
+
+    private AiReportResult convert(Object source) {
+        return objectMapper.convertValue(source, AiReportResult.class);
     }
 }

@@ -2,6 +2,7 @@ package com.cuea.infrastructure.ai;
 
 import com.cuea.infrastructure.ai.dto.AiAnswerSubmitRequest;
 import com.cuea.infrastructure.ai.dto.AiReportRequest;
+import com.cuea.infrastructure.ai.dto.AiReportRetryRequest;
 import com.cuea.infrastructure.ai.dto.AiReportTaskStatusResponse;
 import com.cuea.infrastructure.ai.dto.AiSessionStartRequest;
 import com.cuea.infrastructure.ai.dto.AiSessionStartResponse;
@@ -41,6 +42,14 @@ public interface AiClient {
      * @throws com.cuea.common.exception.BusinessException 답변이 2문항 미만이면 {@code REPORT_TOO_SHORT}
      */
     String requestReport(String sessionId, String idempotencyKey, AiReportRequest request);
+
+    /**
+     * PARTIAL 리포트의 실패한 축만 다시 계산합니다. task_id 를 돌려받고, 폴링 결과는
+     * {@link #requestReport} 와 같은 <b>전체 리포트</b>입니다.
+     *
+     * <p>Idempotency-Key 규칙은 생성과 같습니다. 시도 번호를 올린 새 키를 쓰세요.
+     */
+    String retryReport(String sessionId, String idempotencyKey, AiReportRetryRequest request);
 
     /** 리포트 작업 상태 조회. 경로는 {@link #getTask} 와 같고 결과 모양만 다릅니다. */
     AiReportTaskStatusResponse getReportTask(String taskId);

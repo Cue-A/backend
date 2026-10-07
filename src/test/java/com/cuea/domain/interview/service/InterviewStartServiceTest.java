@@ -123,7 +123,7 @@ class InterviewStartServiceTest {
 
     private InterviewStartRequest request(Long companyId) {
         return new InterviewStartRequest(
-                DOCUMENT_PUBLIC_ID.toString(), companyId, "백엔드 개발", Persona.PRESSURE, 6);
+                DOCUMENT_PUBLIC_ID.toString(), companyId, "백엔드 개발", Persona.PRESSURE, 6, null);
     }
 
     private InterviewSession fakeSession(String sessionId) {
@@ -266,6 +266,27 @@ class InterviewStartServiceTest {
     }
 
     @Test
+    void 음성만_모드_요청은_hideQuestionText_true_로_세션_생성에_전달되고_AI_요청에는_포함되지_않는다() throws Exception {
+        AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_v", "task_v", 6);
+        when(aiClient.startSession(any())).thenReturn(aiResponse);
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6)))
+                .thenReturn(fakeSession("sess_v"));
+
+        service.start(USER_ID, new InterviewStartRequest(
+                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, 6, true));
+
+        ArgumentCaptor<InterviewStartRequest> reqCaptor = ArgumentCaptor.forClass(InterviewStartRequest.class);
+        verify(sessionWriter).createSession(any(), any(), any(), reqCaptor.capture(), any(), eq(6));
+        assertThat(reqCaptor.getValue().hideQuestionText()).isTrue();
+
+        // 음성만 모드는 UI 표시 방식만 바꾼다. AI 세션 시작 요청에는 진행 방식 필드가 없다.
+        ArgumentCaptor<AiSessionStartRequest> aiCaptor = ArgumentCaptor.forClass(AiSessionStartRequest.class);
+        verify(aiClient).startSession(aiCaptor.capture());
+        String json = new com.fasterxml.jackson.databind.ObjectMapper().writeValueAsString(aiCaptor.getValue());
+        assertThat(json).doesNotContain("hide_question_text");
+    }
+
+    @Test
     void questionCount_가_null_이면_기본값_6_으로_AI_에_보낸다() {
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_q", "task_q", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
@@ -273,7 +294,7 @@ class InterviewStartServiceTest {
                 .thenReturn(fakeSession("sess_q"));
 
         service.start(USER_ID, new InterviewStartRequest(
-                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, null));
+                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, null, null));
 
         ArgumentCaptor<AiSessionStartRequest> captor = ArgumentCaptor.forClass(AiSessionStartRequest.class);
         verify(aiClient).startSession(captor.capture());
@@ -283,13 +304,13 @@ class InterviewStartServiceTest {
     @Test
     void questionCount_가_3_6_9_외의_값이면_AI_호출_전에_거부한다() {
         assertThatThrownBy(() -> service.start(USER_ID, new InterviewStartRequest(
-                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, 4)))
+                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, 4, null)))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.INVALID_QUESTION_COUNT);
 
         // 0 도 마찬가지로 거부(mock 이 session_end 를 첫 결과로 주는 값).
         assertThatThrownBy(() -> service.start(USER_ID, new InterviewStartRequest(
-                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, 0)))
+                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, 0, null)))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.INVALID_QUESTION_COUNT);
 

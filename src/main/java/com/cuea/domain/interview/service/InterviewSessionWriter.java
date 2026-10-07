@@ -49,7 +49,7 @@ public class InterviewSessionWriter {
                         ? aiResponse.questionTotal()
                         : fallbackQuestionCount)
                 .persona(request.persona())
-                .hideQuestionText(false)
+                .hideQuestionText(Boolean.TRUE.equals(request.hideQuestionText()))
                 .status(SessionStatus.IN_PROGRESS)
                 .build();
         return sessionRepository.save(session);

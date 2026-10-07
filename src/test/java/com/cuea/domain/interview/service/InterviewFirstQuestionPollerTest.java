@@ -92,7 +92,7 @@ class InterviewFirstQuestionPollerTest {
                 "https://s3.../q_1.mp3?X-Amz-Signature=abc", true,
                 "지원동기", "L1", 1, 9));
         // 수신자(WebSocket 연결) 1개가 붙어 정상 전송된 상황.
-        when(socketHandler.push(eq(SESSION_ID), any())).thenReturn(1);
+        when(socketHandler.pushFirstQuestion(eq(SESSION_ID), eq("q_1"), any())).thenReturn(1);
 
         poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
 
@@ -101,7 +101,8 @@ class InterviewFirstQuestionPollerTest {
         verify(questionPushFactory).create(saved, 9);
 
         ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
-        verify(socketHandler).push(eq(SESSION_ID), captor.capture());
+        // 첫 질문은 소켓별 중복 방지 경로(pushFirstQuestion)로 보낸다(polling·catch-up 공용).
+        verify(socketHandler).pushFirstQuestion(eq(SESSION_ID), eq("q_1"), captor.capture());
         SocketMessage<?> pushed = captor.getValue();
         assertThat(pushed.type()).isEqualTo("question");
         assertThat(pushed.payload()).isInstanceOf(QuestionPushMessage.class);
@@ -130,7 +131,7 @@ class InterviewFirstQuestionPollerTest {
         when(questionPushFactory.create(saved, 9)).thenReturn(new QuestionPushMessage(
                 "q_1", "QUESTION", "지원 동기를 말씀해 주세요.",
                 null, false, "지원동기", "L1", 1, 9));
-        when(socketHandler.push(eq(SESSION_ID), any())).thenReturn(1);
+        when(socketHandler.pushFirstQuestion(eq(SESSION_ID), eq("q_1"), any())).thenReturn(1);
 
         poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
 
@@ -139,7 +140,7 @@ class InterviewFirstQuestionPollerTest {
         verify(sessionWriter, org.mockito.Mockito.never()).markAborted(anyString());
 
         ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
-        verify(socketHandler).push(eq(SESSION_ID), captor.capture());
+        verify(socketHandler).pushFirstQuestion(eq(SESSION_ID), eq("q_1"), captor.capture());
         assertThat(captor.getValue().type()).isEqualTo("question");
         QuestionPushMessage payload = (QuestionPushMessage) captor.getValue().payload();
         // 텍스트는 그대로, 음성만 빠진다.
@@ -301,8 +302,8 @@ class InterviewFirstQuestionPollerTest {
                         .type(QuestionType.QUESTION).text("지원 동기를 말씀해 주세요.")
                         .audioUrl("https://s3.../q_1.mp3").category("지원동기").difficulty("L1")
                         .questionNumber(1).topicIndex(0).build());
-        // 수신자 없음: push 가 0 건 전송을 반환.
-        when(socketHandler.push(eq(SESSION_ID), any())).thenReturn(0);
+        // 활성 WebSocket 없음: pushFirstQuestion 이 0 건 전송을 반환.
+        when(socketHandler.pushFirstQuestion(eq(SESSION_ID), eq("q_1"), any())).thenReturn(0);
 
         poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
 
@@ -311,9 +312,9 @@ class InterviewFirstQuestionPollerTest {
         verify(aiClient, org.mockito.Mockito.never()).abortSession(anyString());
         verify(sessionWriter, org.mockito.Mockito.never()).markAborted(anyString());
 
-        // question push 는 시도됐다(수신자가 없었을 뿐). error push 는 없다.
+        // 첫 질문 전송은 시도됐다(활성 수신자가 없었을 뿐). error push 는 없다.
         ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
-        verify(socketHandler).push(eq(SESSION_ID), captor.capture());
+        verify(socketHandler).pushFirstQuestion(eq(SESSION_ID), eq("q_1"), captor.capture());
         assertThat(captor.getValue().type()).isEqualTo("question");
     }
 

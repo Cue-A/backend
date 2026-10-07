@@ -110,11 +110,7 @@ public class InterviewFirstQuestionPoller {
         }
         int delivered = socketHandler.pushFirstQuestion(sessionId, question.getQuestionId(),
                 QuestionPushMessage.of(questionPushFactory.create(question, questionTotal)));
-        // WebSocket 핸드셰이크가 폴링보다 늦으면 이 시점에 수신자가 없어 전송 0 건입니다.
-        // 질문은 DB 에 저장돼 있으므로 유실이 아니라, 프론트가 뒤늦게 연결하면 그때
-        // 연결 시점 복구(InterviewFirstQuestionCatchUp)가 같은 질문을 내려줍니다(#35).
-        // 핸들러가 소켓별 questionId 클레임으로 중복을 막아, 복구와 이 push 가 겹쳐도
-        // 소켓당 한 번만 전달됩니다. 여기서는 진단용 사실만 남깁니다.
+        // 활성 WebSocket 이 없으면 유실이 아니라, 뒤늦게 연결될 때 catch-up 이 복구한다.
         if (delivered == 0) {
             log.info("첫 질문 활성 WebSocket 없음 sessionId={} questionId={}. "
                             + "다음 연결 시 DB catch-up 대상(질문은 DB 저장됨).",

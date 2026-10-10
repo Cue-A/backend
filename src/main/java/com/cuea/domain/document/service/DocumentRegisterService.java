@@ -56,9 +56,6 @@ public class DocumentRegisterService {
     /** 마크다운 본문 상한. {@code doc_text} 는 TEXT 라 DB 제약이 없어 여기서 막습니다. */
     static final int MAX_MARKDOWN_LENGTH = 20_000;
 
-    /** {@code doc_title VARCHAR(100)}. 넘으면 DB 가 잘라내는 게 아니라 터집니다. */
-    static final int MAX_TITLE_LENGTH = 100;
-
     private static final String MARKDOWN_COPY_FILE_NAME = "content.txt";
     private static final String MARKDOWN_COPY_CONTENT_TYPE = "text/plain; charset=UTF-8";
 
@@ -69,7 +66,7 @@ public class DocumentRegisterService {
     private final DocumentWriter documentWriter;
 
     public DocumentResponse register(String userId, DocumentCreateCommand command) {
-        validateTitle(command.title());
+        DocumentTitle.validate(command.title());
         validateNotOverLimit(userId);
 
         User user = userRepository.findById(userId)
@@ -180,16 +177,6 @@ public class DocumentRegisterService {
      */
     private DocumentStatus initialStatus() {
         return DocumentStatus.READY;
-    }
-
-    private void validateTitle(String title) {
-        if (title == null || title.isBlank()) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST, "title 이 필요합니다");
-        }
-        if (title.trim().length() > MAX_TITLE_LENGTH) {
-            throw new BusinessException(ErrorCode.INVALID_REQUEST,
-                    "제목은 %d자 이하여야 합니다".formatted(MAX_TITLE_LENGTH));
-        }
     }
 
     /**

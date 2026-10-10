@@ -178,7 +178,7 @@ class DocumentRegisterServiceTest {
 
     @Test
     void 제목이_상한을_넘으면_거절한다() {
-        String tooLong = "가".repeat(DocumentRegisterService.MAX_TITLE_LENGTH + 1);
+        String tooLong = "가".repeat(DocumentTitle.MAX_LENGTH + 1);
         DocumentCreateCommand command = new DocumentCreateCommand(
                 SourceType.MARKDOWN, DocType.RESUME, tooLong, "본문", null);
 

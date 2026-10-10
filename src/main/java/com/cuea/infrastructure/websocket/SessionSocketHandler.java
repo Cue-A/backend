@@ -1,10 +1,11 @@
 package com.cuea.infrastructure.websocket;
 
-import com.cuea.domain.interview.service.InterviewFirstQuestionCatchUp;
+import com.cuea.domain.interview.service.InterviewSocketConnectedEvent;
 import com.cuea.infrastructure.websocket.message.SocketMessage;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.CloseStatus;
 import org.springframework.web.socket.TextMessage;
@@ -26,29 +27,15 @@ public class SessionSocketHandler extends TextWebSocketHandler {
 
     private final SocketSessionRegistry registry;
     private final ObjectMapper objectMapper;
-    private final InterviewFirstQuestionCatchUp catchUp;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Override
     public void afterConnectionEstablished(WebSocketSession socket) {
         String sessionId = extractSessionId(socket);
         registry.register(sessionId, socket);
         log.debug("WebSocket 연결 sessionId={} socketId={}", sessionId, socket.getId());
-        catchUpFirstQuestion(sessionId, socket);
-    }
-
-    /**
-     * 연결 전에 드롭됐을 수 있는 첫 질문을 이 연결에만 복구합니다. register 이후에
-     * 조회해야 그 사이의 폴링 push 와 겹쳐도 유실이 없습니다. 복구 실패가 연결을 끊지
-     * 않도록 예외를 흡수합니다.
-     */
-    private void catchUpFirstQuestion(String sessionId, WebSocketSession socket) {
-        try {
-            catchUp.firstQuestion(sessionId)
-                    .ifPresent(fq -> pushFirstQuestionTo(socket, fq.questionId(), fq.message()));
-        } catch (RuntimeException e) {
-            log.warn("연결 시점 첫 질문 복구 실패 sessionId={} socketId={}",
-                    sessionId, socket.getId(), e);
-        }
+        // register 이후 발행해야, 리스너의 복구와 그 사이의 폴링 push 가 겹쳐도 유실이 없다.
+        eventPublisher.publishEvent(new InterviewSocketConnectedEvent(sessionId, socket.getId()));
     }
 
     @Override
@@ -108,12 +95,17 @@ public class SessionSocketHandler extends TextWebSocketHandler {
     }
 
     /**
-     * 연결 하나에 첫 질문을 보내되, 그 연결에 같은 questionId 를 이미 보냈으면 보내지
-     * 않습니다.
+     * 세션의 연결 하나(socketId)에만 첫 질문을 보내되, 이미 같은 questionId 를 보냈으면
+     * 보내지 않습니다. 그 연결이 이미 사라졌으면 아무 것도 하지 않습니다.
      *
      * @return 이번 호출로 실제 전송하면 {@code true}.
      */
-    public boolean pushFirstQuestionTo(WebSocketSession socket, String questionId, SocketMessage<?> message) {
+    public boolean pushFirstQuestionTo(String interviewSessionId, String socketId,
+                                       String questionId, SocketMessage<?> message) {
+        WebSocketSession socket = findSocket(interviewSessionId, socketId);
+        if (socket == null) {
+            return false;
+        }
         String payload = serialize(message);
         if (payload == null) {
             return false;
@@ -127,7 +119,7 @@ public class SessionSocketHandler extends TextWebSocketHandler {
     /**
      * 첫 질문을 소켓당 최대 한 번 전송합니다.
      *
-     * <p>폴링과 catch-up 두 경로가 서로 다른 스레드에서 같은 소켓에 들어올 수 있으므로,
+     * <p>폴링과 연결-복구가 서로 다른 스레드에서 같은 소켓에 들어올 수 있으므로,
      * "클레임 확인 → 전송 → 클레임 기록" 을 모두 같은 {@code synchronized (socket)}
      * 모니터 안에서 원자적으로 처리합니다.
      *
@@ -157,6 +149,15 @@ public class SessionSocketHandler extends TextWebSocketHandler {
             log.warn("첫 질문 push 실패 socketId={}", socket.getId(), e);
             return false;
         }
+    }
+
+    private WebSocketSession findSocket(String interviewSessionId, String socketId) {
+        for (WebSocketSession socket : registry.find(interviewSessionId)) {
+            if (socket.getId().equals(socketId)) {
+                return socket;
+            }
+        }
+        return null;
     }
 
     private String serialize(SocketMessage<?> message) {

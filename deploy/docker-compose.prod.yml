@@ -1,0 +1,114 @@
+# 운영 배포용. EC2 의 ~/cue-a 에 이 디렉토리째 올라가 거기서 돕니다.
+# 이미지는 GitHub Actions 가 빌드해 넘겨줍니다. 서버에서 빌드하지 않습니다.
+# 절차는 docs/30-deploy.md 참고.
+#   docker compose -f docker-compose.prod.yml up -d
+name: cue-a-prod
+
+x-logging: &logging
+  driver: json-file
+  options:
+    # 기본값은 무제한이라 디스크가 로그로 찹니다.
+    max-size: "10m"
+    max-file: "3"
+
+services:
+  postgres:
+    image: postgres:16
+    container_name: cue-a-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-cuea}
+      POSTGRES_USER: ${POSTGRES_USER:-cuea}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD 를 .env 에 넣어주세요}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    # ports 를 열지 않습니다. DB 는 백엔드에서만 접근합니다.
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-cuea} -d ${POSTGRES_DB:-cuea}"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging: *logging
+
+  # refresh 토큰과 호출 제한이 씁니다. 빼면 로그인이 안 됩니다.
+  redis:
+    image: redis:7-alpine
+    container_name: cue-a-redis
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+    logging: *logging
+
+  spring:
+    image: cue-a-backend:latest
+    container_name: cue-a-spring
+    restart: unless-stopped
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    env_file: .env
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      SPRING_DATASOURCE_URL: jdbc:postgresql://postgres:5432/${POSTGRES_DB:-cuea}
+      SPRING_DATASOURCE_USERNAME: ${POSTGRES_USER:-cuea}
+      SPRING_DATASOURCE_PASSWORD: ${POSTGRES_PASSWORD}
+      SPRING_DATA_REDIS_HOST: redis
+      # nginx 뒤라서 켭니다. 안 켜면 호출 제한이 전원을 nginx IP 하나로 셉니다.
+      SERVER_FORWARD_HEADERS_STRATEGY: framework
+      # Dockerfile 의 file.encoding 을 덮어쓰므로 같이 적습니다.
+      JAVA_TOOL_OPTIONS: "-Dfile.encoding=UTF-8 -XX:MaxRAMPercentage=50"
+    # 외부에 열지 않습니다. nginx 만 붙습니다.
+    expose:
+      - "8080"
+    logging: *logging
+
+  nginx:
+    image: nginx:1.27-alpine
+    container_name: cue-a-nginx
+    restart: unless-stopped
+    depends_on:
+      - spring
+    environment:
+      API_DOMAIN: ${API_DOMAIN:?API_DOMAIN 을 .env 에 넣어주세요}
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      # nginx 이미지가 기동 시 ${API_DOMAIN} 을 치환해 conf.d 에 씁니다.
+      - ./nginx/default.conf.template:/etc/nginx/templates/default.conf.template:ro
+      - certbot-conf:/etc/letsencrypt:ro
+      - certbot-www:/var/www/certbot:ro
+    # 갱신된 인증서를 읽도록 6시간마다 reload 합니다.
+    command: >
+      /bin/sh -c "while :; do sleep 6h & wait $${!}; nginx -s reload; done &
+      exec /docker-entrypoint.sh nginx -g 'daemon off;'"
+    logging: *logging
+
+  certbot:
+    image: certbot/certbot:latest
+    container_name: cue-a-certbot
+    restart: unless-stopped
+    volumes:
+      - certbot-conf:/etc/letsencrypt
+      - certbot-www:/var/www/certbot
+    # 최초 발급은 init-letsencrypt.sh 가 합니다. 여기서는 갱신만 돕니다.
+    entrypoint: >
+      /bin/sh -c "trap exit TERM; while :; do
+      certbot renew --webroot -w /var/www/certbot --quiet;
+      sleep 12h & wait $${!}; done"
+    logging: *logging
+
+volumes:
+  postgres-data:
+  redis-data:
+  certbot-conf:
+  certbot-www:

@@ -30,6 +30,11 @@ public record AiReportResult(
         List<ImprovedAnswer> improvedAnswers
 ) {
 
+    /** 실패한 축({@code overall.axes_failed}). 없으면 빈 목록. 실패 축 재시도가 그대로 AI 에 보냅니다. */
+    public List<String> failedAxes() {
+        return overall == null || overall.axesFailed() == null ? List.of() : overall.axesFailed();
+    }
+
     /**
      * @param score      0~100. 게이트가 적용된 최종값
      * @param display    1~5

@@ -4,6 +4,7 @@ import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.infrastructure.ai.dto.AiReportAnswer;
 import com.cuea.infrastructure.ai.dto.AiReportRequest;
+import com.cuea.infrastructure.ai.dto.AiReportRetryRequest;
 import com.cuea.infrastructure.ai.dto.AiReportTaskStatusResponse;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -73,6 +74,29 @@ class RealAiClientReportTest {
         // 영상이 없으면 키를 빼지 않고 null 로 보냅니다. 계약이 null 을 skipped 로 해석합니다.
         assertThat(answer.has("video_url")).isTrue();
         assertThat(answer.path("video_url").isNull()).isTrue();
+    }
+
+    @Test
+    void 재시도는_retry_경로에_멱등_키와_axes_를_실어_보낸다() throws IOException {
+        AtomicReference<String> key = new AtomicReference<>();
+        AtomicReference<String> path = new AtomicReference<>();
+        AtomicReference<JsonNode> body = new AtomicReference<>();
+        startServer(exchange -> {
+            key.set(exchange.getRequestHeaders().getFirst("Idempotency-Key"));
+            path.set(exchange.getRequestURI().getPath());
+            body.set(objectMapper.readTree(exchange.getRequestBody()));
+            respond(exchange, 202, "{\"task_id\":\"task_r2\"}");
+        });
+
+        String taskId = client(Duration.ofSeconds(2)).retryReport("sess_1", "rpt_sess_1_2",
+                AiReportRetryRequest.of(List.of("gaze"), request()));
+
+        assertThat(taskId).isEqualTo("task_r2");
+        assertThat(path.get()).isEqualTo("/ai/sessions/sess_1/report/retry");
+        assertThat(key.get()).isEqualTo("rpt_sess_1_2");
+        assertThat(body.get().path("axes").toString()).isEqualTo("[\"gaze\"]");
+        assertThat(body.get().path("job_role").asText()).isEqualTo("백엔드 개발");
+        assertThat(body.get().path("answers").get(0).path("question_id").asText()).isEqualTo("q_1");
     }
 
     @Test

@@ -443,7 +443,8 @@ score_content   INT           NULL
 score_speech    INT           NULL               -- 실패 시 null
 score_gaze      INT           NULL               -- 실패 또는 카메라 미사용(skipped) 시 null
 report_data     JSONB         NULL               -- AI result 원본 전체. 삭제 금지
-error_code      VARCHAR(50)   NULL               -- FAILED 일 때
+error_code      VARCHAR(50)   NULL               -- FAILED 일 때, 또는 retry_status = FAILED 일 때
+retry_status    VARCHAR(20)   NULL               -- null | PROCESSING | FAILED. PARTIAL 실패 축 재시도
 created_at      TIMESTAMPTZ   NOT NULL
 completed_at    TIMESTAMPTZ   NULL
 ```
@@ -452,6 +453,12 @@ completed_at    TIMESTAMPTZ   NULL
 만들지 않고 이 행을 `PROCESSING` 으로 되돌리며 `attempt` 를 올립니다. 그래서 재요청해도
 `reportId` 가 같습니다. AI 는 같은 Idempotency-Key 면 실패한 기존 task 를 돌려주므로
 시도 번호가 키에 들어갑니다.
+
+**실패 축 재시도는 `status` 가 아니라 `retry_status` 로 표시합니다.** 재시도 중에도 리포트는 PARTIAL
+결과 그대로 보여야 하기 때문입니다. 성공하면 결과를 통째로 바꾸고 `retry_status` 를 비우고, 실패하면
+결과는 그대로 두고 `retry_status = FAILED`, 원인은 `error_code` 에 남깁니다. 재시도는 PARTIAL 에서만
+하므로 `status = FAILED` 와 `retry_status = FAILED` 는 함께 생기지 않습니다. nullable 이라 `ddl-auto: update`
+로 기존 행에 그대로 추가됩니다. [`13-report.md`](./13-report.md) 의 실패 축 재시도 절 참고.
 
 **`status` 는 우리 상태라 enum 입니다.** AI 의 `report_status`(complete | partial)는
 `COMPLETED` · `PARTIAL` 로 옮기고, 원문은 `report_data` 에 남습니다.

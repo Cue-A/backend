@@ -4,6 +4,7 @@ import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.report.entity.Report;
+import com.cuea.domain.report.entity.ReportRetryStatus;
 import com.cuea.domain.report.entity.ReportStatus;
 import com.cuea.domain.report.repository.ReportRepository;
 import com.fasterxml.jackson.core.type.TypeReference;
@@ -13,6 +14,7 @@ import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.List;
 import java.util.Map;
 
 /**
@@ -64,6 +66,33 @@ public class ReportWriter {
         return reopened;
     }
 
+    /**
+     * PARTIAL 리포트의 실패 축 재시도를 시작하고, 커밋되면 폴링을 시작하도록 이벤트를 냅니다.
+     *
+     * @throws BusinessException 다른 요청이 먼저 시작했으면 {@code REPORT_RETRY_IN_PROGRESS}
+     */
+    @Transactional
+    public Report startRetry(Report partial, String sessionId, String aiTaskId, List<String> axes) {
+        int nextAttempt = partial.getAttempt() + 1;
+        int updated = reportRepository.startRetry(
+                partial.getReportId(), partial.getAttempt(), nextAttempt, aiTaskId,
+                ReportStatus.PARTIAL, ReportRetryStatus.PROCESSING);
+        if (updated == 0) {
+            throw new BusinessException(ErrorCode.REPORT_RETRY_IN_PROGRESS);
+        }
+        Report started = findForInternal(partial.getReportId());
+        eventPublisher.publishEvent(new ReportRequestedEvent(
+                started.getReportId(), started.getPublicId(), sessionId,
+                started.getAiTaskId(), started.getAttempt(), List.copyOf(axes)));
+        return started;
+    }
+
+    /** 실패 축 재시도가 실패했습니다. 리포트는 원래 PARTIAL 결과 그대로입니다. */
+    @Transactional
+    public void failRetry(Long reportId, ErrorCode errorCode) {
+        findForInternal(reportId).failRetry(errorCode.name());
+    }
+
     /** 백그라운드 자동 재시도로 새 task 를 받았습니다. */
     @Transactional
     public void recordRetry(Long reportId, int attempt, String aiTaskId) {
@@ -96,6 +125,6 @@ public class ReportWriter {
     private void publishRequested(Report report, String sessionId) {
         eventPublisher.publishEvent(new ReportRequestedEvent(
                 report.getReportId(), report.getPublicId(), sessionId,
-                report.getAiTaskId(), report.getAttempt()));
+                report.getAiTaskId(), report.getAttempt(), null));
     }
 }

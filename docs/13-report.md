@@ -37,8 +37,9 @@ DB 에는 0~100 점수만 컬럼으로 꺼내고, 나머지는 원본(`report_da
 ```
 POST /api/interviews/{sessionId}/reports     → 202 { reportId, sessionId, status, createdAt }
 WS   /ws/reports/{reportId}                  → progress · report · error
-GET  /api/reports/{reportId}/status          → { reportId, sessionId, status, stage, progress, errorCode, message, retryable, createdAt, completedAt }
+GET  /api/reports/{reportId}/status          → { reportId, sessionId, status, stage, progress, errorCode, message, retryable, retry, createdAt, completedAt }
 GET  /api/reports/{reportId}                 → 리포트 상세 (COMPLETED · PARTIAL 만)
+POST /api/reports/{reportId}/retry           → 202 { reportId, status, retry }  (PARTIAL 실패 축 재시도)
 ```
 
 ### 동기 구간 (HTTP 요청 스레드, 1초 이내)
@@ -139,7 +140,7 @@ WS 메시지는 붙어 있는 연결에만 갑니다. 소켓에 늦게 붙거나
 1. WS /ws/reports/{reportId} 연결
 2. GET /api/reports/{reportId}/status
    PROCESSING          → stage 가 있으면 그 단계로 로딩 화면을 맞추고 WS 를 기다림
-   COMPLETED · PARTIAL → 리포트 화면으로
+   COMPLETED · PARTIAL → 리포트 화면으로. retry.status 가 PROCESSING 이면 그 축 칸만 로딩
    FAILED              → retryable 이면 다시 요청 버튼, 아니면 실패 안내
 ```
 
@@ -158,7 +159,7 @@ WS 메시지는 붙어 있는 연결에만 갑니다. 소켓에 늦게 붙거나
 | status | stage · progress | errorCode · message · retryable |
 |---|---|---|
 | `PROCESSING` | 마지막 WS progress 와 같은 값. 첫 progress 전이면 null | null |
-| `COMPLETED` · `PARTIAL` | null | null |
+| `COMPLETED` · `PARTIAL` | null. 단 PARTIAL 재시도 중이면 재시도의 단계 | null. 재시도 실패 원인은 `retry` 안에 |
 | `FAILED` | null | DB `error_code`. `message` · `retryable` 은 WS `error` 와 같은 값 |
 
 - `sessionId` 는 FAILED 재요청(`POST /api/interviews/{sessionId}/reports`)에 씁니다. 새로고침으로
@@ -246,6 +247,67 @@ COMPLETED · PARTIAL 이면 부릅니다.
 
 ---
 
+## 실패 축 재시도 (`POST /api/reports/{reportId}/retry`)
+
+PARTIAL 리포트에서 **실패한 축(말하기·시선)만** 다시 분석합니다. AI 는 요청한 축만 다시 계산하고,
+폴링 결과는 생성과 같은 **전체 리포트**입니다(계약 14장). FAILED 는 이 API 가 아니라 등록 API 재요청으로
+복구합니다.
+
+**재시도 중에도 리포트는 PARTIAL 로 그대로 보입니다.** 화면은 리포트를 그대로 두고 다시 분석하는 축의
+칸에서만 로딩을 보여줍니다. 그래서 리포트 상태(`status`)와 재시도 상태(`retry_status`)를 따로 둡니다.
+
+### 동기 구간
+
+| 단계 | 내용 | 실패 시 |
+|---|---|---|
+| ① | 본인 리포트 조회 | 404 `REPORT_NOT_FOUND` |
+| ② | `status == PARTIAL` 인지 | 409 `REPORT_NOT_RETRYABLE` (PROCESSING · COMPLETED · FAILED) |
+| ③ | 재시도 중이 아닌지 | 409 `REPORT_RETRY_IN_PROGRESS` |
+| ④ | `report_data.overall.axes_failed` 읽기 | 비어 있으면 409 `REPORT_NOT_RETRYABLE`. AI 의 400 을 미리 막음 |
+| ⑤ | AI 재시도 요청 (Idempotency-Key `rpt_{sessionId}_{attempt+1}`) | 503 · 504. **리포트를 바꾸지 않음** |
+| ⑥ | 조건부 UPDATE → `retry_status = PROCESSING`, `attempt+1`, 새 task | 0행이면 409 `REPORT_RETRY_IN_PROGRESS` |
+| ⑦ | 커밋 후 폴링 시작, 202 | |
+
+- AI 호출이 UPDATE 보다 먼저입니다. 등록 API 와 같은 이유로, AI 가 거절하면 리포트를 그대로 둡니다.
+  동시 재시도는 같은 키로 AI 를 부르므로 AI 작업은 하나고 ⑥에서 한쪽만 통과합니다
+- 분당 10회로 제한합니다. **재시도 횟수 상한은 AI 파트와 논의 중**입니다([`90-open-questions.md`](./90-open-questions.md))
+
+### 백그라운드
+
+생성과 같은 `ReportPoller` 가 폴링하고 같은 WS(`progress` · `report` · `error`)를 보냅니다. 다른 점만 적습니다.
+
+| 상황 | 리포트 | `retry_status` | WS |
+|---|---|---|---|
+| 성공 | 새 결과로 통째로 교체 (PARTIAL → COMPLETED 가능) | null | `report` |
+| 실패 | **원래 PARTIAL 그대로** | FAILED, 원인은 `error_code` | `error` |
+
+- 자동 재시도(`CONTENT_FAILED` · `MEDIA_FETCH_FAILED` 1회)도 생성이 아니라 **재시도 엔드포인트**를 같은 축으로 부릅니다
+- 축 하나 때문에 이미 받은 리포트를 잃지 않도록, 재시도 실패는 리포트를 FAILED 로 만들지 않습니다
+
+### `retry` 필드
+
+재시도 · 상세 조회 · 상태 조회 응답에 같은 모양으로 들어갑니다.
+
+```json
+"retry": { "status": "PROCESSING", "axes": ["gaze"], "errorCode": null, "message": null, "retryable": null }
+```
+
+| `retry` | 의미 |
+|---|---|
+| `null` | 재시도한 적 없음, 또는 재시도가 성공해 결과가 교체됨 |
+| `status: PROCESSING` | 재시도 중. `axes` 칸에 로딩 |
+| `status: FAILED` | 마지막 재시도 실패. `errorCode` · `retryable` 은 리포트 실패와 같은 규칙. `message` 는 아래 |
+
+- `axes` 는 리포트의 `overall.axesFailed` 와 같습니다
+- **`message` 는 재시도용 문구입니다**(`ReportFailurePolicy.retryMessageOf`). 재시도가 실패해도
+  리포트는 PARTIAL 로 보이므로 "리포트를 만들지 못했습니다"를 쓰지 않습니다. `STT_FAILED` 는
+  "음성 인식에 실패해 다시 분석하지 못했습니다", 모르는 코드는 "다시 분석하지 못했습니다"이고
+  나머지는 `ErrorCode` 문구 그대로입니다. 재시도 실패 WS `error.message` 도 같은 문구입니다
+- 202 는 재시도를 **시작했다는 응답**입니다. 바뀐 점수는 WS `report` 를 받고 상세 조회로 가져옵니다
+- 처음 생성 때 쓴 소켓은 닫혀 있을 수 있으므로, 프론트는 202 를 받으면 소켓에 다시 붙고 상태 조회를 1회 부릅니다
+
+---
+
 ## 알아둘 제약
 
 - **서버가 재시작되면 폴링이 끊깁니다.** 그 리포트는 `PROCESSING` 으로 남고 재요청도
@@ -257,6 +319,10 @@ COMPLETED · PARTIAL 이면 부릅니다.
   DB 쓰기가 실패하면(순간적인 DB 장애 등) 행이 `PROCESSING` 으로 남습니다. 소켓은 실패라고
   했는데 상태 조회는 PROCESSING 이고, 재요청은 409 로 막힙니다. 고아 정리 작업이 함께 풀어야
   합니다
+- **재시도도 같습니다.** 폴링이 끊기면 `retry_status = PROCESSING` 이 남아 재시도가 409 로 막힙니다.
+  리포트 자체는 PARTIAL 로 계속 보입니다. 고아 정리 작업이 함께 풀어야 합니다
+- **`attempt` 는 생성 시도 수가 아니라 AI 작업 수**입니다. 생성 재요청 · 자동 재시도 · 실패 축 재시도가
+  같은 번호를 이어 씁니다. Idempotency-Key 가 겹치지 않게 하려는 것입니다
 - AI 서버는 단일 인스턴스라 재배포하면 task 가 사라집니다. 폴링이 `SESSION_NOT_FOUND`
   로 끝나 `FAILED` 가 되고, 사용자가 다시 요청하면 됩니다
 
@@ -266,7 +332,6 @@ COMPLETED · PARTIAL 이면 부릅니다.
 
 | 기능 | 비고 |
 |---|---|
-| 실패한 축만 재시도 (`/ai/sessions/{id}/report/retry`) | `PARTIAL` 전용. 만들지 팀 확인 필요 |
 | 회차 비교 (`/ai/reports/compare`) | 전체 회차의 `report_data` 를 함께 보냄 |
 
 ### 회차 비교 규칙 (계약 8장)

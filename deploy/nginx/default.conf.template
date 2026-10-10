@@ -1,0 +1,53 @@
+# ${API_DOMAIN} 만 치환됩니다. $host 같은 nginx 변수는 그대로 남습니다.
+
+server {
+    listen 80;
+    server_name ${API_DOMAIN};
+
+    # Let's Encrypt 갱신 확인용. https 로 돌리면 갱신이 실패합니다.
+    location /.well-known/acme-challenge/ {
+        root /var/www/certbot;
+    }
+
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name ${API_DOMAIN};
+
+    ssl_certificate     /etc/letsencrypt/live/${API_DOMAIN}/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/${API_DOMAIN}/privkey.pem;
+    ssl_protocols       TLSv1.2 TLSv1.3;
+
+    # 문서 업로드가 이 서버를 통과합니다. 기본값 1MB 면 Spring 에 닿기 전에 413 이 납니다.
+    # application.yml 의 max-request-size(12MB)와 맞춥니다.
+    client_max_body_size 12m;
+
+    proxy_set_header Host              $host;
+    proxy_set_header X-Real-IP         $remote_addr;
+    proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+    proxy_set_header X-Forwarded-Proto $scheme;
+
+    # WebSocket. 리포트 분석이 최대 10분이라 기본 60초면 중간에 끊깁니다.
+    location /ws/ {
+        proxy_pass http://spring:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade    $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_read_timeout 15m;
+        proxy_send_timeout 15m;
+    }
+
+    location / {
+        proxy_pass http://spring:8080;
+        proxy_read_timeout 120s;
+    }
+}

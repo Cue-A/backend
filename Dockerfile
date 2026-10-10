@@ -1,4 +1,4 @@
-# docker-compose.yml (데모용) 에서만 씁니다.
+# docker-compose.yml (데모용) 과 운영 배포(.github/workflows/deploy.yml)가 씁니다.
 # 개발 중에는 IntelliJ 로 실행하세요.
 FROM eclipse-temurin:21-jdk AS build
 WORKDIR /workspace

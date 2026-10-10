@@ -108,16 +108,12 @@ public class InterviewFirstQuestionPoller {
             log.info("이미 종료된 세션에 늦게 도착한 첫 질문이라 저장·push 하지 않습니다 sessionId={}", sessionId);
             return;
         }
-        int delivered = socketHandler.push(sessionId,
+        int delivered = socketHandler.pushFirstQuestion(sessionId, question.getQuestionId(),
                 QuestionPushMessage.of(questionPushFactory.create(question, questionTotal)));
-        // WebSocket 핸드셰이크가 폴링보다 늦으면 수신자가 없어 첫 질문 push 가 드롭됩니다.
-        // 질문 자체는 DB 에 저장돼 있으므로 세션은 유효하지만, 프론트는 첫 질문을 못 받습니다.
-        // pending 버퍼/catch-up 은 후속 작업으로 분리했고, 여기서는 유실을 추적할 수 있게
-        // 경고 로그만 남깁니다.
+        // 활성 WebSocket 이 없으면 유실이 아니라, 뒤늦게 연결될 때 catch-up 이 복구한다.
         if (delivered == 0) {
-            log.warn("첫 질문 push 수신자 없음(유실) sessionId={} questionId={}. "
-                            + "WebSocket 미연결로 첫 질문이 드롭됐습니다(질문은 DB 저장됨). "
-                            + "catch-up 은 후속 이슈에서 처리.",
+            log.info("첫 질문 활성 WebSocket 없음 sessionId={} questionId={}. "
+                            + "다음 연결 시 DB catch-up 대상(질문은 DB 저장됨).",
                     sessionId, question.getQuestionId());
         }
     }

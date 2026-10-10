@@ -2,6 +2,8 @@ package com.cuea.domain.interview.service;
 
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
+import com.cuea.domain.document.entity.Document;
+import com.cuea.domain.interview.dto.request.InterviewStartRequest;
 import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.interview.entity.Persona;
 import com.cuea.domain.interview.entity.Question;
@@ -11,6 +13,7 @@ import com.cuea.domain.interview.repository.InterviewSessionRepository;
 import com.cuea.domain.interview.repository.QuestionRepository;
 import com.cuea.domain.user.entity.User;
 import com.cuea.infrastructure.ai.dto.AiQuestionResult;
+import com.cuea.infrastructure.ai.dto.AiSessionStartResponse;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
@@ -237,5 +240,50 @@ class InterviewSessionWriterTest {
 
         assertThat(saved).isNull();
         verify(questionRepository, never()).save(any());
+    }
+
+    @Test
+    void createSession_은_요청의_hideQuestionText_true_를_음성만_모드로_저장한다() {
+        ArgumentCaptor<InterviewSession> captor = ArgumentCaptor.forClass(InterviewSession.class);
+        when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        writer.createSession(mock(User.class), mock(Document.class), null,
+                startRequest(true), aiStartResponse(), 6);
+
+        verify(sessionRepository).save(captor.capture());
+        assertThat(captor.getValue().isHideQuestionText()).isTrue();
+    }
+
+    @Test
+    void createSession_은_요청의_hideQuestionText_false_를_그대로_저장한다() {
+        ArgumentCaptor<InterviewSession> captor = ArgumentCaptor.forClass(InterviewSession.class);
+        when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        writer.createSession(mock(User.class), mock(Document.class), null,
+                startRequest(false), aiStartResponse(), 6);
+
+        verify(sessionRepository).save(captor.capture());
+        assertThat(captor.getValue().isHideQuestionText()).isFalse();
+    }
+
+    @Test
+    void createSession_은_hideQuestionText_가_null_이면_기존_동작대로_false_로_저장한다() {
+        ArgumentCaptor<InterviewSession> captor = ArgumentCaptor.forClass(InterviewSession.class);
+        when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        writer.createSession(mock(User.class), mock(Document.class), null,
+                startRequest(null), aiStartResponse(), 6);
+
+        verify(sessionRepository).save(captor.capture());
+        assertThat(captor.getValue().isHideQuestionText()).isFalse();
+    }
+
+    private InterviewStartRequest startRequest(Boolean hideQuestionText) {
+        return new InterviewStartRequest(
+                "11111111-1111-1111-1111-111111111111", null, "백엔드", Persona.FRIENDLY, 6, hideQuestionText);
+    }
+
+    private AiSessionStartResponse aiStartResponse() {
+        return new AiSessionStartResponse(SESSION_ID, "task_1", 6);
     }
 }

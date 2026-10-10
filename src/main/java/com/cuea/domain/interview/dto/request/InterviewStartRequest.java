@@ -17,6 +17,8 @@ import jakarta.validation.constraints.Size;
  * @param jobRole          자유 문자열. VARCHAR(100) 기준.
  * @param persona          FRIENDLY | PRESSURE
  * @param questionCount    3 | 6 | 9. null 이면 서비스 기본값(6)을 씁니다.
+ * @param hideQuestionText 질문 텍스트를 숨기고 음성만 들려주는 실전 모드면 true.
+ *                         null 이면 기본값 텍스트+음성(false)으로 저장합니다.
  */
 public record InterviewStartRequest(
         @NotBlank
@@ -31,6 +33,8 @@ public record InterviewStartRequest(
         @NotNull
         Persona persona,
 
-        Integer questionCount
+        Integer questionCount,
+
+        Boolean hideQuestionText
 ) {
 }

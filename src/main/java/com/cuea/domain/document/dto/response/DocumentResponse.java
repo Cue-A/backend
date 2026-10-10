@@ -35,7 +35,10 @@ public record DocumentResponse(
         @Schema(description = "바이트. MARKDOWN 이면 null")
         Long fileSize,
 
-        OffsetDateTime createdAt
+        OffsetDateTime createdAt,
+
+        @Schema(description = "마지막 수정 시각. 수정한 적 없으면 등록 시점입니다(createdAt 과 미세하게 다를 수 있음)")
+        OffsetDateTime updatedAt
 ) {
 
     public static DocumentResponse from(Document document) {
@@ -46,6 +49,7 @@ public record DocumentResponse(
                 document.getDocTitle(),
                 document.getFileName(),
                 document.getFileSize(),
-                document.getCreatedAt());
+                document.getCreatedAt(),
+                document.getUpdatedAt());
     }
 }

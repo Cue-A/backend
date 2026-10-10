@@ -8,6 +8,7 @@ import com.cuea.domain.report.entity.Report;
 import com.cuea.domain.report.service.ReportProgressStore.ReportProgress;
 import com.cuea.infrastructure.ai.AiClient;
 import com.cuea.infrastructure.ai.AiPoller;
+import com.cuea.infrastructure.ai.AiReportResultReader;
 import com.cuea.infrastructure.ai.dto.AiReportRequest;
 import com.cuea.infrastructure.ai.dto.AiReportTaskStatusResponse;
 import com.cuea.infrastructure.websocket.ReportSocketHandler;
@@ -59,6 +60,7 @@ public class ReportPoller {
     private final ReportWriter reportWriter;
     private final ReportSocketHandler socketHandler;
     private final ReportProgressStore progressStore;
+    private final AiReportResultReader resultReader;
 
     @Async(AsyncConfig.REPORT_EXECUTOR)
     @TransactionalEventListener(phase = TransactionPhase.AFTER_COMMIT)
@@ -74,7 +76,10 @@ public class ReportPoller {
                 AiReportTaskStatusResponse done = aiPoller.await(
                         taskId, reportProperties.pollTimeout(), aiClient::getReportTask,
                         status -> pushProgress(reportId, status));
-                finish(event, ReportResult.from(done));
+                ReportResult result = ReportResult.from(done);
+                // 상세 조회가 읽지 못할 결과를 COMPLETED 로 남기지 않습니다. AiReportResultReader 참고.
+                resultReader.validate(done.result());
+                finish(event, result);
                 return;
             } catch (BusinessException e) {
                 if (retried || !ReportFailurePolicy.shouldAutoRetry(e.getErrorCode())) {

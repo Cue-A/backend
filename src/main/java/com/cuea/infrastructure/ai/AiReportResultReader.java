@@ -49,13 +49,36 @@ public class AiReportResultReader {
     /**
      * 폴링으로 받은 결과가 상세 조회에서 읽을 수 있는 모양인지 저장 전에 확인합니다.
      *
-     * @throws BusinessException 계약 모양이 아니면 {@code UNEXPECTED_AI_RESPONSE}
+     * <p>역직렬화는 키가 빠져도 null 로 통과하므로 필수 필드도 따로 봅니다. 껍데기만 온 결과를
+     * COMPLETED 로 남기면 빈 리포트인데 재요청도 막힙니다. 필수는 총점, 세 축의 {@code status},
+     * {@code questions} 배열입니다. 실패·skipped 축은 점수가 null 이라 축 점수는 보지 않고,
+     * 글로 된 칸({@code company_comment} 등)은 생성에 실패하면 비어 올 수 있어 보지 않습니다.
+     *
+     * @throws BusinessException 계약 모양이 아니거나 필수 필드가 없으면 {@code UNEXPECTED_AI_RESPONSE}
      */
     public void validate(JsonNode result) {
+        AiReportResult report;
         try {
-            convert(result);
+            report = convert(result);
         } catch (IllegalArgumentException e) {
             throw new BusinessException(ErrorCode.UNEXPECTED_AI_RESPONSE, "리포트 결과를 해석할 수 없습니다", e);
+        }
+        requirePresent(report.overall() != null && report.overall().score() != null, "overall.score");
+        AiReportResult.Axes axes = report.axes();
+        requirePresent(axes != null, "axes");
+        requireStatus(axes.content(), "axes.content");
+        requireStatus(axes.speech(), "axes.speech");
+        requireStatus(axes.gaze(), "axes.gaze");
+        requirePresent(report.questions() != null, "questions");
+    }
+
+    private static void requireStatus(AiReportResult.Axis axis, String field) {
+        requirePresent(axis != null && axis.status() != null, field + ".status");
+    }
+
+    private static void requirePresent(boolean present, String field) {
+        if (!present) {
+            throw new BusinessException(ErrorCode.UNEXPECTED_AI_RESPONSE, "리포트 결과에 필수 필드가 없습니다: " + field);
         }
     }
 

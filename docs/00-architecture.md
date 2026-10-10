@@ -243,6 +243,7 @@ spring:
 |---|---|
 | `docker-compose.dev.yml` | 인프라만 (PG, Redis, MinIO). **개발 중 상시 사용** |
 | `docker-compose.yml` | 전체 (인프라 + Spring + AI + 프론트). 데모용 |
+| `deploy/docker-compose.prod.yml` | 운영 (EC2). [`30-deploy.md`](./30-deploy.md) |
 
 개발 중에는 인프라만 도커로 띄우고 Spring은 IntelliJ에서 실행합니다.
 디버거와 핫리로드를 쓸 수 있습니다.

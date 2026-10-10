@@ -1,0 +1,74 @@
+name: Deploy
+
+# main 에 머지되면 EC2 로 배포합니다. 절차와 Secrets 는 docs/30-deploy.md 참고.
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# 배포가 겹치면 컨테이너 교체가 꼬입니다. 진행 중인 배포는 끊지 않고 뒤에 줄 세웁니다.
+concurrency:
+  group: deploy
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      DEPLOY_DIR: cue-a
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+          cache: gradle
+
+      # 테스트가 깨진 상태로는 배포하지 않습니다. Testcontainers 가 러너의 Docker 를 씁니다.
+      - name: Test
+        run: ./gradlew --no-daemon test
+
+      # 이미지는 여기서 빌드합니다. EC2(t3.small)에서 Gradle 빌드를 돌리면 메모리가 모자랍니다.
+      # 러너가 amd64 라 EC2 도 x86(t3 계열)이어야 합니다. t4g(ARM)면 실행되지 않습니다.
+      - name: Build image
+        run: |
+          docker build -t cue-a-backend:latest .
+          docker save cue-a-backend:latest | gzip > image.tar.gz
+
+      - name: Set up SSH
+        run: |
+          mkdir -p ~/.ssh
+          echo "${{ secrets.EC2_SSH_KEY }}" > ~/.ssh/id_deploy
+          chmod 600 ~/.ssh/id_deploy
+          ssh-keyscan -H "${{ secrets.EC2_HOST }}" >> ~/.ssh/known_hosts
+
+      # .env 는 서버에만 있고 여기서 보내지 않습니다. 덮어쓰지 않도록 파일을 골라 보냅니다.
+      - name: Upload
+        run: |
+          SSH="ssh -i ~/.ssh/id_deploy ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}"
+          $SSH "mkdir -p ~/$DEPLOY_DIR/nginx"
+          scp -i ~/.ssh/id_deploy image.tar.gz \
+            deploy/docker-compose.prod.yml deploy/init-letsencrypt.sh deploy/.env.prod.example \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/$DEPLOY_DIR/
+          scp -i ~/.ssh/id_deploy deploy/nginx/default.conf.template \
+            ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }}:~/$DEPLOY_DIR/nginx/
+
+      - name: Restart
+        run: |
+          ssh -i ~/.ssh/id_deploy ${{ secrets.EC2_USER }}@${{ secrets.EC2_HOST }} bash -s <<SCRIPT
+          set -euo pipefail
+          cd ~/$DEPLOY_DIR
+          gunzip -c image.tar.gz | docker load
+          rm image.tar.gz
+          # 서버를 처음 세팅할 때는 .env 가 아직 없습니다. 이미지만 올려두고 끝냅니다.
+          if [ ! -f .env ]; then
+            echo "::warning::~/$DEPLOY_DIR/.env 가 없어 기동을 건너뜁니다. docs/30-deploy.md 의 서버 준비 6~7번을 진행하세요."
+            exit 0
+          fi
+          docker compose -f docker-compose.prod.yml up -d --remove-orphans
+          docker image prune -f
+          SCRIPT

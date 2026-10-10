@@ -27,6 +27,6 @@ final class ReportRetryInfos {
         }
         String errorCode = report.getErrorCode();
         return new ReportRetryInfo(status, retryAxes, errorCode,
-                ReportFailurePolicy.messageOf(errorCode), ReportFailurePolicy.isUserRetryable(errorCode));
+                ReportFailurePolicy.retryMessageOf(errorCode), ReportFailurePolicy.isUserRetryable(errorCode));
     }
 }

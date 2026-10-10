@@ -163,8 +163,11 @@ public class ReportPoller {
             // 작업이 생기기 전까지 풀리지 않습니다. docs/13-report.md 의 알아둘 제약 참고.
             log.error("리포트 실패 처리 실패 reportId={} retry={}", event.reportId(), event.isRetry(), e);
         }
+        String message = event.isRetry()
+                ? ReportFailurePolicy.retryMessageOf(errorCode)
+                : ReportFailurePolicy.messageOf(errorCode);
         socketHandler.push(event.reportPublicId().toString(), ReportErrorPushMessage.of(
-                new ReportErrorPushMessage(errorCode.name(), ReportFailurePolicy.messageOf(errorCode),
+                new ReportErrorPushMessage(errorCode.name(), message,
                         ReportFailurePolicy.isUserRetryable(errorCode))));
     }
 

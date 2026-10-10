@@ -250,6 +250,16 @@ class ReportStatusServiceTest {
         assertThat(response.retry().retryable()).isTrue();
     }
 
+    /** 재시도가 실패해도 리포트는 PARTIAL 로 보이므로 생성 실패 문구를 내려주지 않습니다. */
+    @Test
+    void 재시도_실패_문구는_리포트를_만들지_못했다고_하지_않는다() {
+        givenReport(partial(ReportRetryStatus.FAILED, "STT_FAILED"));
+
+        ReportStatusResponse response = service.getStatus(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.retry().message()).isEqualTo("음성 인식에 실패해 다시 분석하지 못했습니다");
+    }
+
     @Test
     void 재시도한_적이_없으면_retry_는_null_이고_남은_진행_단계도_붙이지_않는다() {
         givenReport(partial(null, null));

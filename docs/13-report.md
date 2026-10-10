@@ -293,9 +293,13 @@ PARTIAL 리포트에서 **실패한 축(말하기·시선)만** 다시 분석합
 |---|---|
 | `null` | 재시도한 적 없음, 또는 재시도가 성공해 결과가 교체됨 |
 | `status: PROCESSING` | 재시도 중. `axes` 칸에 로딩 |
-| `status: FAILED` | 마지막 재시도 실패. `errorCode` · `message` · `retryable` 은 리포트 실패와 같은 규칙 |
+| `status: FAILED` | 마지막 재시도 실패. `errorCode` · `retryable` 은 리포트 실패와 같은 규칙. `message` 는 아래 |
 
 - `axes` 는 리포트의 `overall.axesFailed` 와 같습니다
+- **`message` 는 재시도용 문구입니다**(`ReportFailurePolicy.retryMessageOf`). 재시도가 실패해도
+  리포트는 PARTIAL 로 보이므로 "리포트를 만들지 못했습니다"를 쓰지 않습니다. `STT_FAILED` 는
+  "음성 인식에 실패해 다시 분석하지 못했습니다", 모르는 코드는 "다시 분석하지 못했습니다"이고
+  나머지는 `ErrorCode` 문구 그대로입니다. 재시도 실패 WS `error.message` 도 같은 문구입니다
 - 202 는 재시도를 **시작했다는 응답**입니다. 바뀐 점수는 WS `report` 를 받고 상세 조회로 가져옵니다
 - 처음 생성 때 쓴 소켓은 닫혀 있을 수 있으므로, 프론트는 202 를 받으면 소켓에 다시 붙고 상태 조회를 1회 부릅니다
 

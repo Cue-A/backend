@@ -326,6 +326,8 @@ class ReportPollerTest {
         verify(reportWriter, never()).fail(any(), any());
         ReportErrorPushMessage error = (ReportErrorPushMessage) pushed();
         assertThat(error.errorCode()).isEqualTo("STT_FAILED");
+        assertThat(error.message()).isEqualTo(ReportFailurePolicy.retryMessageOf("STT_FAILED"))
+                .doesNotContain("리포트를 만들지 못했습니다");
     }
 
     /** 자동 재시도도 생성이 아니라 재시도 엔드포인트를 같은 축으로 부릅니다. */

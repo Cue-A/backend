@@ -1,0 +1,111 @@
+package com.cuea.domain.report.service;
+
+import com.cuea.common.exception.ErrorCode;
+
+import java.util.Map;
+import java.util.Optional;
+import java.util.Set;
+
+/**
+ * 리포트 실패를 어떻게 다룰지. 리포트 계약 9장의 재시도 분류를 따릅니다.
+ *
+ * <p>{@code AiErrorTranslator} 에 넣지 않은 이유: 같은 코드라도 질문 생성과 리포트의
+ * 재시도 규칙이 다릅니다(예: {@code STT_FAILED} 는 질문에선 1회 재시도, 리포트에선
+ * 재시도 없음). 리포트 규칙은 리포트 도메인에 둡니다.
+ */
+final class ReportFailurePolicy {
+
+    /** 백그라운드에서 새 Idempotency-Key 로 한 번 더 요청합니다. */
+    private static final Set<ErrorCode> AUTO_RETRY = Set.of(
+            ErrorCode.CONTENT_FAILED,       // LLM 일시 오류 가능성
+            ErrorCode.MEDIA_FETCH_FAILED);  // presigned URL 만료 가능성. 재조립하면 새 URL
+
+    /** 사용자가 등록 API 로 다시 요청해 볼 만한 실패. */
+    private static final Set<ErrorCode> USER_RETRYABLE = Set.of(
+            ErrorCode.CONTENT_FAILED,
+            ErrorCode.MEDIA_FETCH_FAILED,
+            ErrorCode.AI_TIMEOUT,
+            ErrorCode.AI_UNAVAILABLE);
+
+    /**
+     * 기본 문구가 리포트에 맞지 않는 코드. {@code STT_FAILED} 의 기본 문구는 "다시 녹음해
+     * 주세요"인데, 리포트는 면접이 끝난 뒤라 다시 녹음할 수 없습니다.
+     */
+    private static final Map<ErrorCode, String> MESSAGE_OVERRIDES = Map.of(
+            ErrorCode.STT_FAILED, "음성 인식에 실패해 리포트를 만들지 못했습니다");
+
+    /** 지금 {@link ErrorCode} 에 없는 옛 코드이거나 코드가 비어 있을 때. */
+    private static final String UNKNOWN_FAILURE_MESSAGE = "리포트를 만들지 못했습니다";
+
+    /**
+     * 실패 축 재시도용. 재시도가 실패해도 리포트는 PARTIAL 로 보이므로 "리포트를 만들지
+     * 못했다"는 생성 실패 문구를 쓰지 않습니다.
+     */
+    private static final Map<ErrorCode, String> RETRY_MESSAGE_OVERRIDES = Map.of(
+            ErrorCode.STT_FAILED, "음성 인식에 실패해 다시 분석하지 못했습니다");
+
+    private static final String UNKNOWN_RETRY_FAILURE_MESSAGE = "다시 분석하지 못했습니다";
+
+    private ReportFailurePolicy() {
+    }
+
+    static boolean shouldAutoRetry(ErrorCode errorCode) {
+        return AUTO_RETRY.contains(errorCode);
+    }
+
+    /**
+     * WebSocket {@code error.retryable}. {@code STT_FAILED} 는 오디오 자체 문제일 가능성이
+     * 높아 다시 돌려도 같습니다.
+     */
+    static boolean isUserRetryable(ErrorCode errorCode) {
+        return USER_RETRYABLE.contains(errorCode);
+    }
+
+    /**
+     * DB 에 남은 {@code error_code} 로 판단합니다. 상태 조회 API 가 WebSocket 과 같은 값을
+     * 내려주려고 씁니다. 지금 {@link ErrorCode} 에 없는 옛 코드는 재시도 불가로 봅니다.
+     */
+    static boolean isUserRetryable(String errorCode) {
+        return parse(errorCode).map(ReportFailurePolicy::isUserRetryable).orElse(false);
+    }
+
+    /**
+     * 사용자에게 보여줄 실패 문구. WebSocket {@code error.message} 와 상태 조회
+     * {@code message} 가 같은 값을 내려주도록 둘 다 여기를 씁니다.
+     *
+     * <p>AI 가 준 문구는 쓰지 않습니다. 사용자용으로 쓴 문구라는 보장이 없고, 쓰면 같은
+     * 실패인데 소켓과 상태 조회의 문구가 달라집니다. AI 문구는 로그에만 남깁니다.
+     */
+    static String messageOf(ErrorCode errorCode) {
+        return MESSAGE_OVERRIDES.getOrDefault(errorCode, errorCode.getMessage());
+    }
+
+    /** DB 에 남은 {@code error_code} 로 문구를 만듭니다. 모르는 코드는 공통 문구입니다. */
+    static String messageOf(String errorCode) {
+        return parse(errorCode).map(ReportFailurePolicy::messageOf).orElse(UNKNOWN_FAILURE_MESSAGE);
+    }
+
+    /**
+     * 실패 축 재시도의 실패 문구. WebSocket {@code error.message} 와 조회 응답의
+     * {@code retry.message} 가 같은 값을 내려주도록 둘 다 여기를 씁니다.
+     */
+    static String retryMessageOf(ErrorCode errorCode) {
+        return RETRY_MESSAGE_OVERRIDES.getOrDefault(errorCode, errorCode.getMessage());
+    }
+
+    /** DB 에 남은 {@code error_code} 로 재시도 실패 문구를 만듭니다. 모르는 코드는 공통 문구입니다. */
+    static String retryMessageOf(String errorCode) {
+        return parse(errorCode).map(ReportFailurePolicy::retryMessageOf).orElse(UNKNOWN_RETRY_FAILURE_MESSAGE);
+    }
+
+    private static Optional<ErrorCode> parse(String errorCode) {
+        if (errorCode == null) {
+            return Optional.empty();
+        }
+        try {
+            return Optional.of(ErrorCode.valueOf(errorCode));
+        } catch (IllegalArgumentException e) {
+            return Optional.empty();
+        }
+    }
+}

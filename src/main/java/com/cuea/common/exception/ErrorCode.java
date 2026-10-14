@@ -20,14 +20,26 @@ public enum ErrorCode {
     UNAUTHORIZED(HttpStatus.UNAUTHORIZED, "로그인이 필요합니다"),
     FORBIDDEN(HttpStatus.FORBIDDEN, "권한이 없습니다"),
     INVALID_TOKEN(HttpStatus.UNAUTHORIZED, "유효하지 않은 토큰입니다"),
+    // 프론트는 이 둘을 반드시 구분해야 합니다. TOKEN_EXPIRED 면 재발급을 시도하고,
+    // 나머지 401 이면 토큰을 버리고 로그인 화면으로 보냅니다.
+    TOKEN_EXPIRED(HttpStatus.UNAUTHORIZED, "토큰이 만료되었습니다"),
+    INVALID_REFRESH_TOKEN(HttpStatus.UNAUTHORIZED, "다시 로그인해 주세요"),
+    REFRESH_TOKEN_REUSED(HttpStatus.UNAUTHORIZED, "보안을 위해 로그아웃되었습니다. 다시 로그인해 주세요"),
     INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다"),
     EMAIL_ALREADY_EXISTS(HttpStatus.CONFLICT, "이미 가입된 이메일입니다"),
+    INVALID_PASSWORD_FORMAT(HttpStatus.BAD_REQUEST, "비밀번호는 영문·숫자를 포함해 8~64자여야 합니다"),
+    OAUTH_FAILED(HttpStatus.UNAUTHORIZED, "소셜 로그인에 실패했습니다"),
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다"),
 
     // ── 문서 · 파일 ──────────────────────────────────────────
     DOCUMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "문서를 찾을 수 없습니다"),
-    UNSUPPORTED_FILE_TYPE(HttpStatus.BAD_REQUEST, "지원하지 않는 파일 형식입니다"),
-    FILE_TOO_LARGE(HttpStatus.PAYLOAD_TOO_LARGE, "파일이 너무 큽니다"),
+    // 아래 둘은 문서·이력서·녹음이 함께 씁니다. 허용 형식과 크기 상한이 경로마다
+    // 달라 기본 메시지는 일반형으로 두고, 구체적인 안내는 FileValidator 가 허용
+    // 목록에서 만들어 넘깁니다.
+    UNSUPPORTED_FILE_FORMAT(HttpStatus.BAD_REQUEST, "지원하지 않는 파일 형식입니다"),
+    INVALID_SOURCE_TYPE(HttpStatus.BAD_REQUEST, "sourceType에 맞는 필드가 누락되었습니다"),
+    FILE_SIZE_EXCEEDED(HttpStatus.PAYLOAD_TOO_LARGE, "파일 크기가 허용치를 초과했습니다"),
+    DOCUMENT_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "문서는 최대 20개까지 등록할 수 있습니다"),
     UPLOAD_NOT_COMPLETED(HttpStatus.BAD_REQUEST, "업로드가 완료되지 않았습니다"),
     STORAGE_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "파일 저장소 오류가 발생했습니다"),
 
@@ -47,10 +59,28 @@ public enum ErrorCode {
     TTS_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "음성 합성에 실패했습니다"),
     INVALID_QUESTION_ID(HttpStatus.BAD_REQUEST, "존재하지 않는 질문 ID 입니다"),
     RESUME_PARSE_FAILED(HttpStatus.UNPROCESSABLE_ENTITY, "이력서를 읽지 못했습니다. 다른 파일로 시도해 주세요"),
+    // AI 서버 errorCode 가 아니라, AI 응답이 계약과 다를 때 Backend 가 내는 코드입니다.
+    // 예: 첫 질문 자리에 session_end / 알 수 없는 type 이 온 경우.
+    UNEXPECTED_AI_RESPONSE(HttpStatus.BAD_GATEWAY, "AI 응답을 해석할 수 없습니다"),
+    // 리포트 계약의 AI 코드입니다. 이름이 AI error_code 와 같아야 AiErrorTranslator 가
+    // 옮길 수 있고, 없으면 AI_UNAVAILABLE 로 뭉개져 재시도 분기를 탈 수 없습니다.
+    CONTENT_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "답변 내용 분석에 실패했습니다"),
+    MEDIA_FETCH_FAILED(HttpStatus.INTERNAL_SERVER_ERROR, "답변 녹음을 가져오지 못했습니다"),
+    // AI 는 400 으로 주지만 원인은 Backend 의 answers[] 조립 버그라 사용자에게는 서버 오류입니다.
+    INVALID_ANSWERS(HttpStatus.INTERNAL_SERVER_ERROR, "분석 요청을 만들지 못했습니다"),
 
     // ── 리포트 ──────────────────────────────────────────────
-    // 계약 도착 전이라 아직 채우지 않았습니다. docs/13-report.md 참고.
-    REPORT_NOT_READY(HttpStatus.ACCEPTED, "리포트를 생성하고 있습니다");
+    REPORT_NOT_FOUND(HttpStatus.NOT_FOUND, "리포트를 찾을 수 없습니다"),
+    SESSION_NOT_COMPLETED(HttpStatus.CONFLICT, "아직 진행 중인 세션입니다"),
+    REPORT_ALREADY_EXISTS(HttpStatus.CONFLICT, "이미 분석을 요청한 세션입니다"),
+    // AI 계약 코드와 같은 이름입니다. 되묻기를 뺀 답변이 2문항 미만이면 AI 가 422 로 거절합니다.
+    REPORT_TOO_SHORT(HttpStatus.UNPROCESSABLE_ENTITY, "답변이 부족해 리포트를 만들 수 없습니다"),
+    REPORT_NOT_READY(HttpStatus.ACCEPTED, "리포트를 생성하고 있습니다"),
+    // 실패 원인은 상태 조회(errorCode · retryable)로 봅니다. 상세 조회는 끝난 리포트만 다룹니다.
+    REPORT_FAILED(HttpStatus.CONFLICT, "리포트를 만들지 못했습니다"),
+    // 실패 축 재시도는 PARTIAL 리포트만 받습니다. FAILED 는 분석 작업 등록을 다시 요청합니다.
+    REPORT_NOT_RETRYABLE(HttpStatus.CONFLICT, "다시 분석할 수 없는 리포트입니다"),
+    REPORT_RETRY_IN_PROGRESS(HttpStatus.CONFLICT, "이미 다시 분석하고 있습니다");
 
     private final HttpStatus status;
     private final String message;

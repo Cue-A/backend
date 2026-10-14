@@ -93,7 +93,7 @@ class GlobalExceptionHandlerTest {
     void 필수_헤더가_없으면_400_이다() throws Exception {
         Method method = getClass().getDeclaredMethod("파라미터를_받는_가짜_메서드", int.class);
         ResponseEntity<Result<Void>> response = handler.handleBindingFailure(
-                new MissingRequestHeaderException("X-CueA-Secret", new MethodParameter(method, 0)));
+                new MissingRequestHeaderException("X-Cueanda-Secret", new MethodParameter(method, 0)));
 
         assertThat(response.getStatusCode()).isEqualTo(HttpStatus.BAD_REQUEST);
         assertThat(response.getBody().errorCode()).isEqualTo(ErrorCode.INVALID_REQUEST.name());

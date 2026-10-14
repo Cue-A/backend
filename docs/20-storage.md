@@ -2,16 +2,62 @@
 
 로컬은 MinIO, 배포는 S3. 코드는 AWS S3 SDK로 통일하고 엔드포인트만 바꿉니다.
 
+| 항목 | 값 |
+|---|---|
+| 버킷 | `cue-a-media` |
+| 리전 | `ap-northeast-2` (서울) |
+| 퍼블릭 액세스 | **모두 차단.** 프론트·AI 는 presigned URL 로만 접근 |
+
+실제 AI 연동 테스트는 로컬에서도 S3 를 씁니다. 학과 서버가 MinIO 에 닿지 못합니다.
+
 ---
 
 ## 버킷 구조
 
 ```
 cue-a-media/
-  resumes/{userId}/{documentId}.{ext}          프론트가 Presigned PUT
-  sessions/{sessionId}/answers/{questionId}.webm   프론트가 Presigned PUT
-  sessions/{sessionId}/questions/{questionId}.mp3  ★ AI가 직접 PUT
+  resumes/{userId}/{documentId}.{ext}                    Spring 이 PUT (문서 등록)
+  sessions/{sessionId}/answers/{questionId}.{ext}        프론트가 Presigned PUT (답변 오디오)
+  sessions/{sessionId}/answers/{questionId}_video.{ext}  프론트가 Presigned PUT (답변 영상)
+  sessions/{sessionId}/questions/{questionId}.mp3        ★ AI가 직접 PUT
 ```
+
+### 문서 파일 삭제
+
+문서 삭제(`DELETE /api/documents/{documentId}`)는 DB 에서 문서를 숨기고 **S3 파일도
+항상 지웁니다.** 면접에 쓰인 문서라도 남기지 않으므로, 그 면접은 재연습할 수 없습니다
+(Issue #38, [`02-database.md`](./02-database.md) 의 소프트 삭제 절).
+
+S3 삭제가 실패해도 요청은 성공으로 끝납니다. DB 에서는 이미 숨겼고, 남은 파일은
+로그(`S3 파일 삭제 실패`)로 추적합니다.
+### 문서 key 규칙
+
+파일 문서와 마크다운 문서가 같은 `resumes/{userId}/{documentId}.{ext}` 를 씁니다.
+
+- **파일 문서**: 올린 원본. 확장자는 원본 그대로(`pdf` · `docx` · `txt`)
+- **마크다운 문서**: 본문의 사본. 항상 `.txt`, `text/plain; charset=UTF-8`(Issue #36)
+
+마크다운 사본을 따로 두는 이유는 면접 시작이 AI 에 파일 URL 만 넘기기 때문입니다.
+원본은 DB 의 `doc_text` 이고, 사본은 AI 가 읽어가는 용도입니다.
+[`02-database.md`](./02-database.md) 의 문서 절 참고.
+
+### 답변 미디어 key 규칙
+
+답변 오디오·영상은 같은 `sessions/{sessionId}/answers/{questionId}` 계층에 놓입니다.
+
+- **오디오**(필수): `sessions/{sessionId}/answers/{questionId}.{ext}`
+- **영상**(선택, 카메라 미사용이면 없음): `sessions/{sessionId}/answers/{questionId}_video.{ext}`
+
+**영상 파일명에 `_video` 접미사를 붙여 오디오와 분리합니다.** 오디오·영상 컨테이너가
+같을 수 있어(둘 다 `webm` 가능) 확장자만으로는 key 가 겹치기 때문입니다.
+
+확장자는 실제 업로드 포맷을 그대로 씁니다(고정하지 않음). 허용 포맷과 MIME 은
+아래 "파일 검증" 을 따릅니다. **object key 는 `sessionId`·`questionId` 로 서버가
+만들며, 프론트가 임의 key 를 보내 다른 경로의 Presigned URL 을 얻을 수 없습니다.**
+답변 업로드 URL 발급(`POST /api/interviews/{sessionId}/answers/upload-urls`) 전에
+해당 `(sessionId, questionId)` 질문이 실제 존재하는지 확인하고, 답변 제출
+(`POST /api/interviews/{sessionId}/answers`) 시에는 제출된 key 가 그 질문의 정규
+namespace 에 속하는지 + S3 에 실제 업로드됐는지(`headObject`) 확인합니다.
 
 ---
 
@@ -27,7 +73,79 @@ AI에 발급하는 자격증명은 **질문 오디오 경로에만** 쓰기 권�
 전체 버킷 쓰기 권한을 주지 않습니다.
 
 로컬 개발에서는 MinIO 계정(`minioadmin`)을 공유해도 무방하지만,
-배포 시에는 IAM 정책으로 경로를 제한합니다.
+S3 에서는 IAM 사용자를 나눠 경로를 제한합니다.
+
+### IAM 사용자
+
+| 사용자 | 쓰는 곳 | 정책 |
+|---|---|---|
+| `cue-a-backend` | Spring `APP_STORAGE_ACCESS_KEY` | `cue-a-backend-s3` |
+| `cue-a-ai` | AI 서버 (AI 팀장에게 전달) | `cue-a-ai-tts-upload` |
+
+키 값은 저장소에 남기지 않고 DM 으로만 주고받습니다.
+
+`cue-a-backend-s3`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": ["s3:GetObject", "s3:PutObject", "s3:DeleteObject"],
+      "Resource": "arn:aws:s3:::cue-a-media/*"
+    },
+    {
+      "Effect": "Allow",
+      "Action": "s3:ListBucket",
+      "Resource": "arn:aws:s3:::cue-a-media"
+    }
+  ]
+}
+```
+
+`s3:ListBucket` 이 없으면 없는 객체의 `headObject` 가 404 대신 403 을 받습니다.
+
+`cue-a-ai-tts-upload`:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": "s3:PutObject",
+      "Resource": "arn:aws:s3:::cue-a-media/sessions/*/questions/*"
+    }
+  ]
+}
+```
+
+AI 는 읽기를 presigned GET 으로 하므로 쓰기 권한만 줍니다.
+
+### 질문 음성은 push 때 presigned GET 으로 내려줍니다 (Issue #54)
+
+AI 는 질문 TTS 음성을 위 `sessions/{sessionId}/questions/{questionId}.mp3` 에 직접
+올리고, task 결과의 `audio_url` 로 **서명 없는** S3 URL 을 돌려줍니다. 버킷이 private
+이라 프론트가 그 URL 을 그대로 GET 하면 403 이므로, Backend 는 그 값을 프론트에 그대로
+노출하지 않습니다. 대신 **WebSocket 질문 push 시점에** 같은 object 에 대한 presigned
+GET URL 을 발급해 내려줍니다.
+
+- object key 는 AI 가 준 URL 을 parsing 하지 않고 계약상 고정 규칙
+  (`ObjectKeys.questionAudio(sessionId, questionId)`)으로 만듭니다. 엔드포인트·custom
+  domain·path-style 차이로 URL parsing 이 취약하기 때문입니다
+- 만료는 `question-audio-get`(15분). 사용자가 한 문항을 듣는 시간입니다
+- `audio_url == null`(TTS 없음)이면 presign 을 시도하지 않고 텍스트만 내려줍니다
+- **presign 발급이 실패해도 세션을 중단하지 않습니다.** 질문 text 는 이미 저장돼 있고
+  음성은 optional 이라, TTS 없음과 같은 모양(음성 URL 없음)으로 텍스트만 진행합니다.
+  AWS SDK 예외는 인프라 계층(`PresignedUrlIssuer`)이 캡슐화하고 도메인에는 발급 성공
+  여부(`Optional`)만 전달합니다
+- **presigned URL 은 DB 에 저장하지 않습니다.** `question.audio_url` 에는 AI 가 준
+  안정적인 원본 URL 을 두고, 서명 URL 은 push 때만 만듭니다
+  ([`02-database.md`](./02-database.md))
+
+프론트 관점의 WebSocket 필드(`audioUrl`·`audioAvailable`)는
+[`11-interview.md`](./11-interview.md) 를 봅니다.
 
 ---
 
@@ -38,6 +156,8 @@ AI에 발급하는 자격증명은 **질문 오디오 경로에만** 쓰기 권�
 | 이력서 GET (AI 전달용) | **15분** | Celery 큐 지연 대비 |
 | 업로드 PUT | 10분 | |
 | 녹음 다운로드 GET | 1시간 | 사용자가 리포트 보며 재생 |
+| 문서 다운로드 GET | 1시간 | 사용자가 문서 상세에서 원본을 열어봄 (`document-get`) |
+| 질문 음성 GET | **15분** | 사용자가 한 문항을 듣는 시간 (`question-audio-get`) |
 
 ### ★ 이력서 URL 만료에 여유를 두는 이유
 
@@ -71,14 +191,16 @@ AI 파트는 `Access-Control-Allow-Origin: *` 를 요청했으나,
 **프론트 도메인만 허용하는 것을 권장**합니다. 기능은 동일하고 버킷을 전 세계에
 열어둘 이유가 없습니다.
 
+현재 적용된 값입니다. 프론트 도메인이 정해지면 추가합니다.
+
 ```json
 [
   {
     "AllowedOrigins": [
       "http://localhost:5173",
-      "https://cue-a.example.com"
+      "http://localhost:3000"
     ],
-    "AllowedMethods": ["GET", "PUT"],
+    "AllowedMethods": ["GET", "PUT", "HEAD"],
     "AllowedHeaders": ["*"],
     "ExposeHeaders": ["ETag"],
     "MaxAgeSeconds": 3000
@@ -99,25 +221,49 @@ mc admin config set local api cors_allow_origin="http://localhost:5173"
 
 ## 업로드 흐름
 
+### 문서(이력서·포트폴리오) — Spring 을 통과 (Issue #28)
+
+문서는 presigned 2단계가 아니라 **`POST /api/documents` 로 파일을 Spring 에
+통과시킵니다.**
+
 ```
-1. 프론트: POST /api/documents/presigned  (파일명, 크기, MIME)
-2. Spring: 검증 후 Presigned PUT URL + documentId 반환
-3. 프론트: 해당 URL로 S3에 직접 PUT
-4. 프론트: POST /api/documents/{id}/complete
-5. Spring: object_key 확정, DB 저장
+1. 프론트: POST /api/documents  (multipart: 파일 + 메타)
+2. Spring: 검증 → S3 에 PUT → DB 저장 → 즉시 READY
 ```
 
-**4번을 빼먹지 마세요.** 3번만으로는 Spring이 업로드 성공 여부를 모릅니다.
-`complete` 호출 시 S3에 객체가 실제로 있는지 `headObject` 로 확인합니다.
+자소서는 최대 10MB 라 통과가 감당되고, presigned 로 나누면 PUT 은 성공했는데 확정 전에
+브라우저가 닫힐 때 버킷에 고아 객체가 남기 때문입니다. 마크다운 문서도 본문을 `.txt`
+사본으로 이 경로에서 함께 올립니다(Issue #36). 판단 근거는
+[`02-database.md`](./02-database.md) 의 문서 절 참고.
+
+### 답변 미디어 — Presigned PUT
+
+녹화·녹음은 크기가 커 계속 presigned 로 갑니다.
+
+```
+1. 프론트: POST /api/interviews/{sessionId}/answers/upload-urls  (questionId 등)
+2. Spring: (sessionId, questionId) 질문 존재 확인 → Presigned PUT URL 발급
+3. 프론트: 해당 URL 로 S3 에 직접 PUT (오디오·영상)
+4. 프론트: POST /api/interviews/{sessionId}/answers  (제출)
+5. Spring: 제출된 key 가 정규 namespace 인지 + S3 에 실제 있는지(headObject) 확인
+```
+
+object key 는 서버가 `sessionId`·`questionId` 로 만들므로, 프론트가 임의 key 로 다른
+경로의 URL 을 얻을 수 없습니다.
 
 ### 파일 검증
 
-| 항목 | 제한 |
-|---|---|
-| 이력서 | PDF, DOCX, DOC, TXT / 10MB |
-| 답변 오디오 | webm, mp4 / 50MB |
+| 항목 | 확장자 | MIME | 크기 |
+|---|---|---|---|
+| 이력서 | PDF, DOCX, DOC, TXT | 문서 MIME | 10MB |
+| 답변 오디오 | webm, mp4 | `audio/webm`, `audio/mp4` | 50MB |
+| 답변 영상 | webm, mp4 | `video/webm`, `video/mp4` | 50MB |
 
 MIME 타입은 클라이언트가 보낸 값을 믿지 않고 확장자와 함께 검증합니다.
+**답변 오디오와 영상은 같은 컨테이너(webm, mp4)를 쓰되 MIME 으로 역할을 구분합니다.**
+오디오 자리에는 `audio/*`, 영상 자리에는 `video/*` 만 허용해, 오디오 파일이 영상
+자리에 올라오는(또는 그 반대) 것을 막습니다. `FileValidator.validateAnswerAudio` /
+`validateAnswerVideo` 가 각각 담당합니다.
 
 ---
 

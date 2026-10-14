@@ -221,7 +221,9 @@ app:
 ```
 
 AI 서버가 아직 없으면 `app.ai.mock.enabled=true` 로 두면
-고정 응답을 반환하는 내부 목이 동작합니다. (구현 예정)
+고정 응답을 반환하는 내부 목이 동작합니다.
+
+실제 AI 서버에 붙을 때는 스토리지도 S3 로 바꿉니다. `.env.example` 주석 블록 참고.
 
 > **주의** docker compose 안에서 Spring을 띄울 때는 주소가
 > `http://python-ai:8000` 입니다. 컨테이너마다 `localhost`가 다릅니다.
@@ -408,4 +410,5 @@ feat/12-interview-session
 | [`docs/12-replay.md`](./docs/12-replay.md) | 재연습 |
 | [`docs/13-report.md`](./docs/13-report.md) | 리포트 |
 | [`docs/20-storage.md`](./docs/20-storage.md) | S3 / 파일 |
+| [`docs/30-deploy.md`](./docs/30-deploy.md) | 배포 |
 | [`docs/90-open-questions.md`](./docs/90-open-questions.md) | 미확정 사항 |

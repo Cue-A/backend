@@ -1,0 +1,360 @@
+package com.cuea.domain.interview.service;
+
+import com.cuea.common.exception.BusinessException;
+import com.cuea.common.exception.ErrorCode;
+import com.cuea.infrastructure.ai.AiClient;
+import com.cuea.infrastructure.ai.AiPoller;
+import com.cuea.infrastructure.ai.AiProperties;
+import com.cuea.infrastructure.ai.dto.AiQuestionResult;
+import com.cuea.infrastructure.ai.dto.AiTaskStatusResponse;
+import com.cuea.domain.interview.entity.Question;
+import com.cuea.domain.interview.entity.QuestionType;
+import com.cuea.infrastructure.websocket.SessionSocketHandler;
+import com.cuea.infrastructure.websocket.message.ErrorPushMessage;
+import com.cuea.infrastructure.websocket.message.QuestionPushMessage;
+import com.cuea.infrastructure.websocket.message.SocketMessage;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
+import java.time.Duration;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
+import static org.mockito.Mockito.doThrow;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * 세션 시작 후 백그라운드 폴링 흐름을 검증합니다.
+ *
+ * <p>{@code @Async} 는 여기서 테스트하지 않습니다(프록시 없이 직접 호출). 폴링
+ * 결과에 따른 저장·push·정리 로직만 봅니다. REST 동기 구간은
+ * {@code InterviewStartServiceTest} 에서 검증합니다.
+ */
+class InterviewFirstQuestionPollerTest {
+
+    private static final String SESSION_ID = "sess_1";
+    private static final String TASK_ID = "task_1";
+
+    private AiClient aiClient;
+    private AiPoller aiPoller;
+    private SessionSocketHandler socketHandler;
+    private InterviewSessionWriter sessionWriter;
+    private QuestionPushFactory questionPushFactory;
+    private InterviewFirstQuestionPoller poller;
+
+    @BeforeEach
+    void setUp() {
+        aiClient = mock(AiClient.class);
+        aiPoller = mock(AiPoller.class);
+        socketHandler = mock(SessionSocketHandler.class);
+        sessionWriter = mock(InterviewSessionWriter.class);
+        questionPushFactory = mock(QuestionPushFactory.class);
+
+        AiProperties aiProperties = new AiProperties(
+                "http://localhost:8000", "secret",
+                Duration.ofSeconds(90), Duration.ofSeconds(60),
+                Duration.ofSeconds(1), Duration.ofSeconds(5), Duration.ofSeconds(10),
+                new AiProperties.Mock(false));
+
+        poller = new InterviewFirstQuestionPoller(
+                aiPoller, aiProperties,
+                socketHandler, sessionWriter, questionPushFactory,
+                new InterviewSessionTerminator(aiClient, sessionWriter));
+    }
+
+    private AiQuestionResult firstQuestion() {
+        return new AiQuestionResult(
+                AiQuestionResult.TYPE_QUESTION, "q_1", null,
+                "지원 동기를 말씀해 주세요.", "https://s3.../q_1.mp3",
+                "지원동기", "L1", 1, 9, 0, 3, false, false, null);
+    }
+
+    @Test
+    void 첫질문을_받으면_저장하고_WebSocket_으로_question_을_push_한다() {
+        AiQuestionResult result = firstQuestion();
+        when(aiPoller.await(eq(TASK_ID), eq(Duration.ofSeconds(90)), any()))
+                .thenReturn(new AiTaskStatusResponse(AiTaskStatusResponse.STATUS_DONE, null, result, null, null));
+        Question saved = Question.builder().sessionId(SESSION_ID).questionId("q_1")
+                .type(QuestionType.QUESTION).text("지원 동기를 말씀해 주세요.")
+                .audioUrl("https://s3.../q_1.mp3").category("지원동기").difficulty("L1")
+                .questionNumber(1).topicIndex(0).build();
+        when(sessionWriter.saveFirstQuestion(eq(SESSION_ID), eq(result))).thenReturn(saved);
+        // 질문 push 메시지 조립·presign 은 QuestionPushFactory 책임(별도 테스트에서 검증).
+        // 여기서는 저장된 질문으로 factory 를 호출해 그 결과를 그대로 push 하는지만 본다.
+        // factory 가 signed URL 을 담아준 상황을 가정한다(audioAvailable=true).
+        when(questionPushFactory.create(saved, 9)).thenReturn(new QuestionPushMessage(
+                "q_1", "QUESTION", "지원 동기를 말씀해 주세요.",
+                "https://s3.../q_1.mp3?X-Amz-Signature=abc", true,
+                "지원동기", "L1", 1, 9));
+        // 수신자(WebSocket 연결) 1개가 붙어 정상 전송된 상황.
+        when(socketHandler.pushFirstQuestion(eq(SESSION_ID), eq("q_1"), any())).thenReturn(1);
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        verify(sessionWriter).saveFirstQuestion(SESSION_ID, result);
+        // 저장된 질문으로 push 메시지(presign 포함)를 조립하도록 factory 에 위임한다.
+        verify(questionPushFactory).create(saved, 9);
+
+        ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
+        // 첫 질문은 소켓별 중복 방지 경로(pushFirstQuestion)로 보낸다(polling·catch-up 공용).
+        verify(socketHandler).pushFirstQuestion(eq(SESSION_ID), eq("q_1"), captor.capture());
+        SocketMessage<?> pushed = captor.getValue();
+        assertThat(pushed.type()).isEqualTo("question");
+        assertThat(pushed.payload()).isInstanceOf(QuestionPushMessage.class);
+        QuestionPushMessage payload = (QuestionPushMessage) pushed.payload();
+        assertThat(payload.questionId()).isEqualTo("q_1");
+        assertThat(payload.questionTotal()).isEqualTo(9);
+        assertThat(payload.audioAvailable()).isTrue();
+        // 프론트에는 서명된 GET URL 이 내려간다(AI 원본 unsigned URL 이 아니다).
+        assertThat(payload.audioUrl()).contains("X-Amz-Signature");
+    }
+
+    @Test
+    void 첫질문_presign_이_실패해_text_only_로_와도_질문을_정상_push_하고_세션을_정리하지_않는다() {
+        // Issue #41 정책: presign 실패는 factory 안에서 text-only fallback 으로 흡수된다
+        // (audioUrl=null, audioAvailable=false). poller 는 그 메시지를 그대로 question 으로
+        // push 하고, error/abort/markAborted 로 처리하지 않는다.
+        AiQuestionResult result = firstQuestion();
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenReturn(new AiTaskStatusResponse(AiTaskStatusResponse.STATUS_DONE, null, result, null, null));
+        Question saved = Question.builder().sessionId(SESSION_ID).questionId("q_1")
+                .type(QuestionType.QUESTION).text("지원 동기를 말씀해 주세요.")
+                .audioUrl("https://s3.../q_1.mp3").category("지원동기").difficulty("L1")
+                .questionNumber(1).topicIndex(0).build();
+        when(sessionWriter.saveFirstQuestion(eq(SESSION_ID), eq(result))).thenReturn(saved);
+        // factory 가 presign 실패를 흡수해 text-only 메시지를 돌려준 상황.
+        when(questionPushFactory.create(saved, 9)).thenReturn(new QuestionPushMessage(
+                "q_1", "QUESTION", "지원 동기를 말씀해 주세요.",
+                null, false, "지원동기", "L1", 1, 9));
+        when(socketHandler.pushFirstQuestion(eq(SESSION_ID), eq("q_1"), any())).thenReturn(1);
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        // 세션 정리는 일어나지 않는다.
+        verify(aiClient, org.mockito.Mockito.never()).abortSession(anyString());
+        verify(sessionWriter, org.mockito.Mockito.never()).markAborted(anyString());
+
+        ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
+        verify(socketHandler).pushFirstQuestion(eq(SESSION_ID), eq("q_1"), captor.capture());
+        assertThat(captor.getValue().type()).isEqualTo("question");
+        QuestionPushMessage payload = (QuestionPushMessage) captor.getValue().payload();
+        // 텍스트는 그대로, 음성만 빠진다.
+        assertThat(payload.text()).isEqualTo("지원 동기를 말씀해 주세요.");
+        assertThat(payload.audioUrl()).isNull();
+        assertThat(payload.audioAvailable()).isFalse();
+    }
+
+    @Test
+    void 폴링이_실패하면_AI세션_중단_세션_ABORTED_정리_후_error_를_push_한다() {
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.AI_TIMEOUT));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+
+        ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
+        verify(socketHandler).push(eq(SESSION_ID), captor.capture());
+        assertThat(captor.getValue().type()).isEqualTo("error");
+        ErrorPushMessage payload = (ErrorPushMessage) captor.getValue().payload();
+        assertThat(payload.errorCode()).isEqualTo("AI_TIMEOUT");
+    }
+
+    @Test
+    void 세션시작_LLM_FAILED_는_Backend_재전송_없이_세션을_정리한다() {
+        // AI 파트 확정: 세션 시작 LLM_FAILED 는 AI 가 동일 session_id/task_id 안에서 내부
+        // 재시도까지 실패한 상태다. Backend 는 재전송하지 않고 바로 세션을 정리(ABORTED)한다.
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.LLM_FAILED, "질문 생성 실패"));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        // Backend 재전송 없음(세션 시작 폴러에는 재시도가 없다).
+        verify(aiClient, org.mockito.Mockito.never()).submitAnswer(anyString(), any());
+        // 기존 cleanup 경로로 ABORTED.
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+
+        ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
+        verify(socketHandler).push(eq(SESSION_ID), captor.capture());
+        assertThat(captor.getValue().type()).isEqualTo("error");
+        ErrorPushMessage payload = (ErrorPushMessage) captor.getValue().payload();
+        assertThat(payload.errorCode()).isEqualTo("LLM_FAILED");
+        // 세션 시작 LLM_FAILED 는 Backend 재시도 대상이 아니고 세션이 ABORTED 다.
+        // 최종 오류이므로 retryable=false.
+        assertThat(payload.retryable()).isFalse();
+        assertThat(payload.needsRerecord()).isFalse();
+    }
+
+    @Test
+    void 첫질문_없이_done_이_오면_세션을_정리하고_error_를_push_한다() {
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenReturn(new AiTaskStatusResponse(AiTaskStatusResponse.STATUS_DONE, null, null, null, null));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+        verify(sessionWriter, org.mockito.Mockito.never()).saveFirstQuestion(anyString(), any());
+    }
+
+    @Test
+    void 정리중_예외가_나도_원본_폴링_예외로_error_를_push_한다() {
+        // 원본 폴링 예외: AI_TIMEOUT. cleanup(markAborted)이 실패해도 error push 는
+        // 원본 코드(AI_TIMEOUT) 기준이어야 한다(정리 실패 예외로 덮이면 안 됨).
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.AI_TIMEOUT));
+        doThrow(new RuntimeException("DB down")).when(sessionWriter).markAborted(SESSION_ID);
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
+        verify(socketHandler).push(eq(SESSION_ID), captor.capture());
+        assertThat(captor.getValue().type()).isEqualTo("error");
+        ErrorPushMessage payload = (ErrorPushMessage) captor.getValue().payload();
+        assertThat(payload.errorCode()).isEqualTo("AI_TIMEOUT");
+    }
+
+    @Test
+    void 첫결과가_session_end_이면_질문으로_저장하지_않고_세션을_정리한다() {
+        // 첫 task 자리에 session_end 가 오면 계약 위반. 질문으로 저장하면 null 필드로
+        // DB 오류가 나므로, UNEXPECTED_AI_RESPONSE 로 막고 세션을 정리한다.
+        AiQuestionResult sessionEnd = new AiQuestionResult(
+                AiQuestionResult.TYPE_SESSION_END, null, null, null, null, null, null,
+                null, 9, null, null, false, false, 9);
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenReturn(new AiTaskStatusResponse(AiTaskStatusResponse.STATUS_DONE, null, sessionEnd, null, null));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        verify(sessionWriter, org.mockito.Mockito.never()).saveFirstQuestion(anyString(), any());
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+
+        ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
+        verify(socketHandler).push(eq(SESSION_ID), captor.capture());
+        assertThat(captor.getValue().type()).isEqualTo("error");
+        ErrorPushMessage payload = (ErrorPushMessage) captor.getValue().payload();
+        assertThat(payload.errorCode()).isEqualTo("UNEXPECTED_AI_RESPONSE");
+    }
+
+    @Test
+    void 첫질문_저장이_실패하면_세션을_정리하고_error_를_push_한다() {
+        // saveFirstQuestion 실패도 폴링 실패와 같은 cleanup/error 경로를 타야 한다.
+        // 그러지 않으면 세션이 IN_PROGRESS 로 영구 잔류한다.
+        AiQuestionResult result = firstQuestion();
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenReturn(new AiTaskStatusResponse(AiTaskStatusResponse.STATUS_DONE, null, result, null, null));
+        when(sessionWriter.saveFirstQuestion(eq(SESSION_ID), eq(result)))
+                .thenThrow(new BusinessException(ErrorCode.UNEXPECTED_AI_RESPONSE, "질문 타입이 아닌 AI 응답입니다"));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        verify(aiClient).abortSession(SESSION_ID);
+        verify(sessionWriter).markAborted(SESSION_ID);
+
+        ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
+        verify(socketHandler).push(eq(SESSION_ID), captor.capture());
+        assertThat(captor.getValue().type()).isEqualTo("error");
+        ErrorPushMessage payload = (ErrorPushMessage) captor.getValue().payload();
+        assertThat(payload.errorCode()).isEqualTo("UNEXPECTED_AI_RESPONSE");
+    }
+
+    @Test
+    void status_error_는_await_에서_실패로_인식되어_error_code_가_보존된다() {
+        // 최신 계약의 실패 상태 error. AiPoller 가 실패로 인식해 실제 errorCode 를
+        // 담은 BusinessException 을 던지면, 여기서 그 코드로 error push 해야 한다.
+        // (timeout 으로 오인되지 않아야 한다.)
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.STT_FAILED, "음성을 인식하지 못했습니다"));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
+        verify(socketHandler).push(eq(SESSION_ID), captor.capture());
+        assertThat(captor.getValue().type()).isEqualTo("error");
+        ErrorPushMessage payload = (ErrorPushMessage) captor.getValue().payload();
+        assertThat(payload.errorCode()).isEqualTo("STT_FAILED");
+        assertThat(payload.errorCode()).isNotEqualTo("AI_TIMEOUT");
+        // error push 는 최종 지점이라 Backend 자동 재시도가 없다: retryable=false.
+        // 사용자 다음 행동은 needsRerecord(재녹음)로 알린다.
+        assertThat(payload.retryable()).isFalse();
+        assertThat(payload.needsRerecord()).isTrue();
+    }
+
+    @Test
+    void 첫질문_push_수신자가_없어도_저장은_유지되고_흐름은_실패하지_않는다() {
+        // WebSocket 핸드셰이크가 폴링보다 늦으면 push 수신자가 0개다.
+        // 첫 질문은 이미 저장됐고(세션 유효), push 는 드롭되지만 세션을 ABORTED 로
+        // 정리하거나 error 를 push 하지 않는다. 유실 추적용 경고 로그만 남긴다.
+        // (catch-up 은 후속 이슈에서 처리)
+        AiQuestionResult result = firstQuestion();
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenReturn(new AiTaskStatusResponse(AiTaskStatusResponse.STATUS_DONE, null, result, null, null));
+        when(sessionWriter.saveFirstQuestion(eq(SESSION_ID), eq(result))).thenReturn(
+                Question.builder().sessionId(SESSION_ID).questionId("q_1")
+                        .type(QuestionType.QUESTION).text("지원 동기를 말씀해 주세요.")
+                        .audioUrl("https://s3.../q_1.mp3").category("지원동기").difficulty("L1")
+                        .questionNumber(1).topicIndex(0).build());
+        // 활성 WebSocket 없음: pushFirstQuestion 이 0 건 전송을 반환.
+        when(socketHandler.pushFirstQuestion(eq(SESSION_ID), eq("q_1"), any())).thenReturn(0);
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        // 질문은 저장됐고, 세션 정리(abort/markAborted)는 일어나지 않는다.
+        verify(sessionWriter).saveFirstQuestion(SESSION_ID, result);
+        verify(aiClient, org.mockito.Mockito.never()).abortSession(anyString());
+        verify(sessionWriter, org.mockito.Mockito.never()).markAborted(anyString());
+
+        // 첫 질문 전송은 시도됐다(활성 수신자가 없었을 뿐). error push 는 없다.
+        ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
+        verify(socketHandler).pushFirstQuestion(eq(SESSION_ID), eq("q_1"), captor.capture());
+        assertThat(captor.getValue().type()).isEqualTo("question");
+    }
+
+    @Test
+    void timeout_은_재시도_불가로_내려간다() {
+        // AI_TIMEOUT 은 Backend 자체 코드다. 이름이 AI 원본 코드가 아니므로 retryable 은
+        // false 여야 한다(예전엔 문자열 기준이라 항상 false 로 우연히 맞았지만, 이제는
+        // ErrorCode 기준으로 명시적으로 판정한다).
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.AI_TIMEOUT));
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        ArgumentCaptor<SocketMessage<?>> captor = ArgumentCaptor.forClass(SocketMessage.class);
+        verify(socketHandler).push(eq(SESSION_ID), captor.capture());
+        ErrorPushMessage payload = (ErrorPushMessage) captor.getValue().payload();
+        assertThat(payload.errorCode()).isEqualTo("AI_TIMEOUT");
+        assertThat(payload.retryable()).isFalse();
+        assertThat(payload.needsRerecord()).isFalse();
+    }
+
+    @Test
+    void 사용자_abort_후_늦게_도착한_첫질문은_저장도_push도_하지_않는다() {
+        // 세션 시작 폴링 중 사용자가 abort 하면 세션이 ABORTED 다. 이후 첫 질문이 늦게 와도
+        // saveFirstQuestion 이 IN_PROGRESS 가 아니라 저장하지 않고 null 을 돌려준다(Writer 가
+        // 상태를 확인). 그 경우 question push 도 나가지 않고, 이미 ABORTED 라 추가 정리·error
+        // push 도 하지 않는다(리뷰 5, #25).
+        AiQuestionResult result = firstQuestion();
+        when(aiPoller.await(eq(TASK_ID), any(), any()))
+                .thenReturn(new AiTaskStatusResponse(AiTaskStatusResponse.STATUS_DONE, null, result, null, null));
+        // 이미 종료된 세션: Writer 가 저장하지 않고 null 반환.
+        when(sessionWriter.saveFirstQuestion(eq(SESSION_ID), eq(result))).thenReturn(null);
+
+        poller.pollAndDeliver(SESSION_ID, TASK_ID, 9);
+
+        // 저장 시도(=상태 확인 포함)는 했지만 push 는 나가지 않는다.
+        verify(sessionWriter).saveFirstQuestion(SESSION_ID, result);
+        verify(socketHandler, org.mockito.Mockito.never()).push(eq(SESSION_ID), any());
+        // 추가 정리·error push 없음(이미 abort 로 ABORTED).
+        verify(aiClient, org.mockito.Mockito.never()).abortSession(anyString());
+        verify(sessionWriter, org.mockito.Mockito.never()).markAborted(anyString());
+    }
+}

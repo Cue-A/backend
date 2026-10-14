@@ -1,0 +1,134 @@
+spring:
+  application:
+    name: cue-a
+
+  profiles:
+    default: local
+
+  # AI 폴링(최대 90초)과 WebSocket 이 스레드를 오래 점유합니다.
+  # docs/00-architecture.md 참고. 끄지 마세요.
+  threads:
+    virtual:
+      enabled: true
+
+  datasource:
+    url: ${SPRING_DATASOURCE_URL:jdbc:postgresql://localhost:5432/cuea}
+    username: ${SPRING_DATASOURCE_USERNAME:cuea}
+    password: ${SPRING_DATASOURCE_PASSWORD:cuea}
+    driver-class-name: org.postgresql.Driver
+
+  jpa:
+    hibernate:
+      # create 를 쓰지 마세요. 재시작마다 데이터가 사라집니다.
+      ddl-auto: update
+    open-in-view: false
+    properties:
+      hibernate:
+        jdbc:
+          time_zone: Asia/Seoul
+
+  data:
+    redis:
+      host: ${SPRING_DATA_REDIS_HOST:localhost}
+      port: ${SPRING_DATA_REDIS_PORT:6379}
+
+  # 문서 업로드가 이 서버를 통과합니다(Issue #28). 기본값은 파일 1MB 라
+  # 그대로 두면 10MB 자소서가 전부 막힙니다.
+  #
+  # 우리 상한(10MB)보다 일부러 조금 크게 잡았습니다. 낮거나 같게 두면 톰캣이
+  # 먼저 잘라서 FileValidator 의 FILE_SIZE_EXCEEDED 메시지가 나갈 기회가 없고,
+  # 경계값에서 어느 쪽이 거절했는지에 따라 응답이 갈립니다. 이 값은 넘어오는
+  # 것 자체를 막는 backstop 이고, 실제 거절은 FileValidator 가 합니다.
+  servlet:
+    multipart:
+      max-file-size: 11MB
+      max-request-size: 12MB
+
+  # null 을 빼지 않습니다. docs/01-conventions.md 의 Result 예시가 errorCode·message 를
+  # null 로 명시하고 있고, audio_url·company_id 처럼 "null 이라는 사실" 자체가 의미인
+  # 필드들이 있습니다. 키가 통째로 사라지면 프론트가 구분하지 못합니다.
+  jackson:
+    default-property-inclusion: always
+
+server:
+  port: 8080
+  # 프록시(nginx/ALB) 뒤에 놓을 때만 framework 로 켜세요.
+  #
+  # 켜면 ForwardedHeaderFilter 가 X-Forwarded-For 를 보고 getRemoteAddr() 을
+  # 실제 클라이언트 IP 로 바꿔줍니다. 호출 제한이 IP 로 세기 때문에, 프록시 뒤에서
+  # 이걸 안 켜면 미인증 사용자 전원이 한 IP 로 뭉쳐 한 명이 나머지를 막습니다.
+  #
+  # 반대로 프록시가 없는데 켜면 아무나 X-Forwarded-For 를 위조해 매 요청 다른 IP 인
+  # 척할 수 있어 호출 제한이 통째로 무력화됩니다. AI 비용이 걸린 엔드포인트라
+  # 기본값은 none 입니다. 프록시를 붙이는 배포 환경에서만 framework 로 주세요.
+  forward-headers-strategy: ${SERVER_FORWARD_HEADERS_STRATEGY:none}
+  servlet:
+    encoding:
+      charset: UTF-8
+      force: true
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+    operations-sorter: alpha
+
+logging:
+  level:
+    com.cuea: DEBUG
+
+app:
+  cors:
+    allowed-origins: ${APP_CORS_ALLOWED_ORIGINS:http://localhost:5173,http://localhost:3000}
+
+  jwt:
+    secret: ${APP_JWT_SECRET:local-dev-only-secret-change-me-at-least-32-bytes}
+    # 로그아웃이 access token 을 즉시 무효화하지 못합니다(무상태). 그 창을 좁히려고
+    # 짧게 잡았습니다. 늘리려면 그만큼 탈취 후 사용 가능 시간이 늘어납니다.
+    access-token-validity: 30m
+    refresh-token-validity: 14d
+
+  oauth:
+    kakao:
+      # 카카오 개발자 콘솔의 REST API 키. 인가 코드 요청(카카오 로그인 버튼)에는
+      # 프론트도 이 값을 씁니다. 토큰 교환에서만 이 백엔드가 함께 씁니다.
+      client-id: ${APP_OAUTH_KAKAO_CLIENT_ID:local-dev-only-kakao-client-id}
+      # client-secret 은 백엔드 전용입니다. 콘솔에서 Client Secret 을 껐다면 빈 값으로 둡니다.
+      client-secret: ${APP_OAUTH_KAKAO_CLIENT_SECRET:}
+      connect-timeout: 5s
+      read-timeout: 10s
+
+  ai:
+    base-url: ${APP_AI_BASE_URL:http://localhost:8000}
+    secret: ${APP_AI_SECRET:local-dev-only-ai-secret}
+    # docs/10-ai-client.md — 단일 타임아웃으로 합치지 마세요.
+    session-start-timeout: 90s
+    answer-timeout: 60s
+    poll-interval: 1s
+    connect-timeout: 5s
+    read-timeout: 10s
+    mock:
+      enabled: ${APP_AI_MOCK_ENABLED:true}
+
+  report:
+    # AI 리포트 계약 권장값. 영상 다운로드 + 시선 분석이 포함돼 질문 생성보다 훨씬 깁니다.
+    poll-timeout: 10m
+
+  storage:
+    endpoint: ${APP_STORAGE_ENDPOINT:http://localhost:9000}
+    bucket: ${APP_STORAGE_BUCKET:cue-a-media}
+    access-key: ${APP_STORAGE_ACCESS_KEY:minioadmin}
+    secret-key: ${APP_STORAGE_SECRET_KEY:minioadmin}
+    region: ${APP_STORAGE_REGION:us-east-1}
+    # MinIO 는 필수. S3 로 가면 false
+    path-style-access: ${APP_STORAGE_PATH_STYLE_ACCESS:true}
+    presign:
+      # Celery 큐 지연 대비. docs/20-storage.md 참고. 줄이지 마세요.
+      resume-get: 15m
+      upload-put: 10m
+      recording-get: 1h
+      # 사용자가 브라우저에서 열어보는 시간입니다. resume-get(15분)과 달리
+      # AI 큐 사정과 무관해 따로 둡니다.
+      document-get: 1h
+      # 질문 TTS 음성 GET. AI 가 private 버킷에 올린 질문 음성을 질문 push 때 서명해
+      # 내려줍니다. 사용자가 한 문항을 듣는 시간이라 짧게 잡습니다.
+      question-audio-get: 15m

@@ -4,77 +4,327 @@ PostgreSQL 16. `ddl-auto: update` 로 운영합니다. **`create` 를 쓰지 마
 
 ---
 
+## 식별자 규칙
+
+**내부 조인은 `BIGINT` PK, 외부 노출은 `public_id`(UUID) 입니다.**
+연속된 정수를 URL 이나 응답에 그대로 내보내면 남의 데이터 개수와 순서가 드러납니다.
+
+예외가 셋 있습니다.
+
+| 테이블 | 예외 | 이유 |
+|---|---|---|
+| `users` · `user_auth` | PK 가 `VARCHAR(50)` UUID 문자열 | 먼저 만들어진 테이블. 그래서 **모든 `user_id` FK 가 `VARCHAR(50)`** 입니다 |
+| `session` · `question` | PK 가 AI 발급 문자열 | AI 서버가 준 ID 를 그대로 씁니다. 아래 참고 |
+| `company` · `badge` | `public_id` 없음 | 모두가 같은 목록을 보는 공용 마스터라 ID 를 노출해도 새는 정보가 없습니다 |
+
+시간 컬럼은 `TIMESTAMPTZ` 입니다. 단 먼저 만들어진 `users` · `user_auth` 만
+`TIMESTAMP`(타임존 없음)입니다.
+
+---
+
 ## 사용자
 
+**사람 하나 = `users` 한 행.** 로그인 수단은 몇 개든 `user_auth` 로 붙습니다.
+
 ```sql
-user_id       VARCHAR(50)   PK
-email         VARCHAR(255)  UNIQUE NOT NULL
-password      VARCHAR(255)  NOT NULL
+users
+user_id       VARCHAR(50)   PK          -- UUID 문자열
+email         VARCHAR(255)  UNIQUE NULL -- 카카오 이메일 미동의 시 null
 nickname      VARCHAR(50)   NOT NULL
 created_at    TIMESTAMP     NOT NULL
 ```
 
+```sql
+user_auth
+auth_id       VARCHAR(50)   PK
+user_id       VARCHAR(50)   NOT NULL FK -> users(user_id)
+provider      VARCHAR(20)   NOT NULL    -- LOCAL | KAKAO
+provider_id   VARCHAR(100)  NULL        -- 카카오 회원번호. LOCAL 은 null
+password      VARCHAR(255)  NULL        -- LOCAL 만 채움(BCrypt). 소셜은 null
+created_at    TIMESTAMP     NOT NULL
+
+UNIQUE (provider, provider_id)          -- 같은 카카오 계정이 두 번 붙지 않게
+UNIQUE (user_id, provider)              -- 한 사람이 같은 제공자를 두 번 걸지 않게
+```
+
+**테이블명이 `user` 가 아니라 `users` 입니다.** `user` 는 PostgreSQL 예약어라
+`create table user` 가 문법 오류로 죽습니다. 매번 큰따옴표로 감싸는 것보다 이름을
+바꾸는 편이 낫습니다. `@Table(name = "users")` 로 두세요.
+
+`email` 이 nullable 인 것이 중요합니다. **카카오 이메일은 선택 동의라 안 줄 수
+있습니다.** PostgreSQL 의 UNIQUE 는 NULL 중복을 허용하므로 제약은 그대로 둡니다.
+
+`password` 는 `users` 가 아니라 `user_auth` 에 있습니다. 소셜 전용 계정은
+비밀번호가 없고, 한 사람이 이메일과 카카오를 동시에 쓸 수 있기 때문입니다.
+
+### 왜 인증 수단을 분리했나
+
+이메일로 가입한 사람이 나중에 카카오로 로그인했을 때 **별개 계정을 만들지 않고
+기존 계정에 연결**하기 위해서입니다. 한 테이블에 `provider` 컬럼만 두면 같은
+사람의 면접 기록이 두 계정으로 쪼개집니다.
+
+```
+users(user_id=u_1, email=kim@example.com, nickname=김취준)
+  ├─ user_auth(provider=LOCAL, password=$2a$...)
+  └─ user_auth(provider=KAKAO, provider_id=3821049182)
+```
+
+### 연동 규칙
+
+**두 방향의 허용 여부가 다릅니다. 헷갈리기 쉬우니 주의하세요.**
+
+| 상황 | 동작 |
+|---|---|
+| 카카오 로그인 → 같은 이메일의 계정이 이미 있음 | **연결한다.** `user_auth(KAKAO)` 행만 추가 |
+| 이메일 회원가입 → 같은 이메일의 계정이 이미 있음 | **거부한다.** `EMAIL_ALREADY_EXISTS` |
+| 카카오가 이메일을 안 줬거나 미검증 | 연결하지 않고 **새 `users` 행 생성** (`email = null`) |
+
+**왜 한쪽만 막나요.** 카카오는 이메일 소유를 검증하고 그 결과를
+`kakao_account.is_email_verified` 로 알려줍니다. 검증된 이메일이면 "이 사람이 그
+이메일의 주인"이 보장되므로 연결해도 안전합니다.
+
+반대로 **이메일 회원가입은 이메일 소유를 증명하지 않습니다.** 이 방향을 열어두면
+남의 이메일 주소만 아는 사람이 그 주소로 가입해 비밀번호를 걸고 남의 카카오
+계정에 올라탈 수 있습니다. 이메일 인증 메일 기능이 생기기 전까지는 막습니다.
+
+연결은 `is_email_verified` 가 **true 일 때만** 합니다. 카카오가 이메일을 줘도
+미검증이면 새 계정을 만듭니다.
+
+### 카카오가 안 주는 값
+
+닉네임도 선택 동의입니다. 못 받으면 `"면접자" + user_id 앞 6자` 로 채웁니다.
+`nickname` 은 화면에 항상 떠야 해서 NOT NULL 을 유지합니다.
+
 ---
 
-## 문서 (이력서 · 포트폴리오)
+## 문서 (자기소개서 · 포트폴리오)
 
 ```sql
-document_id   VARCHAR(50)   PK
-user_id       VARCHAR(50)   NOT NULL FK
-type          VARCHAR(20)   NOT NULL   -- RESUME | PORTFOLIO
-file_name     VARCHAR(255)  NOT NULL
-object_key    TEXT          NOT NULL   -- S3 키
-mime_type     VARCHAR(100)  NOT NULL
-file_size     BIGINT        NOT NULL
-created_at    TIMESTAMP     NOT NULL
+document
+doc_id        BIGINT        PK
+public_id     UUID          UNIQUE NOT NULL
+user_id       VARCHAR(50)   NOT NULL FK -> users(user_id)
+doc_title     VARCHAR(100)  NOT NULL
+doc_type      VARCHAR(20)   NOT NULL   -- RESUME | PORTFOLIO
+source_type   VARCHAR(10)   NOT NULL   -- FILE | MARKDOWN
+object_key    TEXT          NULL       -- S3 키. FILE 은 원본, MARKDOWN 은 .txt 사본
+file_name     VARCHAR(255)  NULL       -- FILE 만
+mime_type     VARCHAR(100)  NULL       -- FILE 만
+file_size     BIGINT        NULL       -- FILE 만
+file_format   VARCHAR(10)   NULL       -- PDF | DOCX | TXT. FILE 만
+doc_text      TEXT          NULL       -- MARKDOWN 만. 편집용 원본
+status        VARCHAR(20)   NOT NULL   -- UPLOADED | PARSING | READY | FAILED
+deleted_at    TIMESTAMPTZ   NULL       -- 소프트 삭제 시각. null 이면 살아 있음
+created_at    TIMESTAMPTZ   NOT NULL
+updated_at    TIMESTAMPTZ   NOT NULL
 ```
+
+**`source_type` 은 원본이 어디서 왔는지입니다.** `FILE` 은 사용자가 올린 파일이라
+`file_name` · `mime_type` · `file_size` · `file_format` 을 채우고, `MARKDOWN` 은 직접
+작성한 본문이라 `doc_text` 를 채웁니다. 양쪽이 전부 nullable 인 이유가 이것입니다.
+
+**`object_key` 는 둘 다 가집니다**(Issue #36). 면접 시작은 AI 에 파일 URL
+(`resume_file_url`)을 넘기는 구조라, 마크다운도 등록할 때 본문을 `.txt` 로 S3 에
+올립니다. 그래서 면접에 쓸 수 있는지는 `source_type` 이 아니라 `object_key` 유무로
+판단합니다.
+
+| | `doc_text` | `object_key` | `source_type` |
+|---|---|---|---|
+| 파일 문서 | null | 원본 | `FILE` |
+| 마크다운 문서 | 원본 | `.txt` 사본 | `MARKDOWN` |
+
+- 마크다운의 원본은 `doc_text` 입니다. S3 사본은 AI 가 읽어가는 용도입니다.
+  **본문 수정 기능을 만들 때는 같은 `object_key` 에 사본을 다시 올려야** 두 곳이
+  어긋나지 않습니다
+- Issue #36 이전에 등록된 마크다운 문서는 `object_key` 가 null 입니다. 백필하지 않고
+  두며, 면접 시작 시 "다시 등록해 주세요" 로 거절합니다
+
+등록은 `POST /api/documents` 하나로 받습니다. 업로드 URL 발급 → S3 직접 PUT → 등록
+확정으로 나누지 않고 **파일을 Spring 으로 통과시킵니다.** 자소서는 최대 10MB 라 그
+정도는 감당되고, 나누면 PUT 은 성공했는데 확정 전에 브라우저가 닫힐 때 버킷에 고아
+객체가 남기 때문입니다. 판단 근거와 되돌릴 조건은 Issue #28 참고.
+**녹화 영상은 크기가 달라 계속 Presigned 로 갑니다.**
 
 **S3 URL을 저장하지 않습니다.** `object_key` 만 두고 필요할 때 Presigned URL을
 만듭니다. Presigned URL은 만료되고, 버킷·경로가 바뀌면 전부 손봐야 합니다.
+
+`status` 가 `READY` 가 되기 전에는 세션을 시작할 수 없습니다. AI 서버가 문서를
+읽을 수 없는 상태입니다.
+
+### ★ 문서 삭제는 소프트 삭제입니다 (Issue #38)
+
+`DELETE /api/documents/{documentId}` 는 행을 지우지 않고 `deleted_at` 만 채웁니다.
+`session.document_id` 가 NOT NULL 로 문서를 참조해서, 행을 지우면 FK 에 막히거나
+과거 면접 기록이 깨지기 때문입니다.
+
+- 삭제된 문서는 **목록 · 상세 · 등록 상한(20개) · 면접 시작**에서 빠집니다.
+  `DocumentRepository` 의 모든 조회에 `deleted_at is null` 이 들어 있고, 삭제된 문서를
+  꺼내는 메서드는 두지 않습니다. 호출하는 쪽에 조건을 맡기면 한 곳만 빠뜨려도 새기
+  때문입니다
+- **S3 파일은 항상 지웁니다.** 사용자는 문서를 지우면 파일도 사라진다고 기대합니다
+- 그래서 **삭제된 문서로 본 면접은 재연습할 수 없습니다.** 재연습은 원래 면접의 문서
+  파일을 AI 에 다시 넘기는데([`12-replay.md`](./12-replay.md)) 파일이 없기 때문입니다.
+  재연습은 최초 세션의 문서를 연관관계(`session.getDocument()`)로 가져오고,
+  `Document.isDeleted()` 면 AI 호출 전에 거절해야 합니다. 연관관계 로딩은 삭제 여부로
+  걸러지지 않습니다
+- 과거 면접 기록과 리포트는 행이 남아 있어 그대로 보입니다
+- 없는 문서 · 남의 문서 · 이미 지운 문서는 모두 `DOCUMENT_NOT_FOUND` 입니다
+
+### ★ status 는 프론트로 내보내지 않습니다 (Issue #57)
+
+인덱싱은 **문서 등록이 아니라 면접 세션을 만들 때 AI 서버가** 합니다. 문서 쪽에는
+프론트가 기다릴 비동기 단계가 없으므로 문서 응답에 인덱싱 상태(`indexStatus` ·
+`indexedAt` · `indexError`)를 두지 않습니다. 등록에 성공한 문서는 곧바로 면접에 쓸 수
+있습니다.
+
+**등록하면 즉시 `READY` 입니다**(Issue #28). 문서 등록 때 AI 를 호출하지 않기
+때문입니다. 그래서 `UPLOADED`·`PARSING` 은 현재 도달하지 않는 상태입니다. `status`
+컬럼은 세션 생성 가능 여부(`Document.isUsableForSession()`)를 판단하는 내부 값으로만
+남깁니다. 초기 설계의 RAG·벡터 인덱싱 전제는 폐기됐고, **AI 문서 인덱싱 엔드포인트는 없으며 현재 MVP
+계약에서는 만들지 않습니다.** AI 는 이력서를 색인하지 않고 면접 시작 시 전체 내용을
+받아 처리합니다([`10-ai-client.md`](./10-ai-client.md)).
+
+### ★ ai_doc_ref 를 제거했습니다 (Issue #23)
+
+AI 계약이 확정되면서 `doc_id`(AI 쪽 이력서 파싱 캐시 키)가 지금은 항상 `null`이고
+Spring이 값을 받아 보관할 일이 없다는 것이 명확해졌습니다. 기존
+`ai_doc_ref VARCHAR(100)` 컬럼과 `Document.markReady(String)` 을 제거했습니다.
+
+**`ddl-auto: update` 는 컬럼 삭제를 하지 않습니다.** 배포 환경에 기존
+`ai_doc_ref` 컬럼이 남아 있다면 필요 시 수동으로 `DROP COLUMN` 하세요. 이 PR은
+DROP 스크립트를 포함하지 않습니다. 자세한 내용은 PR 본문의 DB migration 절 참고.
+
+---
+
+## 폴더
+
+```sql
+folder
+folder_id     BIGINT        PK
+public_id     UUID          UNIQUE NOT NULL
+user_id       VARCHAR(50)   NOT NULL FK -> users(user_id)
+folder_name   VARCHAR(50)   NOT NULL
+created_at    TIMESTAMPTZ   NOT NULL
+```
+
+**문서가 아니라 세션을 담습니다.** 이름만 보면 문서 폴더로 오해하기 쉬운데
+`document` 에는 `folder_id` 가 없고 `session` 에만 있습니다.
+
+폴더를 지워도 세션은 지우지 않습니다. `session.folder_id` 만 null 이 되어
+"폴더 없음"으로 남습니다. 연습 기록이 폴더 정리 한 번에 날아가면 안 됩니다.
 
 ---
 
 ## 면접 세션
 
 ```sql
-session_id           VARCHAR(50)   PK        -- AI가 발급
-user_id              VARCHAR(50)   NOT NULL FK
-resume_id            VARCHAR(50)   NOT NULL FK
-company_id           VARCHAR(50)   NULL      -- 회사 미선택 연습 모드
-persona              VARCHAR(20)   NOT NULL  -- friendly | pressure
+session
+session_id           VARCHAR(50)   PK        -- ★ AI가 발급
+user_id              VARCHAR(50)   NOT NULL FK -> users(user_id)
+company_id           BIGINT        NULL FK   -- 회사 미선택 연습 모드
+document_id          BIGINT        NOT NULL FK -- ★ Issue #23 부터 필수
+folder_id            BIGINT        NULL FK   -- 폴더에 넣지 않은 세션
+retry_of_session_id  VARCHAR(50)   NULL FK   -- ★ 항상 최초 세션 ID
+mode                 VARCHAR(20)   NOT NULL
 job_role             VARCHAR(100)  NOT NULL
-question_count       INT           NOT NULL  -- 3 | 6 | 9
-retry_of_session_id  VARCHAR(50)   NULL      -- ★ 항상 최초 세션 ID
-status               VARCHAR(20)   NOT NULL  -- in_progress | completed | aborted
-created_at           TIMESTAMP     NOT NULL
+custom_talent        TEXT          NULL      -- 인재상 직접 입력
+question_count       INT           NOT NULL  -- 3 | 6 | 9. 기본 6
+persona              VARCHAR(20)   NOT NULL  -- FRIENDLY | PRESSURE
+hide_question_text   BOOLEAN       NOT NULL  -- 음성만 듣는 실전 모드
+duration_limit       INT           NULL      -- 답변 제한 시간(초)
+status               VARCHAR(20)   NOT NULL  -- IN_PROGRESS | COMPLETED | ABORTED
+created_at           TIMESTAMPTZ   NOT NULL
+updated_at           TIMESTAMPTZ   NOT NULL
+completed_at         TIMESTAMPTZ   NULL
 ```
 
-`session_id` 는 AI 서버가 발급한 값을 그대로 씁니다.
+### ★ PK 를 우리가 만들지 않습니다
+
+`session_id` 는 **AI 서버가 발급한 값을 그대로** 씁니다. `@GeneratedValue` 가
+없으므로 저장 전에 반드시 AI 응답의 `session_id` 를 넣어야 합니다.
+
+이 테이블만 `BIGINT` + `public_id` 규칙에서 빠지는 이유입니다. 자동증가 PK 로
+잡으면 AI 가 준 세션 ID 를 둘 컬럼이 없어집니다. 이 값 자체가 연속되지 않는
+외부 노출 식별자이므로 `public_id` 도 따로 두지 않습니다.
+
+### ★ document_id 가 NOT NULL 입니다 (Issue #23)
+
+AI 세션 시작 요청(`POST /ai/sessions`)의 `resume_file_url` 이 필수라, 문서 없는
+세션은 성립하지 않습니다. 기존에는 "문서 없이 직무만으로 보는 세션"을 허용해
+nullable 이었지만 이번 이슈부터 NOT NULL 로 바꿨습니다.
+
+**기존 DB에 `document_id` 가 NULL 인 세션 행이 있다면 NOT NULL 제약을 추가하기
+전에 데이터 정리가 필요합니다.** 자세한 절차는 PR 본문의 DB migration 절 참고.
+
+### 나머지
 
 `company_id` 가 NULL 허용인 것이 중요합니다. 회사를 고르지 않고 연습만 하는
-사용자가 있습니다.
+사용자가 있습니다. `folder_id` 도 같은 이유로 NULL 허용입니다.
 
 `retry_of_session_id` 는 **직전 회차가 아니라 항상 최초 세션**을 가리킵니다.
+3회차에서 이 값은 2회차가 아니라 1회차입니다. 회차 목록은 "같은 루트를 가진
+세션 전부"로 뽑으며 직전 회차로 채우면 목록 조회가 재귀 쿼리가 됩니다.
 자세한 내용은 [`12-replay.md`](./12-replay.md).
+
+`mode` 는 값 목록이 확정되지 않아 자바에서도 `String` 입니다. 정해지면 enum 으로
+올리세요.
+
+### ★ persona (Issue #23 — pressure_level 대체)
+
+압박 강도는 기존 `pressure_level VARCHAR(10)` 자유 문자열 대신 `persona` enum 으로
+바꿨습니다. 값은 `FRIENDLY`(순한맛) · `PRESSURE`(매운맛) 이며, AI 요청 시
+소문자 `friendly` · `pressure` 로 직렬화합니다(`Persona.toAiValue()`).
+
+**`ddl-auto: update` 는 컬럼명 변경을 rename 으로 인식하지 못합니다.** 새 컬럼
+`persona` 를 추가만 하고 기존 `pressure_level` 컬럼은 그대로 남습니다. 배포 시
+데이터를 옮기고 옛 컬럼을 정리하는 수동 작업이 필요합니다. PR 본문의 DB
+migration 절 참고.
+
+`folder` 를 지우면 `folder_id` 가, 세션을 지우면 `retry_of_session_id` 가
+`SET NULL` 됩니다.
 
 ---
 
 ## 질문 · 답변 로그
 
+질문과 그 녹음은 `question`, AI 분석 결과는 `answer` 로 나눠 담습니다.
+
 ```sql
-session_id        VARCHAR(50)   -- PK (복합)
-question_id       VARCHAR(50)   -- PK (복합)
-type              VARCHAR(20)   NOT NULL  -- question | followup | reask
-text              TEXT          NOT NULL
-audio_url         TEXT          NULL      -- TTS_FAILED 시 null
-category          VARCHAR(20)   NULL      -- reask는 null
-difficulty        VARCHAR(5)    NULL      -- reask는 null
-is_spare_topic    BOOLEAN       NOT NULL
-is_replay         BOOLEAN       NOT NULL
-question_number   INT           NOT NULL
-topic_index       INT           NOT NULL
-answer_audio_url  TEXT          NULL
-created_at        TIMESTAMP     NOT NULL
+question
+session_id              VARCHAR(50)   -- PK (복합), FK -> session(session_id)
+question_id             VARCHAR(50)   -- PK (복합). AI 발급
+type                    VARCHAR(20)   NOT NULL  -- QUESTION | FOLLOWUP | REASK
+text                    TEXT          NOT NULL
+audio_url               TEXT          NULL      -- AI가 준 서명없는 원본 URL. TTS 없으면 null. presigned는 저장 안 함(#54)
+category                VARCHAR(20)   NULL      -- REASK는 null
+difficulty              VARCHAR(5)    NULL      -- REASK는 null
+reask_of                VARCHAR(50)   NULL      -- ★ REASK 일 때 원 질문의 question_id
+is_spare_topic          BOOLEAN       NOT NULL
+is_replay               BOOLEAN       NOT NULL
+question_number         INT           NOT NULL  -- REASK 에서는 안 올라감
+topic_index             INT           NOT NULL
+answer_audio_object_key TEXT          NULL      -- ★ 사용자 답변 오디오 S3 key. 업로드 완료 시 채움
+answer_video_object_key TEXT          NULL      -- ★ 사용자 답변 영상 S3 key. 카메라 미사용 시 null
+answer_is_timeout       BOOLEAN       NOT NULL  -- ★ 제한 시간 만료로 자동 제출됐는지
+is_bookmarked           BOOLEAN       NOT NULL
+created_at              TIMESTAMPTZ   NOT NULL
+```
+
+```sql
+answer
+answer_id     BIGINT        PK
+session_id    VARCHAR(50)   NOT NULL  -- FK -> question (복합)
+question_id   VARCHAR(50)   NOT NULL  -- FK -> question (복합)
+answer_text   TEXT          NULL      -- STT 실패 시 null
+score         INT           NULL
+answer_start  DOUBLE PRECISION NULL   -- 발화 시작 지점(초)
+answer_end    DOUBLE PRECISION NULL
+think_time    DOUBLE PRECISION NULL   -- 말을 시작하기까지 걸린 시간(초)
+answered_at   TIMESTAMPTZ   NULL
+metrics       JSONB         NULL      -- 음성·시선 분석 원본
+created_at    TIMESTAMPTZ   NOT NULL
+
+UNIQUE (session_id, question_id)
 ```
 
 ### ★ 복합 PK
@@ -84,13 +334,52 @@ created_at        TIMESTAMP     NOT NULL
 
 ```java
 @Entity
-@IdClass(QuestionLogId.class)
-public class QuestionLog {
+@IdClass(QuestionId.class)
+public class Question {
     @Id private String sessionId;
     @Id private String questionId;
     ...
 }
 ```
+
+`answer` 와 `bookmarked_question` 은 이 두 컬럼을 묶어 FK 로 겁니다.
+
+### ★ question_number 에 UNIQUE 를 걸지 마세요
+
+되묻기에서는 올라가지 않습니다. 같은 `question_number` 를 가진 행이 한 세션에
+둘 이상 존재하는 것이 정상이며, UNIQUE 를 걸면 되묻기 저장이 실패합니다.
+
+### ★ 녹음은 question, 분석 결과는 answer
+
+`answer_audio_object_key` 가 `answer` 가 아니라 `question` 에 있습니다. **업로드가
+끝난 시점에는 아직 AI 분석 전이라 `answer` 행이 없습니다.** 답변하지 않고 끝난
+질문에도 `answer` 행이 없으므로, 문항 수를 셀 때 어느 테이블 기준인지
+구분하세요.
+
+URL 이 아니라 **S3 object key** 를 저장합니다. Presigned URL 은 만료되므로
+`document.object_key` 와 같은 규칙입니다. 재생이 필요하면
+`PresignedUrlIssuer.issueRecordingDownload` 로 그때 다시 URL 을 만듭니다.
+
+이번 이슈(#23)에서는 컬럼만 추가했습니다. `answer_audio_object_key` ·
+`answer_video_object_key` · `answer_is_timeout` 에 실제 값을 채우는 답변 제출
+로직은 다음 이슈 범위입니다.
+
+### ★ reask_of
+
+되묻기(`REASK`)일 때 원 질문의 `question_id` 를 담습니다. AI 계약의 `reask_of` 에
+대응합니다. FK 는 걸지 않습니다 — 복합키를 다시 참조하려면 조인 컬럼이 늘고,
+이 값은 표시·추적용입니다. `QUESTION`·`FOLLOWUP` 이면 null 입니다.
+
+### ★ answer_audio_url 을 answer_audio_object_key 로 교체했습니다 (Issue #23)
+
+기존 `answer_audio_url TEXT` 컬럼은 이름과 달리 실제로는 URL 이 아니라 저장
+위치를 담는 용도로 쓰였습니다. `document.object_key` 규칙과 맞추기 위해
+`answer_audio_object_key` 로 이름을 바꿨습니다.
+
+**`ddl-auto: update` 는 컬럼명 변경을 rename 으로 인식하지 못합니다.** 새 컬럼을
+추가만 하고 기존 `answer_audio_url` 컬럼은 그대로 남습니다. 배포 시 데이터를
+옮기고 옛 컬럼을 정리하는 수동 작업이 필요합니다. PR 본문의 DB migration 절
+참고.
 
 ### ★ category 는 enum으로 만들지 않습니다
 
@@ -117,6 +406,8 @@ public enum Category { 지원동기, 직무역량, ... }
 private String category;   // AI 원문 그대로
 ```
 
+`type` 은 반대로 enum 입니다. 값이 3개로 고정된 백엔드 개념이고 한글이 아닙니다.
+
 ### is_spare_topic 과 is_replay
 
 이름이 비슷하지만 가리키는 축이 다릅니다.
@@ -127,11 +418,11 @@ private String category;   // AI 원문 그대로
 | `is_replay` | 1회차와 동일한 질문인가 | 회차 간 관계. **비교 화면은 이것만** |
 
 둘 다 모든 응답에 항상 포함되므로 `NOT NULL` 로 둡니다.
-`reask` 는 둘 다 항상 false입니다.
+`REASK` 는 둘 다 항상 false입니다.
 
 ### difficulty
 
-`L1` ~ `L3`. `reask` 에서는 null입니다.
+`L1` ~ `L3`. `REASK` 에서는 null입니다.
 
 재연습 시 꼬리질문의 난이도도 1회차와 같아야 하므로 반드시 저장합니다.
 
@@ -139,17 +430,327 @@ private String category;   // AI 원문 그대로
 
 ## 리포트
 
-리포트 계약 확정 후 작성합니다. [`13-report.md`](./13-report.md) 참고.
+```sql
+report
+report_id       BIGINT        PK
+public_id       UUID          UNIQUE NOT NULL    -- 응답의 reportId
+session_id      VARCHAR(50)   UNIQUE NOT NULL FK -> session(session_id)
+status          VARCHAR(20)   NOT NULL           -- PROCESSING | COMPLETED | PARTIAL | FAILED
+ai_task_id      VARCHAR(100)  NULL               -- 폴링 중인 AI task
+attempt         INT           NOT NULL           -- 시도 번호. Idempotency-Key rpt_{sessionId}_{attempt}
+score_total     INT           NULL               -- 0~100. AI overall.score
+score_content   INT           NULL
+score_speech    INT           NULL               -- 실패 시 null
+score_gaze      INT           NULL               -- 실패 또는 카메라 미사용(skipped) 시 null
+report_data     JSONB         NULL               -- AI result 원본 전체. 삭제 금지
+error_code      VARCHAR(50)   NULL               -- FAILED 일 때, 또는 retry_status = FAILED 일 때
+retry_status    VARCHAR(20)   NULL               -- null | PROCESSING | FAILED. PARTIAL 실패 축 재시도
+created_at      TIMESTAMPTZ   NOT NULL
+completed_at    TIMESTAMPTZ   NULL
+```
+
+**세션당 한 행입니다**(`session_id` UNIQUE). `FAILED` 리포트를 다시 요청하면 새 행을
+만들지 않고 이 행을 `PROCESSING` 으로 되돌리며 `attempt` 를 올립니다. 그래서 재요청해도
+`reportId` 가 같습니다. AI 는 같은 Idempotency-Key 면 실패한 기존 task 를 돌려주므로
+시도 번호가 키에 들어갑니다.
+
+**실패 축 재시도는 `status` 가 아니라 `retry_status` 로 표시합니다.** 재시도 중에도 리포트는 PARTIAL
+결과 그대로 보여야 하기 때문입니다. 성공하면 결과를 통째로 바꾸고 `retry_status` 를 비우고, 실패하면
+결과는 그대로 두고 `retry_status = FAILED`, 원인은 `error_code` 에 남깁니다. 재시도는 PARTIAL 에서만
+하므로 `status = FAILED` 와 `retry_status = FAILED` 는 함께 생기지 않습니다. nullable 이라 `ddl-auto: update`
+로 기존 행에 그대로 추가됩니다. [`13-report.md`](./13-report.md) 의 실패 축 재시도 절 참고.
+
+**`status` 는 우리 상태라 enum 입니다.** AI 의 `report_status`(complete | partial)는
+`COMPLETED` · `PARTIAL` 로 옮기고, 원문은 `report_data` 에 남습니다.
+
+**`report_data` 는 지우지 않습니다.** AI 는 리포트를 보관하지 않아서, 회차 비교
+(`/ai/reports/compare`) 때 Backend 가 전체 회차의 원본을 다시 보냅니다. 조회 조건으로도
+쓰지 마세요. 필요한 값은 컬럼으로 꺼내 둡니다.
+
+**점수가 전부 nullable 인 이유**는 부분 실패 때문입니다. 말하기·시선 축은 실패해도
+리포트가 만들어지고(`PARTIAL`) 그 축만 빕니다. 내용 축이 실패하면 리포트 자체가
+`FAILED` 입니다. [`13-report.md`](./13-report.md) 참고.
+
+### ★ 계약 전 초안 컬럼을 정리했습니다 (Issue #47)
+
+ERD 초안으로 먼저 잡아둔 컬럼 중 계약과 다른 것을 바꿨습니다.
+
+| 초안 | 지금 |
+|---|---|
+| `score_vision` | `score_gaze` (AI 축 이름과 맞춤) |
+| `summary` · `growth_narrative` · `timeline` · `resilience` (JSONB) | 제거. 전부 `report_data` 원본에 있음 |
+| `status` 자유 문자열 | `ReportStatus` enum |
+
+**`ddl-auto: update` 는 컬럼 삭제·이름 변경을 하지 않습니다.** 배포 DB 에 옛 컬럼이
+남아 있으면 report 행이 없는지 확인한 뒤 수동으로 지우세요. 행이 이미 있으면 새
+`attempt INT NOT NULL` 컬럼 추가도 실패하니, 그 경우 먼저 행을 정리해야 합니다.
+
+```sql
+ALTER TABLE report DROP COLUMN IF EXISTS score_vision,
+                   DROP COLUMN IF EXISTS summary,
+                   DROP COLUMN IF EXISTS growth_narrative,
+                   DROP COLUMN IF EXISTS timeline,
+                   DROP COLUMN IF EXISTS resilience;
+```
+
+---
+
+## 회사
+
+```sql
+company
+company_id       BIGINT        PK
+company_name     VARCHAR(100)  UNIQUE NOT NULL
+industry         VARCHAR(100)  NOT NULL
+values_format    VARCHAR(20)   NOT NULL  -- WORD | PRINCIPLE | MIXED
+core_values      JSONB         NOT NULL  -- [{"name":..., "indicator":"..."}]
+job_requirements JSONB         NULL      -- 직무를 키로 하는 요구역량
+source_url       TEXT[]        NOT NULL  -- 출처. 복수 가능
+talent_profile   TEXT          NULL
+interview_style  VARCHAR(200)  NULL
+verified         BOOLEAN       NOT NULL  -- 공식 채용페이지에서 직접 확인했는지
+updated_at       DATE          NOT NULL  -- ★ 수정 시각이 아니라 수집일
+created_at       TIMESTAMPTZ   NOT NULL
+```
+
+```sql
+user_company_interest
+id            BIGINT        PK
+user_id       VARCHAR(50)   NOT NULL FK -> users(user_id)
+company_id    BIGINT        NOT NULL FK -> company(company_id)
+created_at    TIMESTAMPTZ   NOT NULL
+
+UNIQUE (user_id, company_id)
+```
+
+### ★ company.updated_at 은 수집일입니다
+
+이름은 `updated_at` 인데 타입이 `DATE` 이고 의미는 "이 정보를 언제 긁어왔는가"
+입니다. 자동 갱신되면 안 되므로 자바 필드명은 `collectedOn` 으로 다릅니다.
+`getUpdatedAt()` 으로 두면 감사 컬럼으로 착각합니다.
+
+### ★ core_values 구조 — behaviors 배열이 아니라 indicator 문자열입니다 (Issue #23)
+
+ERD 초안 문서는 `[{"name": ..., "behaviors": [...]}]` 형태를 가정했지만, AI 팀이
+실제로 제공한 `companies.json` 은 `indicator` 를 배열이 아닌 문장 하나로 담습니다.
+
+```json
+[
+  {
+    "name": "Bar Raising",
+    "indicator": "이만하면 됐다 싶은 지점에서 한 번 더 고민한다."
+  }
+]
+```
+
+AI 계약(질문 생성 API 계약 6장)의 `company_profile_override` 형식도 이 구조를
+그대로 따릅니다.
+
+```
+기업명 (업종)
+핵심 가치
+  가치 이름 — 행동지표
+  가치 이름 — 행동지표
+```
+
+이 문자열 조립은 `CompanyProfileFormatter` 가 담당합니다. `core_values` JSON 을
+직접 파싱하는 코드를 다른 곳에 새로 만들지 마세요.
+
+**companies.json 의 시드·임포트 기능은 이번 이슈 범위가 아닙니다.** 이 PR 은
+스키마와 조립 로직만 반영하며, 실제 데이터 적재는 별도로 진행합니다.
+
+### values_format 을 PostgreSQL enum 으로 만들지 않습니다
+
+`ddl-auto: update` 에서 Hibernate 가 기존 enum 타입에 값을 추가하지 못합니다.
+항목이 하나 늘 때마다 손으로 `ALTER TYPE` 을 쳐야 합니다. `user_auth.provider`
+와 같은 이유로 `VARCHAR` 에 이름을 담습니다.
+
+---
+
+## 성장 · 게이미피케이션
+
+```sql
+goal
+goal_id       BIGINT        PK
+user_id       VARCHAR(50)   NOT NULL FK -> users(user_id)
+goal_type     VARCHAR(20)   NOT NULL
+target_metric VARCHAR(30)   NOT NULL  -- 무엇을 세는지
+target_value  INT           NOT NULL
+start_date    DATE          NOT NULL
+end_date      DATE          NOT NULL
+status        VARCHAR(20)   NOT NULL
+completed_at  TIMESTAMPTZ   NULL
+created_at    TIMESTAMPTZ   NOT NULL
+updated_at    TIMESTAMPTZ   NOT NULL
+```
+
+```sql
+badge
+badge_id       BIGINT        PK
+badge_code     VARCHAR(50)   UNIQUE NOT NULL  -- 사람이 읽는 안정적인 키
+badge_name     VARCHAR(50)   NOT NULL
+description    VARCHAR(255)  NOT NULL
+category       VARCHAR(20)   NOT NULL
+condition_type VARCHAR(30)   NOT NULL
+condition_data JSONB         NOT NULL  -- 예: {"days": 7}
+icon_url       VARCHAR(500)  NULL
+status         VARCHAR(20)   NOT NULL
+created_at     TIMESTAMPTZ   NOT NULL
+updated_at     TIMESTAMPTZ   NOT NULL
+```
+
+```sql
+user_badge
+user_badge_id     BIGINT        PK
+user_id           VARCHAR(50)   NOT NULL FK -> users(user_id)
+badge_id          BIGINT        NOT NULL FK -> badge(badge_id)
+source_session_id VARCHAR(50)   NULL FK -> session(session_id)
+earned_at         TIMESTAMPTZ   NOT NULL
+
+UNIQUE (user_id, badge_id)
+```
+
+```sql
+streak
+streak_id     BIGINT        PK
+user_id       VARCHAR(50)   NOT NULL FK -> users(user_id)
+activity_date DATE          NOT NULL
+answer_count  INT           NOT NULL  -- CHECK >= 1
+created_at    TIMESTAMPTZ   NOT NULL
+updated_at    TIMESTAMPTZ   NOT NULL
+
+UNIQUE (user_id, activity_date)
+```
+
+### ★ 연속 일수를 저장하지 않습니다
+
+`streak` 은 날짜별 행만 쌓고 연속 여부는 조회할 때 계산합니다. 숫자를 들고
+있으면 자정을 넘기는 요청, 시간대, 중간 실패 때 실제 기록과 어긋나기 시작합니다.
+
+### ★ 획득 기록이 있는 배지는 지우지 마세요
+
+`user_badge.badge_id` 에 삭제 정책을 걸지 않았습니다. PostgreSQL 기본
+`NO ACTION` 이 삭제를 막아줍니다. 더 안 주고 싶으면 지우지 말고 `status` 를
+내리세요.
+
+`badge_code` 가 안정적인 키입니다. 코드에서 배지를 지목할 때 `badge_id` 대신
+이걸 쓰세요. 시드를 다시 넣어도 안 바뀝니다.
+
+---
+
+## 즐겨찾기 · 프로필 · 알림 · 일정
+
+```sql
+bookmarked_question
+bookmarked_question_id BIGINT      PK
+user_id                VARCHAR(50) NOT NULL FK -> users(user_id)
+session_id             VARCHAR(50) NOT NULL  -- FK -> question (복합)
+question_id            VARCHAR(50) NOT NULL  -- FK -> question (복합)
+memo                   VARCHAR(500) NULL
+created_at             TIMESTAMPTZ NOT NULL
+updated_at             TIMESTAMPTZ NOT NULL
+
+UNIQUE (user_id, session_id, question_id)
+```
+
+`question.is_bookmarked` 와 짝인 비정규화 플래그가 있습니다. 목록 조회에서
+조인을 피하려는 용도이며 **이 행을 만들거나 지울 때 그 플래그도 같이 바꿔야
+합니다.** 둘이 어긋나면 목록과 상세가 다르게 보입니다.
+
+```sql
+user_profile
+user_profile_id   BIGINT        PK
+user_id           VARCHAR(50)   UNIQUE NOT NULL FK -> users(user_id)
+profile_image_url VARCHAR(500)  NULL
+introduction      VARCHAR(500)  NULL
+target_job_role   VARCHAR(50)   NULL
+career_level      VARCHAR(20)   NULL
+school_name       VARCHAR(100)  NULL
+major             VARCHAR(100)  NULL
+graduation_year   INT           NULL
+created_at        TIMESTAMPTZ   NOT NULL
+updated_at        TIMESTAMPTZ   NOT NULL
+```
+
+전 컬럼이 nullable 입니다. 없어도 서비스가 도는 값만 모았으므로 가입 시점에
+만들지 않아도 됩니다.
+
+```sql
+notification_setting
+notification_setting_id BIGINT      PK
+user_id                 VARCHAR(50) UNIQUE NOT NULL FK -> users(user_id)
+calendar_enabled        BOOLEAN     NOT NULL
+goal_enabled            BOOLEAN     NOT NULL
+report_enabled          BOOLEAN     NOT NULL
+badge_enabled           BOOLEAN     NOT NULL
+streak_enabled          BOOLEAN     NOT NULL
+marketing_enabled       BOOLEAN     NOT NULL
+created_at              TIMESTAMPTZ NOT NULL
+updated_at              TIMESTAMPTZ NOT NULL
+```
+
+**이쪽은 반대로 가입 시점에 만들어야 합니다.** 전 컬럼이 NOT NULL 이라 행이
+없으면 "설정 안 함"과 "끔"을 구분할 수 없습니다. `marketing_enabled` 만 기본값이
+false 입니다. 광고성 정보는 수신 동의를 받아야 보낼 수 있습니다.
+
+```sql
+calendar_event
+calendar_event_id BIGINT        PK
+user_id           VARCHAR(50)   NOT NULL FK -> users(user_id)
+company_name      VARCHAR(100)  NOT NULL  -- ★ 직접 입력. company FK 아님
+job_role          VARCHAR(50)   NOT NULL
+interview_round   VARCHAR(30)   NULL
+scheduled_at      TIMESTAMPTZ   NOT NULL
+interview_method  VARCHAR(10)   NOT NULL  -- ONLINE | OFFLINE
+location          VARCHAR(200)  NULL      -- OFFLINE 만
+meeting_url       VARCHAR(500)  NULL      -- ONLINE 만
+memo              TEXT          NULL
+created_at        TIMESTAMPTZ   NOT NULL
+updated_at        TIMESTAMPTZ   NOT NULL
+```
+
+`company_name` 이 문자열이고 `company` FK 가 아닙니다. **우리가 수집해둔 기업
+목록에 없는 회사에도 지원하기 때문입니다.** FK 로 묶으면 목록에 없는 회사의
+일정을 아예 등록할 수 없게 됩니다.
+
+---
+
+## 삭제 정책
+
+```
+users 삭제      → 종속 테이블 전부 CASCADE
+session 삭제    → question, report CASCADE
+question 삭제   → answer, bookmarked_question CASCADE
+session 삭제    → retry_of_session_id, user_badge.source_session_id SET NULL
+folder 삭제     → session.folder_id SET NULL
+badge 삭제      → user_badge 가 막음 (NO ACTION)
+company 삭제    → session.company_id 가 막음 (NO ACTION)
+document 삭제   → session.document_id 가 막음 (NO ACTION). API 는 소프트 삭제만 합니다
+```
 
 ---
 
 ## 인덱스
 
 ```sql
-CREATE INDEX idx_session_user       ON interview_session(user_id, created_at DESC);
-CREATE INDEX idx_session_retry_root ON interview_session(retry_of_session_id);
-CREATE INDEX idx_qlog_session       ON question_log(session_id, question_number);
-CREATE INDEX idx_document_user      ON document(user_id, type);
+CREATE INDEX idx_session_user       ON session(user_id, created_at);
+CREATE INDEX idx_session_retry_root ON session(retry_of_session_id);
+CREATE INDEX idx_session_folder     ON session(folder_id);
+CREATE INDEX idx_qlog_session       ON question(session_id, question_number);
+CREATE INDEX idx_document_user      ON document(user_id);
+CREATE INDEX idx_folder_user        ON folder(user_id);
+CREATE INDEX idx_company_industry   ON company(industry);
+CREATE INDEX idx_company_verified   ON company(verified);
+CREATE INDEX idx_goal_user_status   ON goal(user_id, status);
+CREATE INDEX idx_user_badge_user_earned ON user_badge(user_id, earned_at);
+CREATE INDEX idx_user_badge_badge       ON user_badge(badge_id);
+CREATE INDEX idx_bookmarked_question_user ON bookmarked_question(user_id, created_at);
+CREATE INDEX idx_calendar_event_user_scheduled ON calendar_event(user_id, scheduled_at);
+CREATE INDEX idx_user_company_interest_company ON user_company_interest(company_id);
 ```
 
 `idx_session_retry_root` 는 회차 목록 조회(같은 루트를 가진 세션 전부)에 씁니다.
+
+`user_auth` 는 인덱스를 따로 만들지 않습니다. 로그인 조회에 쓰는
+`(provider, provider_id)` 와 `(user_id, provider)` 는 UNIQUE 제약이 이미 인덱스를
+만듭니다. 같은 걸 두 번 만들면 쓰기만 느려집니다.

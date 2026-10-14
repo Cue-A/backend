@@ -51,12 +51,26 @@ STT, LLM, TTS, 시선 분석은 전부 별도 Python AI 서버에서 처리하�
 | 전체 구조 파악 | `docs/00-architecture.md` |
 | 코드 작성 (항상) | `docs/01-conventions.md` |
 | 엔티티·리포지토리 | `docs/02-database.md` |
+| 로그인, 토큰, 프론트 401 처리 | `docs/03-auth.md` |
 | AI 서버 호출, 폴링, 에러 처리 | `docs/10-ai-client.md` |
 | 면접 세션, 질문·답변 | `docs/11-interview.md` |
 | 재연습 | `docs/12-replay.md` |
 | 리포트, 성장 추적 | `docs/13-report.md` |
 | 파일 업로드, S3 | `docs/20-storage.md` |
+| 배포, 실제 S3·AI 전환 | `docs/30-deploy.md` |
 | 결정되지 않은 것 확인 | `docs/90-open-questions.md` |
+
+---
+
+## Claude Code 스킬
+
+`.claude/skills/` 에 이 저장소 전용 워크플로우가 있습니다. `/이름` 으로 호출합니다.
+
+| 스킬 | 언제 쓰나 |
+|---|---|
+| `/git` | 커밋·브랜치·이슈·PR 생성. `docs/01-conventions.md` 의 규칙을 그대로 따릅니다 |
+| `/planmd` | 개발 전 구현 계획을 `docs/plans/` 에 문서로 뽑습니다. 이 스킬은 코드를 쓰지 않습니다 |
+| `/pr-check` | 현재 브랜치 PR 의 리뷰 코멘트를 중요도 순으로 정리합니다 |
 
 ---
 

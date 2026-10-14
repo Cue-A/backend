@@ -1,0 +1,289 @@
+package com.cuea.domain.interview.service;
+
+import com.cuea.common.exception.BusinessException;
+import com.cuea.common.exception.ErrorCode;
+import com.cuea.domain.document.entity.Document;
+import com.cuea.domain.interview.dto.request.InterviewStartRequest;
+import com.cuea.domain.interview.entity.InterviewSession;
+import com.cuea.domain.interview.entity.Persona;
+import com.cuea.domain.interview.entity.Question;
+import com.cuea.domain.interview.entity.QuestionType;
+import com.cuea.domain.interview.entity.SessionStatus;
+import com.cuea.domain.interview.repository.InterviewSessionRepository;
+import com.cuea.domain.interview.repository.QuestionRepository;
+import com.cuea.domain.user.entity.User;
+import com.cuea.infrastructure.ai.dto.AiQuestionResult;
+import com.cuea.infrastructure.ai.dto.AiSessionStartResponse;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
+
+import java.util.Optional;
+
+import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.verify;
+import static org.mockito.Mockito.when;
+
+/**
+ * 답변 흐름에서 {@link InterviewSessionWriter} 가 하는 짧은 트랜잭션 DB 작업을
+ * 검증합니다. 결과 타입 매핑(특히 {@code reask_of})과 session_end 전이,
+ * 알 수 없는 type 거부를 봅니다.
+ */
+class InterviewSessionWriterTest {
+
+    private static final String SESSION_ID = "sess_1";
+
+    private InterviewSessionRepository sessionRepository;
+    private QuestionRepository questionRepository;
+    private InterviewSessionWriter writer;
+
+    @BeforeEach
+    void setUp() {
+        sessionRepository = mock(InterviewSessionRepository.class);
+        questionRepository = mock(QuestionRepository.class);
+        writer = new InterviewSessionWriter(sessionRepository, questionRepository);
+        when(questionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        // 기본값: 세션이 존재하고 IN_PROGRESS. 저장/완료 전이는 IN_PROGRESS 일 때만
+        // 일어나므로(늦은 결과 무시, 리뷰 5/#25) 정상 경로 테스트는 이 세션을 씁니다.
+        // 종료 상태를 봐야 하는 테스트는 각자 다시 stub 합니다.
+        when(sessionRepository.findBySessionIdForInternal(SESSION_ID))
+                .thenReturn(Optional.of(inProgressSession()));
+    }
+
+    private InterviewSession inProgressSession() {
+        return InterviewSession.builder()
+                .sessionId(SESSION_ID).user(mock(User.class))
+                .document(mock(com.cuea.domain.document.entity.Document.class))
+                .mode("PRACTICE").jobRole("백엔드").questionCount(9)
+                .persona(Persona.FRIENDLY).hideQuestionText(false)
+                .status(SessionStatus.IN_PROGRESS).build();
+    }
+
+    private AiQuestionResult reaskResult() {
+        return new AiQuestionResult(
+                AiQuestionResult.TYPE_REASK, "q_2r", "q_2", "다시 말씀해 주시겠어요?", "https://s3/q.mp3",
+                null, null, 2, 9, 1, 4, false, false, null);
+    }
+
+    @Test
+    void REASK_를_저장하면_reask_of_와_null_category_difficulty_가_반영된다() {
+        Question saved = writer.saveNextQuestion(SESSION_ID, reaskResult());
+
+        assertThat(saved.getType()).isEqualTo(QuestionType.REASK);
+        assertThat(saved.getReaskOf()).isEqualTo("q_2");
+        assertThat(saved.getCategory()).isNull();
+        assertThat(saved.getDifficulty()).isNull();
+        // reask 는 question_number 가 올라가지 않는다(원 질문과 같은 2).
+        assertThat(saved.getQuestionNumber()).isEqualTo(2);
+    }
+
+    @Test
+    void QUESTION_을_저장하면_카테고리_난이도가_그대로_보존된다() {
+        AiQuestionResult result = new AiQuestionResult(
+                AiQuestionResult.TYPE_QUESTION, "q_2", null, "다음 질문", "https://s3/q.mp3",
+                "협업·갈등", "L3", 2, 9, 1, 4, false, false, null);
+
+        Question saved = writer.saveNextQuestion(SESSION_ID, result);
+
+        assertThat(saved.getType()).isEqualTo(QuestionType.QUESTION);
+        // 가운뎃점(·)까지 그대로 저장.
+        assertThat(saved.getCategory()).isEqualTo("협업·갈등");
+        assertThat(saved.getDifficulty()).isEqualTo("L3");
+        assertThat(saved.getReaskOf()).isNull();
+    }
+
+    @Test
+    void session_end_는_질문으로_저장하지_않고_거부한다() {
+        AiQuestionResult sessionEnd = new AiQuestionResult(
+                AiQuestionResult.TYPE_SESSION_END, null, null, null, null, null, null,
+                null, 9, null, null, false, false, 9);
+
+        assertThatThrownBy(() -> writer.saveNextQuestion(SESSION_ID, sessionEnd))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.UNEXPECTED_AI_RESPONSE);
+
+        verify(questionRepository, never()).save(any());
+    }
+
+    @Test
+    void 알_수_없는_type_은_QUESTION_으로_fallback_하지_않고_거부한다() {
+        // C10: unknown → QUESTION fallback 회귀 방지. Writer 레벨에서도 직접 검증한다.
+        AiQuestionResult unknown = new AiQuestionResult(
+                "something_new", "q_x", null, "?", null, null, null,
+                null, 9, null, null, false, false, null);
+
+        assertThatThrownBy(() -> writer.saveNextQuestion(SESSION_ID, unknown))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.UNEXPECTED_AI_RESPONSE);
+
+        verify(questionRepository, never()).save(any());
+    }
+
+    @Test
+    void attachAnswerMedia_는_object_key_와_timeout_을_질문에_저장한다() {
+        Question question = Question.builder()
+                .sessionId(SESSION_ID).questionId("q_1").type(QuestionType.QUESTION)
+                .text("질문").questionNumber(1).topicIndex(0).build();
+        when(questionRepository.findBySessionIdAndQuestionId(SESSION_ID, "q_1"))
+                .thenReturn(Optional.of(question));
+
+        writer.attachAnswerMedia(SESSION_ID, "q_1",
+                "sessions/sess_1/answers/q_1.webm", "sessions/sess_1/answers/q_1_video.mp4", true);
+
+        assertThat(question.getAnswerAudioObjectKey()).isEqualTo("sessions/sess_1/answers/q_1.webm");
+        assertThat(question.getAnswerVideoObjectKey()).isEqualTo("sessions/sess_1/answers/q_1_video.mp4");
+        assertThat(question.isAnswerIsTimeout()).isTrue();
+    }
+
+    @Test
+    void attachAnswerMedia_는_video_가_null_이어도_저장한다() {
+        Question question = Question.builder()
+                .sessionId(SESSION_ID).questionId("q_1").type(QuestionType.QUESTION)
+                .text("질문").questionNumber(1).topicIndex(0).build();
+        when(questionRepository.findBySessionIdAndQuestionId(SESSION_ID, "q_1"))
+                .thenReturn(Optional.of(question));
+
+        writer.attachAnswerMedia(SESSION_ID, "q_1", "sessions/sess_1/answers/q_1.webm", null, false);
+
+        assertThat(question.getAnswerAudioObjectKey()).isEqualTo("sessions/sess_1/answers/q_1.webm");
+        assertThat(question.getAnswerVideoObjectKey()).isNull();
+        assertThat(question.isAnswerIsTimeout()).isFalse();
+    }
+
+    @Test
+    void attachAnswerMedia_대상_질문이_없으면_QUESTION_NOT_FOUND() {
+        when(questionRepository.findBySessionIdAndQuestionId(SESSION_ID, "q_x"))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> writer.attachAnswerMedia(SESSION_ID, "q_x", "key", null, false))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.QUESTION_NOT_FOUND);
+    }
+
+    @Test
+    void completeSession_은_세션을_COMPLETED_로_전이하고_true_를_반환한다() {
+        // 기본 stub(IN_PROGRESS 세션) 사용.
+        InterviewSession session = inProgressSession();
+        when(sessionRepository.findBySessionIdForInternal(SESSION_ID))
+                .thenReturn(Optional.of(session));
+
+        boolean transitioned = writer.completeSession(SESSION_ID);
+
+        assertThat(transitioned).isTrue();
+        assertThat(session.getStatus()).isEqualTo(SessionStatus.COMPLETED);
+        assertThat(session.getCompletedAt()).isNotNull();
+    }
+
+    @Test
+    void completeSession_은_이미_ABORTED_면_전이하지_않고_false_를_반환한다() {
+        // 사용자 abort 로 이미 ABORTED 인 세션에 늦게 session_end 가 와도 완료로 역전하지
+        // 않고, 호출부가 session_end push 를 건너뛸 수 있게 false 를 준다(리뷰 5, #25).
+        InterviewSession aborted = inProgressSession();
+        aborted.abort();
+        when(sessionRepository.findBySessionIdForInternal(SESSION_ID))
+                .thenReturn(Optional.of(aborted));
+
+        boolean transitioned = writer.completeSession(SESSION_ID);
+
+        assertThat(transitioned).isFalse();
+        assertThat(aborted.getStatus()).isEqualTo(SessionStatus.ABORTED);
+    }
+
+    @Test
+    void completeSession_대상_세션이_없으면_SESSION_NOT_FOUND() {
+        when(sessionRepository.findBySessionIdForInternal(SESSION_ID))
+                .thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> writer.completeSession(SESSION_ID))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.SESSION_NOT_FOUND);
+    }
+
+    @Test
+    void saveNextQuestion_은_수신값을_그대로_저장한다() {
+        ArgumentCaptor<Question> captor = ArgumentCaptor.forClass(Question.class);
+
+        writer.saveNextQuestion(SESSION_ID, reaskResult());
+
+        verify(questionRepository).save(captor.capture());
+        assertThat(captor.getValue().getQuestionId()).isEqualTo("q_2r");
+    }
+
+    @Test
+    void saveNextQuestion_은_세션이_이미_ABORTED_면_저장하지_않고_null_을_반환한다() {
+        // 사용자 abort 로 종료된 세션에 늦게 도착한 결과는 새 Question 을 만들지 않는다.
+        // 상태 확인과 저장이 같은 트랜잭션 안에 있어(리뷰 5, #25), null 을 돌려주면 호출부가
+        // push 도 건너뛴다.
+        InterviewSession aborted = inProgressSession();
+        aborted.abort();
+        when(sessionRepository.findBySessionIdForInternal(SESSION_ID))
+                .thenReturn(Optional.of(aborted));
+
+        Question saved = writer.saveNextQuestion(SESSION_ID, reaskResult());
+
+        assertThat(saved).isNull();
+        verify(questionRepository, never()).save(any());
+    }
+
+    @Test
+    void saveFirstQuestion_도_세션이_이미_ABORTED_면_저장하지_않고_null_을_반환한다() {
+        InterviewSession aborted = inProgressSession();
+        aborted.abort();
+        when(sessionRepository.findBySessionIdForInternal(SESSION_ID))
+                .thenReturn(Optional.of(aborted));
+
+        Question saved = writer.saveFirstQuestion(SESSION_ID, reaskResult());
+
+        assertThat(saved).isNull();
+        verify(questionRepository, never()).save(any());
+    }
+
+    @Test
+    void createSession_은_요청의_hideQuestionText_true_를_음성만_모드로_저장한다() {
+        ArgumentCaptor<InterviewSession> captor = ArgumentCaptor.forClass(InterviewSession.class);
+        when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        writer.createSession(mock(User.class), mock(Document.class), null,
+                startRequest(true), aiStartResponse(), 6);
+
+        verify(sessionRepository).save(captor.capture());
+        assertThat(captor.getValue().isHideQuestionText()).isTrue();
+    }
+
+    @Test
+    void createSession_은_요청의_hideQuestionText_false_를_그대로_저장한다() {
+        ArgumentCaptor<InterviewSession> captor = ArgumentCaptor.forClass(InterviewSession.class);
+        when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        writer.createSession(mock(User.class), mock(Document.class), null,
+                startRequest(false), aiStartResponse(), 6);
+
+        verify(sessionRepository).save(captor.capture());
+        assertThat(captor.getValue().isHideQuestionText()).isFalse();
+    }
+
+    @Test
+    void createSession_은_hideQuestionText_가_null_이면_기존_동작대로_false_로_저장한다() {
+        ArgumentCaptor<InterviewSession> captor = ArgumentCaptor.forClass(InterviewSession.class);
+        when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        writer.createSession(mock(User.class), mock(Document.class), null,
+                startRequest(null), aiStartResponse(), 6);
+
+        verify(sessionRepository).save(captor.capture());
+        assertThat(captor.getValue().isHideQuestionText()).isFalse();
+    }
+
+    private InterviewStartRequest startRequest(Boolean hideQuestionText) {
+        return new InterviewStartRequest(
+                "11111111-1111-1111-1111-111111111111", null, "백엔드", Persona.FRIENDLY, 6, hideQuestionText);
+    }
+
+    private AiSessionStartResponse aiStartResponse() {
+        return new AiSessionStartResponse(SESSION_ID, "task_1", 6);
+    }
+}

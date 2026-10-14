@@ -123,6 +123,21 @@ class TokenServiceTest {
         tokenService.logout("");
     }
 
+    /** 회원 탈퇴 시 이 사용자가 로그인한 모든 기기의 refresh token을 끊습니다. */
+    @Test
+    void revokeAll_은_모든_기기의_토큰을_끊는다() {
+        TokenResponse laptop = tokenService.issue(user);
+        tokenService.issue(user);                       // 폰에서도 로그인
+        assertThat(store.liveTokenCount(user.getUserId())).isEqualTo(2);
+
+        tokenService.revokeAll(user.getUserId());
+
+        assertThat(store.liveTokenCount(user.getUserId())).isZero();
+        assertThatThrownBy(() -> tokenService.refresh(laptop.refreshToken()))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.REFRESH_TOKEN_REUSED);
+    }
+
     @Test
     void access_토큰으로는_재발급할_수_없다() {
         TokenResponse issued = tokenService.issue(user);

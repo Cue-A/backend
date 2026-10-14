@@ -41,6 +41,11 @@ class FakeRefreshTokenStore implements RefreshTokenStore {
         }
     }
 
+    @Override
+    public void revokeAll(String userId) {
+        jtisByUser.remove(userId);
+    }
+
     int liveTokenCount(String userId) {
         return jtisByUser.getOrDefault(userId, Set.of()).size();
     }

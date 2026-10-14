@@ -26,4 +26,7 @@ public interface RefreshTokenStore {
 
     /** 로그아웃. 그 기기 하나만 끊습니다. */
     void revoke(String userId, String jti);
+
+    /** 회원 탈퇴 등으로 그 사용자의 모든 기기를 한 번에 끊습니다. */
+    void revokeAll(String userId);
 }

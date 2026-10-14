@@ -191,6 +191,16 @@ public class Document extends BaseTimeEntity {
                 .build();
     }
 
+    /**
+     * 제목 변경. 검증과 앞뒤 공백 제거는 서비스가 끝낸 값을 받습니다.
+     *
+     * <p>본문은 바꾸지 않습니다. 마크다운 본문은 S3 사본과 함께 갱신해야 해서
+     * 별도 작업입니다(Issue #75).
+     */
+    public void rename(String title) {
+        this.docTitle = title;
+    }
+
     public void markParsing() {
         this.status = DocumentStatus.PARSING;
     }

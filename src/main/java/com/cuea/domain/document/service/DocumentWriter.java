@@ -29,6 +29,21 @@ public class DocumentWriter {
     }
 
     /**
+     * 본인의 살아 있는 문서를 찾아 제목을 바꿉니다. 없는 문서·남의 문서·삭제된
+     * 문서는 구별하지 않고 {@code DOCUMENT_NOT_FOUND} 입니다.
+     *
+     * <p>{@code updatedAt} 은 커밋 직전 flush 때 {@code @PreUpdate} 가 채웁니다.
+     * 돌려준 객체가 그 엔티티라, 메서드가 끝난 뒤 읽으면 갱신된 값이 보입니다.
+     */
+    @Transactional
+    public Document rename(UUID publicId, String userId, String title) {
+        Document document = documentRepository.findByPublicIdAndUser_UserId(publicId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.DOCUMENT_NOT_FOUND));
+        document.rename(title);
+        return document;
+    }
+
+    /**
      * 본인의 살아 있는 문서를 찾아 소프트 삭제합니다. 없는 문서·남의 문서·이미
      * 삭제된 문서는 구별하지 않고 {@code DOCUMENT_NOT_FOUND} 입니다.
      */

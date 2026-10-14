@@ -4,6 +4,7 @@ import com.cuea.common.annotation.RateLimit;
 import com.cuea.common.result.Result;
 import com.cuea.common.security.CurrentUser;
 import com.cuea.domain.document.dto.request.DocumentCreateCommand;
+import com.cuea.domain.document.dto.request.DocumentUpdateRequest;
 import com.cuea.domain.document.dto.response.DocumentDetailResponse;
 import com.cuea.domain.document.dto.response.DocumentListResponse;
 import com.cuea.domain.document.dto.response.DocumentResponse;
@@ -12,6 +13,7 @@ import com.cuea.domain.document.entity.SourceType;
 import com.cuea.domain.document.service.DocumentDeleteService;
 import com.cuea.domain.document.service.DocumentQueryService;
 import com.cuea.domain.document.service.DocumentRegisterService;
+import com.cuea.domain.document.service.DocumentUpdateService;
 import com.cuea.infrastructure.file.UploadedFile;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -20,8 +22,10 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.ResponseStatus;
@@ -47,6 +51,7 @@ public class DocumentController {
 
     private final DocumentRegisterService documentRegisterService;
     private final DocumentQueryService documentQueryService;
+    private final DocumentUpdateService documentUpdateService;
     private final DocumentDeleteService documentDeleteService;
 
     @Operation(
@@ -105,6 +110,24 @@ public class DocumentController {
             @PathVariable String documentId) {
 
         return Result.ok(documentQueryService.detail(userId, documentId));
+    }
+
+    @Operation(
+            summary = "문서 제목 수정",
+            description = """
+                    제목만 바꿀 수 있습니다. 본문 수정은 지원하지 않습니다.
+
+                    title 은 앞뒤 공백을 자른 뒤 1~100자입니다.
+                    본인 문서만 수정할 수 있고, 남의 문서·없는 문서·지운 문서는 404 입니다.
+                    응답은 목록·상세의 문서 객체와 같은 형태입니다.""")
+    @PatchMapping("/{documentId}")
+    @RateLimit(key = "document-update", limit = 30, windowSeconds = 60)
+    public Result<DocumentResponse> updateTitle(
+            @CurrentUser String userId,
+            @PathVariable String documentId,
+            @RequestBody DocumentUpdateRequest request) {
+
+        return Result.ok(documentUpdateService.updateTitle(userId, documentId, request.title()));
     }
 
     @Operation(

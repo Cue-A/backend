@@ -248,7 +248,7 @@ class InterviewSessionWriterTest {
         when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         writer.createSession(mock(User.class), mock(Document.class), null,
-                startRequest(true), aiStartResponse(), 6);
+                startRequest(true), aiStartResponse(), 6, null);
 
         verify(sessionRepository).save(captor.capture());
         assertThat(captor.getValue().isHideQuestionText()).isTrue();
@@ -260,7 +260,7 @@ class InterviewSessionWriterTest {
         when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         writer.createSession(mock(User.class), mock(Document.class), null,
-                startRequest(false), aiStartResponse(), 6);
+                startRequest(false), aiStartResponse(), 6, null);
 
         verify(sessionRepository).save(captor.capture());
         assertThat(captor.getValue().isHideQuestionText()).isFalse();
@@ -272,15 +272,43 @@ class InterviewSessionWriterTest {
         when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         writer.createSession(mock(User.class), mock(Document.class), null,
-                startRequest(null), aiStartResponse(), 6);
+                startRequest(null), aiStartResponse(), 6, null);
 
         verify(sessionRepository).save(captor.capture());
         assertThat(captor.getValue().isHideQuestionText()).isFalse();
     }
 
+    @Test
+    void createSession_은_retryOfSession_이_주어지면_재면접_연관으로_저장한다() {
+        ArgumentCaptor<InterviewSession> captor = ArgumentCaptor.forClass(InterviewSession.class);
+        when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+        InterviewSession root = inProgressSession();
+
+        writer.createSession(mock(User.class), mock(Document.class), null,
+                startRequest(false), aiStartResponse(), 6, root);
+
+        verify(sessionRepository).save(captor.capture());
+        assertThat(captor.getValue().getRetryOfSession()).isSameAs(root);
+        assertThat(captor.getValue().isRetry()).isTrue();
+    }
+
+    @Test
+    void createSession_은_retryOfSession_이_null_이면_일반_세션으로_저장한다() {
+        ArgumentCaptor<InterviewSession> captor = ArgumentCaptor.forClass(InterviewSession.class);
+        when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        writer.createSession(mock(User.class), mock(Document.class), null,
+                startRequest(false), aiStartResponse(), 6, null);
+
+        verify(sessionRepository).save(captor.capture());
+        assertThat(captor.getValue().getRetryOfSession()).isNull();
+        assertThat(captor.getValue().isRetry()).isFalse();
+    }
+
     private InterviewStartRequest startRequest(Boolean hideQuestionText) {
         return new InterviewStartRequest(
-                "11111111-1111-1111-1111-111111111111", null, "백엔드", Persona.FRIENDLY, 6, hideQuestionText);
+                "11111111-1111-1111-1111-111111111111", null, "백엔드", Persona.FRIENDLY, 6,
+                hideQuestionText, null);
     }
 
     private AiSessionStartResponse aiStartResponse() {

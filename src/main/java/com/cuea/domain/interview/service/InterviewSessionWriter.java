@@ -37,12 +37,16 @@ public class InterviewSessionWriter {
     public InterviewSession createSession(User user, Document document, Company company,
                                            InterviewStartRequest request,
                                            AiSessionStartResponse aiResponse,
-                                           int fallbackQuestionCount) {
+                                           int fallbackQuestionCount,
+                                           InterviewSession retryOfSession) {
         InterviewSession session = InterviewSession.builder()
                 .sessionId(aiResponse.sessionId())
                 .user(user)
                 .company(company)
                 .document(document)
+                // 재면접이 실제로 적용된 경우에만 root 세션 연관을 저장합니다. 옵션 변경으로
+                // 일반 면접으로 전환됐으면 null 이라 일반 세션과 동일하게 저장됩니다.
+                .retryOfSession(retryOfSession)
                 .mode("PRACTICE")
                 .jobRole(request.jobRole())
                 .questionCount(aiResponse.questionTotal() != null

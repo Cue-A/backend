@@ -19,6 +19,11 @@ import jakarta.validation.constraints.Size;
  * @param questionCount    3 | 6 | 9. null 이면 서비스 기본값(6)을 씁니다.
  * @param hideQuestionText 질문 텍스트를 숨기고 음성만 들려주는 실전 모드면 true.
  *                         null 이면 기본값 텍스트+음성(false)으로 저장합니다.
+ * @param sourceSessionId  재면접(replay) 대상 세션의 식별자. null 이면 일반 면접입니다.
+ *                         값이 있으면 그 세션의 최초 root 세션을 기준으로 재면접을
+ *                         구성합니다. 식별자 타입은 기존 세션 ID 와 같은 문자열입니다.
+ *                         재면접 성립 여부(옵션 변경에 따른 일반 면접 전환 등)는
+ *                         {@code InterviewStartService} 가 판정합니다. docs/12-replay.md 참고.
  */
 public record InterviewStartRequest(
         @NotBlank
@@ -35,6 +40,13 @@ public record InterviewStartRequest(
 
         Integer questionCount,
 
-        Boolean hideQuestionText
+        Boolean hideQuestionText,
+
+        String sourceSessionId
 ) {
+
+    /** 재면접 요청인지. sourceSessionId 가 비어 있지 않으면 재면접입니다. */
+    public boolean isReplayRequested() {
+        return sourceSessionId != null && !sourceSessionId.isBlank();
+    }
 }

@@ -25,5 +25,19 @@ public interface InterviewSessionRepository extends Repository<InterviewSession,
     @Query("select s from InterviewSession s where s.sessionId = :sessionId")
     Optional<InterviewSession> findBySessionIdForInternal(@Param("sessionId") String sessionId);
 
+    /**
+     * 재면접 옵션 비교에 필요한 연관({@code document}·{@code company})을 함께 읽어오는 조회입니다.
+     *
+     * <p>{@code open-in-view=false} 이고 {@link com.cuea.domain.interview.service.InterviewStartService}
+     * 는 트랜잭션 밖에서 root 세션의 옵션을 비교하므로, LAZY 연관을 지연 로딩하면
+     * {@code LazyInitializationException} 이 납니다. 비교에 쓰는 연관을 fetch join 으로 미리
+     * 초기화해 둡니다. 소유권은 호출 전에 이미 확인했으므로 여기서는 보지 않습니다.
+     */
+    @Query("select s from InterviewSession s "
+            + "left join fetch s.document "
+            + "left join fetch s.company "
+            + "where s.sessionId = :sessionId")
+    Optional<InterviewSession> findRootForReplay(@Param("sessionId") String sessionId);
+
     InterviewSession save(InterviewSession session);
 }

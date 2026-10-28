@@ -19,6 +19,7 @@ import com.cuea.domain.interview.entity.SessionStatus;
 import com.cuea.domain.user.entity.User;
 import com.cuea.domain.user.repository.UserRepository;
 import com.cuea.infrastructure.ai.AiClient;
+import com.cuea.infrastructure.ai.dto.AiReplayLogItem;
 import com.cuea.infrastructure.ai.dto.AiSessionStartRequest;
 import com.cuea.infrastructure.ai.dto.AiSessionStartResponse;
 import com.cuea.infrastructure.file.PresignedUrlIssuer;
@@ -62,6 +63,9 @@ class InterviewStartServiceTest {
     private InterviewSessionWriter sessionWriter;
     private InterviewFirstQuestionPoller firstQuestionPoller;
     private PresignedUrlIssuer presignedUrlIssuer;
+    private InterviewSessionQueryService sessionQueryService;
+    private ReplayLogAssembler replayLogAssembler;
+    private ReplayOptionPolicy replayOptionPolicy;
     private InterviewStartService service;
 
     private Document document;
@@ -80,6 +84,12 @@ class InterviewStartServiceTest {
         when(presignedUrlIssuer.issueResumeDownload(anyString()))
                 .thenReturn("https://s3.example.com/resume.pdf?presigned=1");
 
+        sessionQueryService = mock(InterviewSessionQueryService.class);
+        replayLogAssembler = mock(ReplayLogAssembler.class);
+        // 기본은 옵션이 같아 재면접을 유지한다고 본다. 전환 케이스는 각 테스트에서 재stub.
+        replayOptionPolicy = mock(ReplayOptionPolicy.class);
+        when(replayOptionPolicy.keepsReplay(any(), any())).thenReturn(true);
+
         user = User.create("kim@example.com", "김취준");
         document = document(DocumentStatus.READY);
 
@@ -91,7 +101,8 @@ class InterviewStartServiceTest {
                 userRepository, documentRepository, companyRepository,
                 new CompanyProfileFormatter(), presignedUrlIssuer,
                 aiClient, sessionWriter, firstQuestionPoller,
-                new InterviewSessionTerminator(aiClient, sessionWriter));
+                new InterviewSessionTerminator(aiClient, sessionWriter),
+                sessionQueryService, replayLogAssembler, replayOptionPolicy);
     }
 
     private Document document(DocumentStatus status) {
@@ -123,7 +134,7 @@ class InterviewStartServiceTest {
 
     private InterviewStartRequest request(Long companyId) {
         return new InterviewStartRequest(
-                DOCUMENT_PUBLIC_ID.toString(), companyId, "백엔드 개발", Persona.PRESSURE, 6, null);
+                DOCUMENT_PUBLIC_ID.toString(), companyId, "백엔드 개발", Persona.PRESSURE, 6, null, null);
     }
 
     private InterviewSession fakeSession(String sessionId) {
@@ -157,7 +168,7 @@ class InterviewStartServiceTest {
     void 세션을_생성하면_REST_는_첫질문을_기다리지_않고_즉시_반환하고_폴링은_백그라운드로_위임한다() {
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_9f2a1c", "task_001", 9);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(eq(user), eq(document), eq(null), any(), eq(aiResponse), eq(6)))
+        when(sessionWriter.createSession(eq(user), eq(document), eq(null), any(), eq(aiResponse), eq(6), eq(null)))
                 .thenReturn(fakeSession("sess_9f2a1c"));
 
         InterviewStartResponse response = service.start(USER_ID, request(null));
@@ -165,7 +176,7 @@ class InterviewStartServiceTest {
         assertThat(response.sessionId()).isEqualTo("sess_9f2a1c");
         assertThat(response.questionTotal()).isEqualTo(9);
         // REST 동기 구간에서는 세션 생성까지만 하고, 폴링/첫질문은 백그라운드에 위임한다.
-        verify(sessionWriter).createSession(eq(user), eq(document), eq(null), any(), eq(aiResponse), eq(6));
+        verify(sessionWriter).createSession(eq(user), eq(document), eq(null), any(), eq(aiResponse), eq(6), eq(null));
         verify(firstQuestionPoller).pollAndDeliver("sess_9f2a1c", "task_001", 9);
         // 이 서비스는 첫 질문을 직접 저장하지 않는다.
         verify(sessionWriter, never()).saveFirstQuestion(anyString(), any());
@@ -176,7 +187,7 @@ class InterviewStartServiceTest {
         when(companyRepository.findByCompanyIdAndVerifiedTrue(10L)).thenReturn(Optional.of(verifiedCompany()));
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_2", "task_2", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6)))
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
                 .thenReturn(fakeSession("sess_2"));
 
         service.start(USER_ID, request(10L));
@@ -197,7 +208,7 @@ class InterviewStartServiceTest {
         when(companyRepository.findByCompanyIdAndVerifiedTrue(10L)).thenReturn(Optional.of(verifiedCompany()));
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_2", "task_2", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6)))
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
                 .thenReturn(fakeSession("sess_2"));
 
         service.start(USER_ID, request(10L));
@@ -214,7 +225,7 @@ class InterviewStartServiceTest {
     void 회사_미선택이면_company_id_는_null_이라_JSON_에서_빠진다() throws Exception {
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_3", "task_3", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), eq(null), any(), any(), eq(6)))
+        when(sessionWriter.createSession(any(), any(), eq(null), any(), any(), eq(6), any()))
                 .thenReturn(fakeSession("sess_3"));
 
         service.start(USER_ID, request(null));
@@ -269,14 +280,14 @@ class InterviewStartServiceTest {
     void 음성만_모드_요청은_hideQuestionText_true_로_세션_생성에_전달되고_AI_요청에는_포함되지_않는다() throws Exception {
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_v", "task_v", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6)))
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
                 .thenReturn(fakeSession("sess_v"));
 
         service.start(USER_ID, new InterviewStartRequest(
-                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, 6, true));
+                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, 6, true, null));
 
         ArgumentCaptor<InterviewStartRequest> reqCaptor = ArgumentCaptor.forClass(InterviewStartRequest.class);
-        verify(sessionWriter).createSession(any(), any(), any(), reqCaptor.capture(), any(), eq(6));
+        verify(sessionWriter).createSession(any(), any(), any(), reqCaptor.capture(), any(), eq(6), any());
         assertThat(reqCaptor.getValue().hideQuestionText()).isTrue();
 
         // 음성만 모드는 UI 표시 방식만 바꾼다. AI 세션 시작 요청에는 진행 방식 필드가 없다.
@@ -290,11 +301,11 @@ class InterviewStartServiceTest {
     void questionCount_가_null_이면_기본값_6_으로_AI_에_보낸다() {
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_q", "task_q", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6)))
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
                 .thenReturn(fakeSession("sess_q"));
 
         service.start(USER_ID, new InterviewStartRequest(
-                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, null, null));
+                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, null, null, null));
 
         ArgumentCaptor<AiSessionStartRequest> captor = ArgumentCaptor.forClass(AiSessionStartRequest.class);
         verify(aiClient).startSession(captor.capture());
@@ -304,13 +315,13 @@ class InterviewStartServiceTest {
     @Test
     void questionCount_가_3_6_9_외의_값이면_AI_호출_전에_거부한다() {
         assertThatThrownBy(() -> service.start(USER_ID, new InterviewStartRequest(
-                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, 4, null)))
+                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, 4, null, null)))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.INVALID_QUESTION_COUNT);
 
         // 0 도 마찬가지로 거부(mock 이 session_end 를 첫 결과로 주는 값).
         assertThatThrownBy(() -> service.start(USER_ID, new InterviewStartRequest(
-                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, 0, null)))
+                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, 0, null, null)))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.INVALID_QUESTION_COUNT);
 
@@ -326,7 +337,7 @@ class InterviewStartServiceTest {
                 .thenReturn(Optional.of(markdown));
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_md", "task_md", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6)))
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
                 .thenReturn(fakeSession("sess_md"));
 
         service.start(USER_ID, request(null));
@@ -354,7 +365,7 @@ class InterviewStartServiceTest {
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_x", "task_x", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
         BusinessException writeError = new BusinessException(ErrorCode.INTERNAL_ERROR, "DB 저장 실패");
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6))).thenThrow(writeError);
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any())).thenThrow(writeError);
 
         assertThatThrownBy(() -> service.start(USER_ID, request(null)))
                 .isInstanceOf(BusinessException.class)
@@ -372,7 +383,7 @@ class InterviewStartServiceTest {
         // IN_PROGRESS 로 저장됐으므로 정리하지 않으면 영구 잔류한다.
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_p", "task_p", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6)))
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
                 .thenReturn(fakeSession("sess_p"));
         doThrow(new org.springframework.core.task.TaskRejectedException("executor shutting down"))
                 .when(firstQuestionPoller).pollAndDeliver("sess_p", "task_p", 6);
@@ -382,5 +393,179 @@ class InterviewStartServiceTest {
 
         verify(aiClient).abortSession("sess_p");
         verify(sessionWriter).markAborted("sess_p");
+    }
+
+    // ───────────────────────── 재면접(replay) ─────────────────────────
+
+    private static final String SOURCE_SESSION_ID = "sess_root_1";
+
+    private InterviewStartRequest replayRequest(String sourceSessionId) {
+        return new InterviewStartRequest(
+                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.PRESSURE, 6, null,
+                sourceSessionId);
+    }
+
+    /** 완료 상태의 root 세션. 기본 옵션은 request(null) 과 동일해 재면접이 유지됩니다. */
+    private InterviewSession completedRoot(String sessionId) {
+        return InterviewSession.builder()
+                .sessionId(sessionId)
+                .user(user)
+                .document(document)
+                .mode("PRACTICE")
+                .jobRole("백엔드 개발")
+                .questionCount(6)
+                .persona(Persona.PRESSURE)
+                .hideQuestionText(false)
+                .status(SessionStatus.COMPLETED)
+                .build();
+    }
+
+    private List<AiReplayLogItem> sampleReplayLog() {
+        return List.of(
+                AiReplayLogItem.question("지원 동기를 말씀해 주세요.", "지원동기", "L1", false),
+                AiReplayLogItem.followup("L2"));
+    }
+
+    @Test
+    void 일반_면접은_AI_요청에_retry_of_session_id_와_replay_log_가_모두_null_이다() {
+        // 회귀: sourceSessionId 가 없으면 재면접 조회·조립을 전혀 하지 않는다.
+        AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_n", "task_n", 6);
+        when(aiClient.startSession(any())).thenReturn(aiResponse);
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
+                .thenReturn(fakeSession("sess_n"));
+
+        service.start(USER_ID, request(null));
+
+        ArgumentCaptor<AiSessionStartRequest> captor = ArgumentCaptor.forClass(AiSessionStartRequest.class);
+        verify(aiClient).startSession(captor.capture());
+        assertThat(captor.getValue().retryOfSessionId()).isNull();
+        assertThat(captor.getValue().replayLog()).isNull();
+        // 재면접 경로를 타지 않았으므로 조회/조립이 호출되지 않는다.
+        verify(sessionQueryService, never()).getOwnedSession(anyString(), anyString());
+        verify(replayLogAssembler, never()).assemble(anyString());
+        // 일반 세션이라 retryOfSession 은 null 로 저장된다.
+        verify(sessionWriter).createSession(any(), any(), any(), any(), any(), eq(6), eq(null));
+    }
+
+    @Test
+    void 정상_재면접은_root_세션_ID_와_replay_log_를_AI_에_보내고_연관을_저장한다() {
+        InterviewSession root = completedRoot(SOURCE_SESSION_ID);
+        when(sessionQueryService.getOwnedSession(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
+        when(sessionQueryService.getRootForReplay(SOURCE_SESSION_ID)).thenReturn(root);
+        when(replayLogAssembler.assemble(SOURCE_SESSION_ID)).thenReturn(sampleReplayLog());
+        AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_r2", "task_r2", 6);
+        when(aiClient.startSession(any())).thenReturn(aiResponse);
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
+                .thenReturn(fakeSession("sess_r2"));
+
+        service.start(USER_ID, replayRequest(SOURCE_SESSION_ID));
+
+        ArgumentCaptor<AiSessionStartRequest> captor = ArgumentCaptor.forClass(AiSessionStartRequest.class);
+        verify(aiClient).startSession(captor.capture());
+        assertThat(captor.getValue().retryOfSessionId()).isEqualTo(SOURCE_SESSION_ID);
+        assertThat(captor.getValue().replayLog()).containsExactlyElementsOf(sampleReplayLog());
+        // 재면접이 실제 적용됐으므로 root 세션을 연관으로 저장한다.
+        verify(sessionWriter).createSession(any(), any(), any(), any(), any(), eq(6), eq(root));
+        // root 는 fetch-join 조회(getRootForReplay)로 읽어야 트랜잭션 밖 옵션 비교에서
+        // LazyInitializationException 이 나지 않는다. 이 경로를 고정한다.
+        verify(sessionQueryService).getRootForReplay(SOURCE_SESSION_ID);
+    }
+
+    @Test
+    void 재면접의_재면접이면_직전이_아니라_최초_root_세션을_retryOfSessionId_로_보낸다() {
+        // source 는 2회차(retryOfSession=root), root 는 1회차.
+        InterviewSession root = completedRoot("sess_root_origin");
+        InterviewSession second = InterviewSession.builder()
+                .sessionId("sess_second")
+                .user(user)
+                .document(document)
+                .retryOfSession(root)
+                .mode("PRACTICE")
+                .jobRole("백엔드 개발")
+                .questionCount(6)
+                .persona(Persona.PRESSURE)
+                .hideQuestionText(false)
+                .status(SessionStatus.COMPLETED)
+                .build();
+        when(sessionQueryService.getOwnedSession("sess_second", USER_ID)).thenReturn(second);
+        when(sessionQueryService.getRootForReplay("sess_root_origin")).thenReturn(root);
+        when(replayLogAssembler.assemble("sess_root_origin")).thenReturn(sampleReplayLog());
+        AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_third", "task_3", 6);
+        when(aiClient.startSession(any())).thenReturn(aiResponse);
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
+                .thenReturn(fakeSession("sess_third"));
+
+        service.start(USER_ID, replayRequest("sess_second"));
+
+        ArgumentCaptor<AiSessionStartRequest> captor = ArgumentCaptor.forClass(AiSessionStartRequest.class);
+        verify(aiClient).startSession(captor.capture());
+        // 직전 회차(sess_second)가 아니라 최초 root(sess_root_origin)여야 한다.
+        assertThat(captor.getValue().retryOfSessionId()).isEqualTo("sess_root_origin");
+        verify(replayLogAssembler).assemble("sess_root_origin");
+        verify(sessionWriter).createSession(any(), any(), any(), any(), any(), eq(6), eq(root));
+    }
+
+    @Test
+    void 옵션이_바뀌면_일반_면접으로_전환해_retry_of_session_id_와_replay_log_를_둘_다_생략한다() {
+        InterviewSession root = completedRoot(SOURCE_SESSION_ID);
+        when(sessionQueryService.getOwnedSession(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
+        when(sessionQueryService.getRootForReplay(SOURCE_SESSION_ID)).thenReturn(root);
+        // 옵션 변경 감지: keepsReplay=false 로 강제.
+        when(replayOptionPolicy.keepsReplay(any(), any())).thenReturn(false);
+        AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_dg", "task_dg", 6);
+        when(aiClient.startSession(any())).thenReturn(aiResponse);
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
+                .thenReturn(fakeSession("sess_dg"));
+
+        service.start(USER_ID, replayRequest(SOURCE_SESSION_ID));
+
+        ArgumentCaptor<AiSessionStartRequest> captor = ArgumentCaptor.forClass(AiSessionStartRequest.class);
+        verify(aiClient).startSession(captor.capture());
+        assertThat(captor.getValue().retryOfSessionId()).isNull();
+        assertThat(captor.getValue().replayLog()).isNull();
+        // 일반 면접으로 전환됐으므로 조립을 호출하지 않고 연관도 저장하지 않는다.
+        verify(replayLogAssembler, never()).assemble(anyString());
+        verify(sessionWriter).createSession(any(), any(), any(), any(), any(), eq(6), eq(null));
+    }
+
+    @Test
+    void 존재하지_않거나_타인_세션이면_SESSION_NOT_FOUND_로_거부하고_AI_를_호출하지_않는다() {
+        when(sessionQueryService.getOwnedSession(SOURCE_SESSION_ID, USER_ID))
+                .thenThrow(new BusinessException(ErrorCode.SESSION_NOT_FOUND));
+
+        assertThatThrownBy(() -> service.start(USER_ID, replayRequest(SOURCE_SESSION_ID)))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.SESSION_NOT_FOUND);
+
+        verify(aiClient, never()).startSession(any());
+        verify(firstQuestionPoller, never()).pollAndDeliver(anyString(), anyString(), any());
+    }
+
+    @Test
+    void 완료되지_않은_세션으로는_재면접할_수_없다() {
+        InterviewSession inProgress = fakeSession(SOURCE_SESSION_ID); // IN_PROGRESS
+        when(sessionQueryService.getOwnedSession(SOURCE_SESSION_ID, USER_ID)).thenReturn(inProgress);
+
+        assertThatThrownBy(() -> service.start(USER_ID, replayRequest(SOURCE_SESSION_ID)))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.SESSION_NOT_COMPLETED);
+
+        verify(aiClient, never()).startSession(any());
+    }
+
+    @Test
+    void root_질문_로그가_비어_있으면_일반_면접으로_전환하지_않고_오류를_낸다() {
+        InterviewSession root = completedRoot(SOURCE_SESSION_ID);
+        when(sessionQueryService.getOwnedSession(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
+        when(sessionQueryService.getRootForReplay(SOURCE_SESSION_ID)).thenReturn(root);
+        // 조립기가 유효한 QUESTION 없음으로 INVALID_REQUEST 를 던진다.
+        when(replayLogAssembler.assemble(SOURCE_SESSION_ID))
+                .thenThrow(new BusinessException(ErrorCode.INVALID_REQUEST, "재면접할 질문 로그가 없습니다"));
+
+        assertThatThrownBy(() -> service.start(USER_ID, replayRequest(SOURCE_SESSION_ID)))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.INVALID_REQUEST);
+
+        verify(aiClient, never()).startSession(any());
     }
 }

@@ -83,5 +83,5 @@ AI 결과를 `report.report_data` 에 원본 그대로 저장하므로 기다릴
 | 항목 | 상태 | 참고 |
 |---|---|---|
 | 첫 질문 push 유실 | 미해결. 백그라운드 폴링이 WebSocket 핸드셰이크보다 먼저 끝나면 첫 질문 push 가 수신자 없이 드롭될 수 있음. pending 버퍼/catch-up 엔드포인트 미구현 | Issue #3/#35, `11-interview.md` |
-| 재연습(replay) | MVP 이후 별도 작업. 미구현 | Issue #26, `12-replay.md` |
+| 재연습(replay) 옵션 변경 전환 정책 | **부분 미해결.** 재연습 자체는 구현됨(Issue #26, PR #78). AI 가 확정한 전환 조건은 `question_count`·`persona` 뿐이고, `documentId`·`companyId`·`jobRole` 변경 시 일반 면접으로 전환하는 규칙은 **Backend 가 제안한 정책으로 팀 합의 대기 중**. 합의 전까지 제안 정책대로 동작하며, 확정되면 이 줄을 "해결된 것" 으로 옮김 | Issue #26, `12-replay.md` |
 | 리포트 실패 축 재시도 횟수 상한 | 미정. 계약 14장에 상한이 없음. 시선 재시도는 GPU 를 오래 써서 무한 재시도는 AI 서버 비용 위험. **AI 파트와 논의 필요.** 정해지기 전까지 분당 10회 호출 제한만 둠 | `13-report.md` |

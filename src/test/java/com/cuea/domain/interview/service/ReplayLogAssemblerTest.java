@@ -101,7 +101,7 @@ class ReplayLogAssemblerTest {
     }
 
     @Test
-    void 유효한_QUESTION_이_없으면_INVALID_REQUEST_를_던진다() {
+    void 유효한_QUESTION_이_없으면_INTERNAL_ERROR_를_던진다() {
         OffsetDateTime t = OffsetDateTime.parse("2026-01-01T00:00:00Z");
         // REASK 만 있는 경우.
         when(questionRepository.findAllBySessionIdOrderByCreatedAtAsc(ROOT)).thenReturn(List.of(
@@ -109,31 +109,31 @@ class ReplayLogAssemblerTest {
 
         assertThatThrownBy(() -> assembler.assemble(ROOT))
                 .isInstanceOf(BusinessException.class)
-                .extracting("errorCode").isEqualTo(ErrorCode.INVALID_REQUEST);
+                .extracting("errorCode").isEqualTo(ErrorCode.INTERNAL_ERROR);
     }
 
     @Test
-    void 질문_로그가_비어_있으면_INVALID_REQUEST_를_던진다() {
+    void 질문_로그가_비어_있으면_INTERNAL_ERROR_를_던진다() {
         when(questionRepository.findAllBySessionIdOrderByCreatedAtAsc(ROOT)).thenReturn(List.of());
 
         assertThatThrownBy(() -> assembler.assemble(ROOT))
                 .isInstanceOf(BusinessException.class)
-                .extracting("errorCode").isEqualTo(ErrorCode.INVALID_REQUEST);
+                .extracting("errorCode").isEqualTo(ErrorCode.INTERNAL_ERROR);
     }
 
     @Test
-    void 주질문의_category_가_비어_있으면_INVALID_REQUEST_로_거부한다() {
+    void 주질문의_category_가_비어_있으면_INTERNAL_ERROR_로_거부한다() {
         OffsetDateTime t = OffsetDateTime.parse("2026-01-01T00:00:00Z");
         when(questionRepository.findAllBySessionIdOrderByCreatedAtAsc(ROOT)).thenReturn(List.of(
                 q("q_1", QuestionType.QUESTION, "지원 동기?", null, "L1", false, t)));
 
         assertThatThrownBy(() -> assembler.assemble(ROOT))
                 .isInstanceOf(BusinessException.class)
-                .extracting("errorCode").isEqualTo(ErrorCode.INVALID_REQUEST);
+                .extracting("errorCode").isEqualTo(ErrorCode.INTERNAL_ERROR);
     }
 
     @Test
-    void 꼬리질문의_difficulty_가_비어_있으면_INVALID_REQUEST_로_거부한다() {
+    void 꼬리질문의_difficulty_가_비어_있으면_INTERNAL_ERROR_로_거부한다() {
         OffsetDateTime t = OffsetDateTime.parse("2026-01-01T00:00:00Z");
         when(questionRepository.findAllBySessionIdOrderByCreatedAtAsc(ROOT)).thenReturn(List.of(
                 q("q_1", QuestionType.QUESTION, "지원 동기?", "지원동기", "L1", false, t),
@@ -141,6 +141,6 @@ class ReplayLogAssemblerTest {
 
         assertThatThrownBy(() -> assembler.assemble(ROOT))
                 .isInstanceOf(BusinessException.class)
-                .extracting("errorCode").isEqualTo(ErrorCode.INVALID_REQUEST);
+                .extracting("errorCode").isEqualTo(ErrorCode.INTERNAL_ERROR);
     }
 }

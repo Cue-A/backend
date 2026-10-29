@@ -84,8 +84,9 @@ public class InterviewStartService {
         Company company = findVerifiedCompany(request.companyId());
 
         // 재면접 요청이면 대상 세션을 검증하고 root 기준으로 replay 구성을 결정합니다.
-        // 일반 면접이면 replay == 적용 안 함(null) 입니다.
-        ReplayPlan replayPlan = resolveReplayPlan(userId, request);
+        // 옵션 비교에 쓸 값은 이미 조회·정규화한 document·company·questionCount 를 넘깁니다
+        // (요청 원문 문자열을 다시 비교하지 않습니다). 일반 면접이면 replay == 적용 안 함(null).
+        ReplayPlan replayPlan = resolveReplayPlan(userId, request, questionCount, document, company);
 
         String resumeFileUrl = presignedUrlIssuer.issueResumeDownload(document.getObjectKey());
         String companyProfileOverride = company == null ? null : companyProfileFormatter.format(company);
@@ -136,7 +137,8 @@ public class InterviewStartService {
             throw e;
         }
 
-        return new InterviewStartResponse(aiResponse.sessionId(), aiResponse.questionTotal());
+        return new InterviewStartResponse(
+                aiResponse.sessionId(), aiResponse.questionTotal(), replayPlan.isApplied());
     }
 
     /**
@@ -161,15 +163,21 @@ public class InterviewStartService {
      * <ol>
      *   <li>대상 세션이 존재하고 요청 사용자 소유인지({@code SESSION_NOT_FOUND})</li>
      *   <li>대상 세션이 완료 상태인지({@code SESSION_NOT_COMPLETED})</li>
-     *   <li>최초 root 세션이 존재하는지({@code SESSION_NOT_FOUND})</li>
+     *   <li>최초 root 세션이 <b>같은 사용자 소유로</b> 존재하는지({@code SESSION_NOT_FOUND})</li>
      *   <li>옵션(문항 수·페르소나·문서·기업·직무)이 root 와 같은지 — 다르면 일반 면접으로
      *       전환해 {@code retry_of_session_id}·{@code replay_log} 를 둘 다 생략</li>
      *   <li>root 질문 로그로 유효한 {@code replay_log} 를 조립할 수 있는지(비었거나 REASK
-     *       만 있거나 필수 필드 누락이면 {@code INVALID_REQUEST}) — 일반 면접으로 조용히
+     *       만 있거나 필수 필드 누락이면 {@code INTERNAL_ERROR}) — 일반 면접으로 조용히
      *       전환하지 않고 오류를 냅니다</li>
      * </ol>
+     *
+     * @param normalizedQuestionCount {@link #resolveQuestionCount} 로 정규화한 문항 수
+     * @param document 요청이 조회해 둔 새 면접 문서(옵션 비교에 재사용)
+     * @param company  요청이 조회해 둔 새 면접 기업. 연습 모드면 null
      */
-    private ReplayPlan resolveReplayPlan(String userId, InterviewStartRequest request) {
+    private ReplayPlan resolveReplayPlan(String userId, InterviewStartRequest request,
+                                         int normalizedQuestionCount,
+                                         Document document, Company company) {
         if (!request.isReplayRequested()) {
             return ReplayPlan.none();
         }
@@ -185,15 +193,16 @@ public class InterviewStartService {
         }
 
         // 3) root 세션 결정. 직전 회차가 아니라 항상 최초 세션입니다(docs/12-replay.md).
+        //    root 도 같은 userId 소유인지 조회 조건으로 확인해 교차 사용자 참조를 막습니다.
         //    옵션 비교에 쓰는 LAZY 연관(document·company)을 fetch join 으로 함께 읽어,
         //    트랜잭션 밖(open-in-view=false)에서 비교해도 LazyInitializationException 이
         //    나지 않게 합니다. source 자신이 root 여도 연관 초기화를 위해 다시 읽습니다.
         String rootSessionId = source.rootSessionId();
-        InterviewSession rootSession = sessionQueryService.getRootForReplay(rootSessionId);
+        InterviewSession rootSession = sessionQueryService.getRootForReplay(rootSessionId, userId);
 
-        // 4) 옵션 변경 판정. 하나라도 비교 대상 옵션이 다르면 일반 면접으로 전환해
-        //    retry_of_session_id·replay_log 를 둘 다 생략합니다.
-        if (!replayOptionPolicy.keepsReplay(request, rootSession)) {
+        // 4) 옵션 변경 판정. 요청이 이미 조회·정규화한 값으로 비교합니다(요청 원문 문자열 아님).
+        //    하나라도 비교 대상 옵션이 다르면 일반 면접으로 전환해 두 필드를 모두 생략합니다.
+        if (!replayOptionPolicy.keepsReplay(request, normalizedQuestionCount, document, company, rootSession)) {
             log.info("옵션 변경으로 재면접을 일반 면접으로 전환합니다 sourceSessionId={} rootSessionId={}",
                     request.sourceSessionId(), rootSessionId);
             return ReplayPlan.none();
@@ -289,6 +298,14 @@ public class InterviewStartService {
         /** AI 요청의 retry_of_session_id. replay 미적용이면 null 입니다. */
         private String retryOfSessionId() {
             return rootSession == null ? null : rootSession.getSessionId();
+        }
+
+        /**
+         * 재면접이 실제로 적용됐는지. 일반 면접이거나 옵션 변경으로 전환된 경우 false 입니다.
+         * 응답의 {@code replayApplied} 로 내려갑니다.
+         */
+        private boolean isApplied() {
+            return rootSession != null;
         }
     }
 }

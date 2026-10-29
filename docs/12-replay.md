@@ -129,6 +129,36 @@ String rootId = sourceSession.getRetryOfSessionId() != null
 
 ---
 
+## 옵션 변경 시 일반 면접 전환 (Issue #26 구현)
+
+재면접 요청(`sourceSessionId` 포함)이라도 **옵션이 최초(root) 세션과 다르면 일반 면접으로
+전환**합니다. 전환되면 AI 요청에서 `retry_of_session_id` 와 `replay_log` 를 **둘 다
+생략**하고(하나만 보내지 않습니다), DB 에 재면접 연관(`retry_of_session_id`)도 저장하지
+않습니다. 응답의 `replayApplied` 는 `false` 로 내려갑니다.
+
+| 옵션 | 변경 시 | 근거 |
+|---|---|---|
+| `questionCount` | 일반 면접 | **AI 계약 확정** |
+| `persona` | 일반 면접 | **AI 계약 확정** |
+| `documentId` | 일반 면접 | Backend 제안 정책 — **팀 합의 대기** |
+| `companyId` | 일반 면접 | Backend 제안 정책 — **팀 합의 대기** |
+| `jobRole` | 일반 면접 | Backend 제안 정책 — **팀 합의 대기** |
+| `hideQuestionText` | **재면접 유지** | 표시 방식만 바꿈. 질문 구성에 무관 |
+
+- **AI 가 확정한 전환 조건은 `question_count`·`persona` 뿐입니다.** 나머지
+  `documentId`·`companyId`·`jobRole` 은 "자료·회사·직무가 바뀌면 같은 질문 세트를 재사용하는
+  의미가 없다"는 판단으로 Backend 가 **제안**한 정책이며, 아직 팀 합의가 끝나지 않았습니다.
+  미확정 상태는 [`90-open-questions.md`](./90-open-questions.md) 에 남겨둡니다.
+- 비교는 **요청 원문 문자열이 아니라 Backend 가 이미 조회·정규화한 값**으로 합니다.
+  문서는 조회된 `Document` 의 `public_id`(UUID)로 비교해, 대소문자만 다른 UUID 가 다른
+  문서로 오판돼 조용히 일반 면접이 되는 것을 막습니다. `questionCount` 는 일반 면접과 같은
+  규칙(null → 6)으로 정규화한 뒤 비교합니다.
+- root 질문 로그가 비었거나 필수 필드가 누락된 경우는 **일반 면접으로 조용히 전환하지 않고**
+  `INTERNAL_ERROR`(500)로 처리합니다(저장 데이터 무결성 문제). 상세 원인은 서버 로그로만
+  남기고 사용자에게는 일반 메시지를 돌려줍니다.
+
+---
+
 ## 조립 로직
 
 ```java

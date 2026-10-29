@@ -42,7 +42,10 @@ public class InterviewController {
     @Operation(summary = "면접 세션 시작",
             description = "Document/Company 조회 → AI 세션 생성(session_id·task_id) 까지 동기로 처리하고 "
                     + "즉시 202 로 응답합니다. 첫 질문은 백그라운드 폴링 후 WebSocket 으로 전달됩니다. "
-                    + "문서는 status=READY 여야 하고(파일·마크다운 모두 가능), 기업을 선택했다면 verified=true 여야 합니다.")
+                    + "문서는 status=READY 여야 하고(파일·마크다운 모두 가능), 기업을 선택했다면 verified=true 여야 합니다. "
+                    + "sourceSessionId 를 주면 그 세션의 최초 세션을 기준으로 재면접(replay)을 시작합니다. "
+                    + "문항 수·페르소나·문서·기업·직무가 원본과 다르면 일반 면접으로 전환되며, 이때 응답의 "
+                    + "replayApplied 는 false 입니다. 정상 재면접이면 replayApplied=true 입니다.")
     @PostMapping
     @ResponseStatus(HttpStatus.ACCEPTED)
     @RateLimit(key = "session-start", limit = 10, windowSeconds = 60)

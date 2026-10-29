@@ -59,7 +59,7 @@ AI 결과를 `report.report_data` 에 원본 그대로 저장하므로 기다릴
 | 되묻기 한도 | 토픽당 1회 / 세션당 3회 | `11-interview.md` |
 | Presigned 만료 | 이력서 15분 · 질문 음성 15분 | `20-storage.md` |
 | `STT_FAILED` 재시도 | 1회 후 재녹음 안내 | `10-ai-client.md` |
-| 회사 목록 캐시 | Redis 1시간 | `10-ai-client.md` |
+| 회사 목록 | AI 에 회사 목록 없음(`GET /ai/companies` 없음). Backend `company` 테이블이 원본이라 캐시하지 않음 | `10-ai-client.md` · `11-interview.md` |
 | 세션 상태 소유권 | AI가 보유. 표시 상태는 Spring DB 기준 | `10-ai-client.md` |
 | 리포트 부분 실패 | 내용 실패=전체 실패 / 음성·시선=해당 축만 | `13-report.md` |
 | AI 서버 위치 (구 4·5·6번) | Whisper·시선 분석에 GPU 가 필요해 **실제 모드 AI 는 학과 GPU 서버**에서 상시 운영. Cloudflare `https` 고정 주소로 받아 `APP_AI_BASE_URL` 에 넣음. compose 에 AI 를 넣지 않고 포트도 신경 쓰지 않음 | `00-architecture.md`, `10-ai-client.md` |

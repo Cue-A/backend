@@ -316,7 +316,7 @@ cue-a/
     │   │   │   ├── ai/                     ★ AI 클라이언트 (폴링·타임아웃·에러분류)
     │   │   │   ├── websocket/              프론트 push
     │   │   │   ├── file/                   S3 Presigned URL
-    │   │   │   ├── redis/                  세션 캐시, 회사 목록 캐시
+    │   │   │   ├── redis/                  리프레시 토큰, 리포트 진행 단계, 요청 횟수 제한
     │   │   │   └── mapper/                 MapStruct
     │   │   │
     │   │   └── domain/                 비즈니스 도메인
@@ -326,7 +326,7 @@ cue-a/
     │   │       ├── interview/              면접 세션, 질문·답변 로그, 재연습
     │   │       ├── report/                 리포트
     │   │       ├── growth/                 회차 비교
-    │   │       └── company/                회사 목록 (AI 프록시)
+    │   │       └── company/                회사·인재상 (Backend 가 원본, AI 에 텍스트로 전달)
     │   │
     │   └── resources/
     │       ├── application.yml

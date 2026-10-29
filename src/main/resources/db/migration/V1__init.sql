@@ -1,4 +1,5 @@
 -- 최초 스키마. Flyway 도입(#79) 시점 dev 의 JPA 엔티티로 Hibernate 가 만든 DDL 입니다.
+-- FK 이름만 Hibernate 해시 대신 fk_{테이블}_{컬럼} 으로 바꿨습니다.
 --
 -- 이미 적용된 마이그레이션 파일은 고치지 마세요. 체크섬이 달라져 앱이 시작하지 않습니다.
 -- 스키마를 바꿀 때는 다음 번호로 새 파일을 추가합니다. docs/02-database.md 참고.
@@ -306,135 +307,135 @@ create index idx_user_company_interest_company
    on user_company_interest (company_id);
 
 alter table if exists answer
-   add constraint FKn7hpjw09peau20tqaigjgaq0q
+   add constraint fk_answer_question_id_session_id
    foreign key (question_id, session_id)
    references question
    on delete cascade;
 
 alter table if exists bookmarked_question
-   add constraint FKoft0952agyfimwhsron3q5frd
+   add constraint fk_bookmarked_question_question_id_session_id
    foreign key (question_id, session_id)
    references question
    on delete cascade;
 
 alter table if exists bookmarked_question
-   add constraint FKisi8x0lq28y7hkb3kk35savh7
+   add constraint fk_bookmarked_question_user_id
    foreign key (user_id)
    references users
    on delete cascade;
 
 alter table if exists calendar_event
-   add constraint FKbacfttv2921opgo9htv1qmhi9
+   add constraint fk_calendar_event_user_id
    foreign key (user_id)
    references users
    on delete cascade;
 
 alter table if exists document
-   add constraint FKm19xjdnh3l6aueyrpm1705t52
+   add constraint fk_document_user_id
    foreign key (user_id)
    references users
    on delete cascade;
 
 alter table if exists folder
-   add constraint FKr9qh6il5woy04190x3qf9dhn5
+   add constraint fk_folder_user_id
    foreign key (user_id)
    references users
    on delete cascade;
 
 alter table if exists goal
-   add constraint FKf70arauooy8e5a5egk8k69xdr
+   add constraint fk_goal_user_id
    foreign key (user_id)
    references users
    on delete cascade;
 
 alter table if exists notification_setting
-   add constraint FKmk226jk5f6j26wg7moshwhdx8
+   add constraint fk_notification_setting_user_id
    foreign key (user_id)
    references users
    on delete cascade;
 
 alter table if exists question
-   add constraint FKnvgdkxogqlmkgulxhojaoxvd3
+   add constraint fk_question_session_id
    foreign key (session_id)
    references session
    on delete cascade;
 
 alter table if exists report
-   add constraint FKcnqbup65rhdc086v3wou3e5mc
+   add constraint fk_report_session_id
    foreign key (session_id)
    references session
    on delete cascade;
 
 alter table if exists session
-   add constraint FK7imtirad6irwot6bmuxs02v6m
+   add constraint fk_session_company_id
    foreign key (company_id)
    references company;
 
 alter table if exists session
-   add constraint FKbc0v7fbvja31ohsrt6qw1mxwn
+   add constraint fk_session_document_id
    foreign key (document_id)
    references document;
 
 alter table if exists session
-   add constraint FKdjny1b0fqdmypdxlyldasw0rj
+   add constraint fk_session_folder_id
    foreign key (folder_id)
    references folder
    on delete set null;
 
 alter table if exists session
-   add constraint FKjhigvov2ee8ba69bax5r07fo9
+   add constraint fk_session_retry_of_session_id
    foreign key (retry_of_session_id)
    references session
    on delete set null;
 
 alter table if exists session
-   add constraint FKj3ffkfbfbdoh9uon462ow7lhl
+   add constraint fk_session_user_id
    foreign key (user_id)
    references users
    on delete cascade;
 
 alter table if exists streak
-   add constraint FKlgpjipy4r4lvcjktr1sshbl4q
+   add constraint fk_streak_user_id
    foreign key (user_id)
    references users
    on delete cascade;
 
 alter table if exists user_auth
-   add constraint FK9hog4tmdalcddidanohglx6gl
+   add constraint fk_user_auth_user_id
    foreign key (user_id)
    references users;
 
 alter table if exists user_badge
-   add constraint FKjqx9n26pk9mqf1qo8f7xvvoq9
+   add constraint fk_user_badge_badge_id
    foreign key (badge_id)
    references badge;
 
 alter table if exists user_badge
-   add constraint FKmunrhakude09c8hgje093wvw3
+   add constraint fk_user_badge_source_session_id
    foreign key (source_session_id)
    references session
    on delete set null;
 
 alter table if exists user_badge
-   add constraint FKa96xbjeyiemypugmi9g8x8fiu
+   add constraint fk_user_badge_user_id
    foreign key (user_id)
    references users
    on delete cascade;
 
 alter table if exists user_company_interest
-   add constraint FK2rnssyx96386x78eu3jh0huq9
+   add constraint fk_user_company_interest_company_id
    foreign key (company_id)
    references company
    on delete cascade;
 
 alter table if exists user_company_interest
-   add constraint FK8qon6qf7368qtkex06x7tc94v
+   add constraint fk_user_company_interest_user_id
    foreign key (user_id)
    references users
    on delete cascade;
 
 alter table if exists user_profile
-   add constraint FKuganfwvnbll4kn2a3jeyxtyi
+   add constraint fk_user_profile_user_id
    foreign key (user_id)
    references users
    on delete cascade;

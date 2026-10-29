@@ -50,12 +50,20 @@ alter table report add constraint report_status_check
 Found non-empty schema(s) "public" but no schema history table.
 ```
 
-로컬은 볼륨째 지우고 다시 띄웁니다. 배포 DB 도 도입 시점에 한 번 초기화합니다.
+로컬은 볼륨째 지우고 다시 띄웁니다. 프로젝트 이름이 `cue-a-dev` 로 고정이라 어느 폴더에서
+실행해도 같은 볼륨이 지워지고, **Redis · MinIO 볼륨도 함께 지워집니다.**
 
 ```bash
 docker compose -f docker-compose.dev.yml down -v
 docker compose -f docker-compose.dev.yml up -d
 ```
+
+**초기화한 뒤 처음 띄우는 앱은 Flyway 가 들어간 코드여야 합니다.** Flyway 가 없는 브랜치로
+먼저 띄우면 `update` 가 히스토리 테이블 없이 테이블을 다시 만들어 또 지워야 합니다. V1 이
+한 번 적용된 뒤에는 다른 브랜치를 띄워도 괜찮습니다.
+
+배포 DB 는 **Flyway 버전을 배포 서버에 처음 올릴 때, 새 버전을 띄우기 직전에** 초기화합니다.
+그보다 먼저 지우면 지금 도는 `update` 가 재시작 때 테이블을 다시 만듭니다.
 
 ---
 

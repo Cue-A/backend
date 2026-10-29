@@ -105,6 +105,8 @@ session.complete();
 
 - 연관관계는 기본 `LAZY`.
 - `@Builder` 사용, 기본 생성자는 `@NoArgsConstructor(access = PROTECTED)`.
+- **엔티티를 바꾸면 같은 PR 에 마이그레이션 파일을 넣습니다.** 컬럼 하나 추가도 마찬가지입니다.
+  번호 규칙과 enum `check` 제약은 [`02-database.md`](./02-database.md) 의 마이그레이션 절 참고.
 
 ---
 

@@ -23,9 +23,9 @@ AI 서버는 AI 파트가 운영합니다. 우리가 준비하는 것은 S3 와 
 | 1 | S3 버킷 `cue-a-media` (`ap-northeast-2`, 퍼블릭 차단) | ✅ |
 | 2 | IAM 사용자 `cue-a-backend` · `cue-a-ai` | ✅ |
 | 3 | S3 CORS | ✅ localhost 만. 프론트 도메인 추가 필요 |
-| 4 | AI 에 버킷·리전·`cue-a-ai` 키 전달 | |
+| 4 | AI 에 버킷·리전·`cue-a-ai` 키 전달 | ✅ AI 가 질문 음성(TTS)을 버킷에 올리는 것까지 확인 |
 | 5 | 질문 음성 presigned GET (Issue #54) | ✅ push 때 presigned GET 발급 |
-| 6 | 실제 AI 연동 테스트 (로컬 백엔드 + S3) | |
+| 6 | 실제 AI 연동 테스트 (로컬 백엔드 + S3) | ✅ 가입 → 이력서 → 면접 3문항 → 리포트 `COMPLETED` (2026-10-28) |
 | 7 | DB (백엔드에서만 접근) | |
 | 8 | 백엔드 배포 (1대) | |
 | 9 | 도메인 + HTTPS + WebSocket 프록시 | |

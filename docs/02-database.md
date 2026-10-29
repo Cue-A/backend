@@ -23,6 +23,9 @@ src/main/resources/db/migration/
   시작하지 않아 바로 드러납니다
 - 컬럼 삭제 · 이름 변경 · NOT NULL 추가도 SQL 로 씁니다. 기존 행이 있으면 값을 채운 뒤
   제약을 거는 순서까지 한 파일에 담습니다
+- **FK 는 `fk_{테이블}_{컬럼}` 으로 이름을 붙입니다.** 복합 FK 는 컬럼을 순서대로 잇습니다
+  (`fk_answer_question_id_session_id`). 이름을 빼면 나중에 지울 때 DB 에서 이름부터
+  찾아야 합니다. 유니크는 `uk_`, 인덱스는 `idx_` 로 시작합니다
 
 ### ★ enum 에 값을 추가하면 check 제약도 바꿉니다
 

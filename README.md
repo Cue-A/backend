@@ -240,9 +240,13 @@ lsof -i :5432        # 점유 프로세스 확인
 brew services stop postgresql   # 로컬에 PG를 깔았다면
 ```
 
-**테이블이 안 생깁니다 / 데이터가 사라집니다**
+**앱이 시작하지 않고 Flyway·스키마 오류가 납니다**
 
-`ddl-auto`가 `update`인지 확인하세요. `create`면 재시작마다 전부 지워집니다.
+- `Found non-empty schema(s) "public" but no schema history table` — Flyway 도입 전에 만든
+  DB 입니다. `docker compose -f docker-compose.dev.yml down -v` 로 볼륨을 지우고 다시 띄우세요.
+- `Schema-validation: missing column ...` — 엔티티를 바꾸고 마이그레이션 파일을 넣지 않았습니다.
+
+자세한 내용은 [`docs/02-database.md`](./docs/02-database.md) 의 마이그레이션 절.
 
 **Docker 이미지 pull이 안 됩니다 (Apple Silicon)**
 

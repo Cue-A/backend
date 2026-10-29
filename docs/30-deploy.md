@@ -57,6 +57,10 @@ AI 서버는 AI 파트가 운영합니다. 우리가 준비하는 것은 S3 와 
 
 ## 주의
 
+- **Flyway 버전을 처음 배포할 때 배포 DB 를 한 번 초기화합니다.** `ddl-auto: update` 로
+  만든 DB 는 Flyway 가 거부해 앱이 시작하지 않습니다. 새 버전을 띄우기 직전에 지웁니다.
+  절차는 [`02-database.md`](./02-database.md#flyway-도입-전에-만든-db). 그다음 배포부터는
+  앱이 시작할 때 새 마이그레이션만 적용합니다.
 - **백엔드·AI 모두 인스턴스 1개.** WebSocket 연결과 AI 세션이 프로세스 메모리에 있습니다.
 - **WebSocket 프록시.** nginx 는 `Upgrade` · `Connection` 헤더를 넘기고, idle timeout
   을 기본 60초보다 늘립니다. 리포트 분석이 최대 10분입니다.

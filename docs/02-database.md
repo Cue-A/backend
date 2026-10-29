@@ -1,6 +1,72 @@
 # 02. 데이터베이스
 
-PostgreSQL 16. `ddl-auto: update` 로 운영합니다. **`create` 를 쓰지 마세요.**
+PostgreSQL 16. 스키마는 **Flyway 마이그레이션으로만 바꿉니다.** `ddl-auto` 는 `validate` 라
+엔티티와 스키마가 다르면 앱이 시작하지 않습니다. `update` · `create` 로 바꾸지 마세요.
+
+---
+
+## 마이그레이션
+
+엔티티를 바꾸면 **같은 PR 에 마이그레이션 파일을 넣습니다.** 앱이 시작할 때 Flyway 가 아직
+적용하지 않은 파일을 번호 순서대로 실행하므로, 다른 사람은 풀 받고 실행만 하면 됩니다.
+
+```
+src/main/resources/db/migration/
+├── V1__init.sql                  Flyway 도입 시점의 스키마 (#79)
+└── V2__add_report_memo.sql       다음 변경부터 한 파일씩
+```
+
+- 이름은 `V{번호}__{영문_설명}.sql` 입니다. 번호는 `dev` 의 마지막 번호 + 1 입니다
+- **`dev` 에 머지된 파일은 고치지 않습니다.** 체크섬이 달라져 앱이 시작하지 않습니다.
+  고칠 게 있으면 새 파일을 추가합니다
+- 다른 PR 이 같은 번호로 먼저 머지되면 내 파일 번호를 올립니다. 같은 번호가 둘이면 앱이
+  시작하지 않아 바로 드러납니다
+- 컬럼 삭제 · 이름 변경 · NOT NULL 추가도 SQL 로 씁니다. 기존 행이 있으면 값을 채운 뒤
+  제약을 거는 순서까지 한 파일에 담습니다
+- **FK 는 `fk_{테이블}_{컬럼}` 으로 이름을 붙입니다.** 복합 FK 는 컬럼을 순서대로 잇습니다
+  (`fk_answer_question_id_session_id`). 이름을 빼면 나중에 지울 때 DB 에서 이름부터
+  찾아야 합니다. 유니크는 `uk_`, 인덱스는 `idx_` 로 시작합니다
+
+### ★ enum 에 값을 추가하면 check 제약도 바꿉니다
+
+Hibernate 는 `@Enumerated(STRING)` 컬럼에 `check (status in (...))` 를 만듭니다.
+**`validate` 는 이 제약을 보지 않아서, 빠뜨리면 앱은 뜨고 새 값을 저장할 때 실패합니다.**
+제약 이름은 `{테이블}_{컬럼}_check` 입니다.
+
+```sql
+alter table report drop constraint report_status_check;
+alter table report add constraint report_status_check
+    check (status in ('PROCESSING', 'COMPLETED', 'PARTIAL', 'FAILED', 'NEW_VALUE'));
+```
+
+### 검증
+
+`PostgresRepositoryTest` 를 상속한 테스트가 돌 때 모든 마이그레이션이 실제 PostgreSQL 에
+적용되고 `validate` 까지 거칩니다. **Docker 가 없으면 이 테스트가 건너뛰어지므로**, 엔티티를
+바꿨다면 Docker 를 켜고 `./gradlew test` 를 돌립니다.
+
+### Flyway 도입 전에 만든 DB
+
+`ddl-auto: update` 로 만든 DB 는 Flyway 가 거부합니다.
+
+```
+Found non-empty schema(s) "public" but no schema history table.
+```
+
+로컬은 볼륨째 지우고 다시 띄웁니다. 프로젝트 이름이 `cue-a-dev` 로 고정이라 어느 폴더에서
+실행해도 같은 볼륨이 지워지고, **Redis · MinIO 볼륨도 함께 지워집니다.**
+
+```bash
+docker compose -f docker-compose.dev.yml down -v
+docker compose -f docker-compose.dev.yml up -d
+```
+
+**초기화한 뒤 처음 띄우는 앱은 Flyway 가 들어간 코드여야 합니다.** Flyway 가 없는 브랜치로
+먼저 띄우면 `update` 가 히스토리 테이블 없이 테이블을 다시 만들어 또 지워야 합니다. V1 이
+한 번 적용된 뒤에는 다른 브랜치를 띄워도 괜찮습니다.
+
+배포 DB 는 **Flyway 버전을 배포 서버에 처음 올릴 때, 새 버전을 띄우기 직전에** 초기화합니다.
+그보다 먼저 지우면 지금 도는 `update` 가 재시작 때 테이블을 다시 만듭니다.
 
 ---
 
@@ -190,10 +256,6 @@ AI 계약이 확정되면서 `doc_id`(AI 쪽 이력서 파싱 캐시 키)가 지
 Spring이 값을 받아 보관할 일이 없다는 것이 명확해졌습니다. 기존
 `ai_doc_ref VARCHAR(100)` 컬럼과 `Document.markReady(String)` 을 제거했습니다.
 
-**`ddl-auto: update` 는 컬럼 삭제를 하지 않습니다.** 배포 환경에 기존
-`ai_doc_ref` 컬럼이 남아 있다면 필요 시 수동으로 `DROP COLUMN` 하세요. 이 PR은
-DROP 스크립트를 포함하지 않습니다. 자세한 내용은 PR 본문의 DB migration 절 참고.
-
 ---
 
 ## 폴더
@@ -253,9 +315,6 @@ AI 세션 시작 요청(`POST /ai/sessions`)의 `resume_file_url` 이 필수라,
 세션은 성립하지 않습니다. 기존에는 "문서 없이 직무만으로 보는 세션"을 허용해
 nullable 이었지만 이번 이슈부터 NOT NULL 로 바꿨습니다.
 
-**기존 DB에 `document_id` 가 NULL 인 세션 행이 있다면 NOT NULL 제약을 추가하기
-전에 데이터 정리가 필요합니다.** 자세한 절차는 PR 본문의 DB migration 절 참고.
-
 ### 나머지
 
 `company_id` 가 NULL 허용인 것이 중요합니다. 회사를 고르지 않고 연습만 하는
@@ -274,11 +333,6 @@ nullable 이었지만 이번 이슈부터 NOT NULL 로 바꿨습니다.
 압박 강도는 기존 `pressure_level VARCHAR(10)` 자유 문자열 대신 `persona` enum 으로
 바꿨습니다. 값은 `FRIENDLY`(순한맛) · `PRESSURE`(매운맛) 이며, AI 요청 시
 소문자 `friendly` · `pressure` 로 직렬화합니다(`Persona.toAiValue()`).
-
-**`ddl-auto: update` 는 컬럼명 변경을 rename 으로 인식하지 못합니다.** 새 컬럼
-`persona` 를 추가만 하고 기존 `pressure_level` 컬럼은 그대로 남습니다. 배포 시
-데이터를 옮기고 옛 컬럼을 정리하는 수동 작업이 필요합니다. PR 본문의 DB
-migration 절 참고.
 
 `folder` 를 지우면 `folder_id` 가, 세션을 지우면 `retry_of_session_id` 가
 `SET NULL` 됩니다.
@@ -376,11 +430,6 @@ URL 이 아니라 **S3 object key** 를 저장합니다. Presigned URL 은 만�
 위치를 담는 용도로 쓰였습니다. `document.object_key` 규칙과 맞추기 위해
 `answer_audio_object_key` 로 이름을 바꿨습니다.
 
-**`ddl-auto: update` 는 컬럼명 변경을 rename 으로 인식하지 못합니다.** 새 컬럼을
-추가만 하고 기존 `answer_audio_url` 컬럼은 그대로 남습니다. 배포 시 데이터를
-옮기고 옛 컬럼을 정리하는 수동 작업이 필요합니다. PR 본문의 DB migration 절
-참고.
-
 ### ★ category 는 enum으로 만들지 않습니다
 
 AI가 정의한 8개 값이며, 가운뎃점(·)까지 정확히 일치해야 합니다.
@@ -457,8 +506,8 @@ completed_at    TIMESTAMPTZ   NULL
 **실패 축 재시도는 `status` 가 아니라 `retry_status` 로 표시합니다.** 재시도 중에도 리포트는 PARTIAL
 결과 그대로 보여야 하기 때문입니다. 성공하면 결과를 통째로 바꾸고 `retry_status` 를 비우고, 실패하면
 결과는 그대로 두고 `retry_status = FAILED`, 원인은 `error_code` 에 남깁니다. 재시도는 PARTIAL 에서만
-하므로 `status = FAILED` 와 `retry_status = FAILED` 는 함께 생기지 않습니다. nullable 이라 `ddl-auto: update`
-로 기존 행에 그대로 추가됩니다. [`13-report.md`](./13-report.md) 의 실패 축 재시도 절 참고.
+하므로 `status = FAILED` 와 `retry_status = FAILED` 는 함께 생기지 않습니다.
+[`13-report.md`](./13-report.md) 의 실패 축 재시도 절 참고.
 
 **`status` 는 우리 상태라 enum 입니다.** AI 의 `report_status`(complete | partial)는
 `COMPLETED` · `PARTIAL` 로 옮기고, 원문은 `report_data` 에 남습니다.
@@ -480,18 +529,6 @@ ERD 초안으로 먼저 잡아둔 컬럼 중 계약과 다른 것을 바꿨습�
 | `score_vision` | `score_gaze` (AI 축 이름과 맞춤) |
 | `summary` · `growth_narrative` · `timeline` · `resilience` (JSONB) | 제거. 전부 `report_data` 원본에 있음 |
 | `status` 자유 문자열 | `ReportStatus` enum |
-
-**`ddl-auto: update` 는 컬럼 삭제·이름 변경을 하지 않습니다.** 배포 DB 에 옛 컬럼이
-남아 있으면 report 행이 없는지 확인한 뒤 수동으로 지우세요. 행이 이미 있으면 새
-`attempt INT NOT NULL` 컬럼 추가도 실패하니, 그 경우 먼저 행을 정리해야 합니다.
-
-```sql
-ALTER TABLE report DROP COLUMN IF EXISTS score_vision,
-                   DROP COLUMN IF EXISTS summary,
-                   DROP COLUMN IF EXISTS growth_narrative,
-                   DROP COLUMN IF EXISTS timeline,
-                   DROP COLUMN IF EXISTS resilience;
-```
 
 ---
 
@@ -561,9 +598,9 @@ AI 계약(질문 생성 API 계약 6장)의 `company_profile_override` 형식도
 
 ### values_format 을 PostgreSQL enum 으로 만들지 않습니다
 
-`ddl-auto: update` 에서 Hibernate 가 기존 enum 타입에 값을 추가하지 못합니다.
-항목이 하나 늘 때마다 손으로 `ALTER TYPE` 을 쳐야 합니다. `user_auth.provider`
-와 같은 이유로 `VARCHAR` 에 이름을 담습니다.
+`ddl-auto: update` 로 돌던 때 Hibernate 가 기존 enum 타입에 값을 추가하지 못해
+`VARCHAR` 에 이름을 담기로 했습니다. `user_auth.provider` 도 같습니다. 값을 추가할
+때는 `check` 제약을 바꾸는 마이그레이션이 필요합니다(위 마이그레이션 절 참고).
 
 ---
 

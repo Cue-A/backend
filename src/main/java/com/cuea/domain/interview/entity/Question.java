@@ -145,9 +145,6 @@ public class Question extends BaseCreatedEntity {
      *
      * <p>기존 {@code answer_audio_url TEXT} 컬럼을 이 필드로 교체했습니다. URL 이
      * 아니라 key 만 저장합니다({@code object_key} 규칙은 {@link Document} 참고).
-     * {@code ddl-auto: update} 는 컬럼명 변경을 인식하지 못해 새 컬럼
-     * {@code answer_audio_object_key} 를 추가만 하고 기존 {@code answer_audio_url}
-     * 컬럼은 그대로 남습니다. 배포 시 수동 조치가 필요합니다.
      */
     @Column(name = "answer_audio_object_key", columnDefinition = "text")
     private String answerAudioObjectKey;

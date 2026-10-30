@@ -22,8 +22,10 @@ import jakarta.validation.constraints.Size;
  * @param sourceSessionId  재면접(replay) 대상 세션의 식별자. null 이면 일반 면접입니다.
  *                         값이 있으면 그 세션의 최초 root 세션을 기준으로 재면접을
  *                         구성합니다. 식별자 타입은 기존 세션 ID 와 같은 문자열입니다.
- *                         재면접 성립 여부(옵션 변경에 따른 일반 면접 전환 등)는
- *                         {@code InterviewStartService} 가 판정합니다. docs/12-replay.md 참고.
+ *                         고정 옵션(이력서·기업·직무·문항 수·면접관 스타일)이 최초 세션과
+ *                         다르면 {@code INVALID_REQUEST}(400)로 거부합니다(일반 면접으로
+ *                         자동 전환하지 않습니다). 판정은 {@code InterviewStartService} 가
+ *                         합니다. docs/12-replay.md 참고.
  */
 public record InterviewStartRequest(
         @NotBlank

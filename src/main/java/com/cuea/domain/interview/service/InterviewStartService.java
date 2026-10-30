@@ -102,8 +102,9 @@ public class InterviewStartService {
                 company == null ? null : String.valueOf(company.getCompanyId()),
                 companyProfileOverride,
                 questionCount,
-                // 재면접이면 root 세션 ID 와 replay_log 를 함께 보냅니다. 옵션 변경으로
-                // 일반 면접으로 전환됐으면 둘 다 null 입니다(하나만 보내면 안 됩니다).
+                // 정상 재면접이면 root 세션 ID 와 replay_log 를 함께 보냅니다. 일반 면접
+                // (sourceSessionId 없음)이면 둘 다 null 입니다(하나만 보내면 안 됩니다).
+                // 재면접 요청의 고정 옵션이 다르면 이 지점 전에 400 으로 거부됩니다.
                 replayPlan.retryOfSessionId(),
                 replayPlan.replayLog(),
                 null);
@@ -164,12 +165,16 @@ public class InterviewStartService {
      *   <li>대상 세션이 존재하고 요청 사용자 소유인지({@code SESSION_NOT_FOUND})</li>
      *   <li>대상 세션이 완료 상태인지({@code SESSION_NOT_COMPLETED})</li>
      *   <li>최초 root 세션이 <b>같은 사용자 소유로</b> 존재하는지({@code SESSION_NOT_FOUND})</li>
-     *   <li>옵션(문항 수·페르소나·문서·기업·직무)이 root 와 같은지 — 다르면 일반 면접으로
-     *       전환해 {@code retry_of_session_id}·{@code replay_log} 를 둘 다 생략</li>
+     *   <li>고정 옵션(문항 수·페르소나·이력서·기업·직무)이 root 와 모두 같은지 — 하나라도
+     *       다르면 일반 면접으로 전환하지 않고 {@code INVALID_REQUEST}(400)로 <b>요청을 거부</b>
+     *       합니다(팀 확정 정책). hideQuestionText·타이머는 비교하지 않습니다.</li>
      *   <li>root 질문 로그로 유효한 {@code replay_log} 를 조립할 수 있는지(비었거나 REASK
      *       만 있거나 필수 필드 누락이면 {@code INTERNAL_ERROR}) — 일반 면접으로 조용히
      *       전환하지 않고 오류를 냅니다</li>
      * </ol>
+     *
+     * <p>거부·오류 경로 모두 AI 호출과 새 세션 생성 이전에 끝나므로, 불일치 요청으로는
+     * AI 세션이 만들어지지 않습니다.
      *
      * @param normalizedQuestionCount {@link #resolveQuestionCount} 로 정규화한 문항 수
      * @param document 요청이 조회해 둔 새 면접 문서(옵션 비교에 재사용)
@@ -200,13 +205,12 @@ public class InterviewStartService {
         String rootSessionId = source.rootSessionId();
         InterviewSession rootSession = sessionQueryService.getRootForReplay(rootSessionId, userId);
 
-        // 4) 옵션 변경 판정. 요청이 이미 조회·정규화한 값으로 비교합니다(요청 원문 문자열 아님).
-        //    하나라도 비교 대상 옵션이 다르면 일반 면접으로 전환해 두 필드를 모두 생략합니다.
-        if (!replayOptionPolicy.keepsReplay(request, normalizedQuestionCount, document, company, rootSession)) {
-            log.info("옵션 변경으로 재면접을 일반 면접으로 전환합니다 sourceSessionId={} rootSessionId={}",
-                    request.sourceSessionId(), rootSessionId);
-            return ReplayPlan.none();
-        }
+        // 4) 고정 옵션 검증. 요청이 이미 조회·정규화한 값으로 비교합니다(요청 원문 문자열 아님).
+        //    문항 수·페르소나·이력서·기업·직무가 최초 세션과 하나라도 다르면 일반 면접으로
+        //    조용히 전환하지 않고 INVALID_REQUEST(400)로 요청을 거부합니다(팀 확정 정책).
+        //    hideQuestionText·타이머는 질문 생성에 무관해 비교하지 않습니다.
+        replayOptionPolicy.enforceFixedOptions(
+                request, normalizedQuestionCount, document, company, rootSession);
 
         // 5) replay_log 조립. 비었거나 REASK 만 있거나 필수 필드 누락이면 여기서 예외.
         List<AiReplayLogItem> replayLog = replayLogAssembler.assemble(rootSessionId);
@@ -278,9 +282,11 @@ public class InterviewStartService {
      * 재면접 실행 계획. 재면접이 실제로 적용될 때만 {@code rootSession} 과 {@code replayLog}
      * 가 채워집니다.
      *
-     * <p>일반 면접이거나 옵션 변경으로 전환된 경우 {@link #none()} 이며, 이때 AI 요청의
+     * <p>일반 면접({@code sourceSessionId} 없음)이면 {@link #none()} 이며, 이때 AI 요청의
      * {@code retry_of_session_id}·{@code replay_log} 는 둘 다 null 이고 DB 에도 재면접
-     * 연관({@code retryOfSession})을 저장하지 않습니다.
+     * 연관({@code retryOfSession})을 저장하지 않습니다. 재면접 요청의 고정 옵션이 다르면
+     * 일반 면접으로 전환하지 않고 그 전에 {@code INVALID_REQUEST}(400)로 거부되므로,
+     * {@code none()} 은 일반 면접 요청에서만 나옵니다.
      *
      * @param rootSession replay 적용 시 연관으로 저장할 최초 세션. 미적용이면 null
      * @param replayLog   AI 에 보낼 replay_log. 미적용이면 null
@@ -301,8 +307,9 @@ public class InterviewStartService {
         }
 
         /**
-         * 재면접이 실제로 적용됐는지. 일반 면접이거나 옵션 변경으로 전환된 경우 false 입니다.
-         * 응답의 {@code replayApplied} 로 내려갑니다.
+         * 재면접이 실제로 적용됐는지. 일반 면접({@code sourceSessionId} 없음)이면 false 입니다.
+         * 응답의 {@code replayApplied} 로 내려갑니다. (고정 옵션 불일치는 그 전에 400 으로
+         * 거부되므로 이 값이 false 인 채로 응답이 나가는 경우는 일반 면접뿐입니다.)
          */
         private boolean isApplied() {
             return rootSession != null;

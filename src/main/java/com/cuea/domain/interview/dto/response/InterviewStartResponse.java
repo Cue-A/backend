@@ -8,8 +8,10 @@ package com.cuea.domain.interview.dto.response;
  *
  * @param sessionId     AI 가 발급한 세션 ID. 이후 모든 면접 API 의 경로 변수로 씁니다.
  * @param questionTotal 사용자가 선택한 총 문항 수(되묻기 제외).
- * @param replayApplied 이 세션이 재면접(replay)으로 시작됐는지. 일반 면접이면 false,
- *                      옵션 변경으로 일반 면접으로 전환됐어도 false, 정상 재면접이면 true.
+ * @param replayApplied 이 세션이 재면접(replay)으로 시작됐는지. 일반 면접({@code sourceSessionId}
+ *                      없음)이면 false, 정상 재면접이면 true 입니다. 재면접 요청의 고정 옵션이
+ *                      최초 세션과 다르면 {@code INVALID_REQUEST}(400)로 거부되어 이 응답 자체가
+ *                      내려가지 않습니다(일반 면접으로 자동 전환하지 않습니다).
  *                      기존 필드는 그대로라 이 필드를 읽지 않는 기존 클라이언트는 영향받지
  *                      않습니다(필드 추가뿐, 하위 호환).
  */

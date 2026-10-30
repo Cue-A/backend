@@ -87,9 +87,9 @@ class InterviewStartServiceTest {
 
         sessionQueryService = mock(InterviewSessionQueryService.class);
         replayLogAssembler = mock(ReplayLogAssembler.class);
-        // 기본은 옵션이 같아 재면접을 유지한다고 본다. 전환 케이스는 각 테스트에서 재stub.
+        // enforceFixedOptions 는 void 라 기본 mock 이 아무것도 하지 않음(= 옵션 일치로 통과).
+        // 불일치 거부 케이스는 각 테스트에서 doThrow 로 stub 한다.
         replayOptionPolicy = mock(ReplayOptionPolicy.class);
-        when(replayOptionPolicy.keepsReplay(any(), anyInt(), any(), any(), any())).thenReturn(true);
 
         user = User.create("kim@example.com", "김취준");
         document = document(DocumentStatus.READY);
@@ -525,42 +525,70 @@ class InterviewStartServiceTest {
     }
 
     @Test
-    void 옵션이_바뀌면_일반_면접으로_전환해_retry_of_session_id_와_replay_log_를_둘_다_생략한다() {
+    void 고정_옵션이_다른_재면접_요청은_400으로_거부하고_AI_호출_세션저장을_하지_않는다() {
         InterviewSession root = completedRoot(SOURCE_SESSION_ID);
         when(sessionQueryService.getOwnedSession(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
         when(sessionQueryService.getRootForReplay(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
-        // 옵션 변경 감지: keepsReplay=false 로 강제.
-        when(replayOptionPolicy.keepsReplay(any(), anyInt(), any(), any(), any())).thenReturn(false);
-        AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_dg", "task_dg", 6);
-        when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
-                .thenReturn(fakeSession("sess_dg"));
+        // 정책이 불일치로 INVALID_REQUEST 를 던지도록 강제(void 메서드라 doThrow 사용).
+        doThrow(new BusinessException(ErrorCode.INVALID_REQUEST, "조건이 다릅니다"))
+                .when(replayOptionPolicy)
+                .enforceFixedOptions(any(), anyInt(), any(), any(), any());
 
-        service.start(USER_ID, replayRequest(SOURCE_SESSION_ID));
+        assertThatThrownBy(() -> service.start(USER_ID, replayRequest(SOURCE_SESSION_ID)))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.INVALID_REQUEST);
 
-        ArgumentCaptor<AiSessionStartRequest> captor = ArgumentCaptor.forClass(AiSessionStartRequest.class);
-        verify(aiClient).startSession(captor.capture());
-        assertThat(captor.getValue().retryOfSessionId()).isNull();
-        assertThat(captor.getValue().replayLog()).isNull();
-        // 일반 면접으로 전환됐으므로 조립을 호출하지 않고 연관도 저장하지 않는다.
+        // 옵션 불일치면 AI 호출·세션 저장·조립을 모두 하지 않는다.
+        verify(aiClient, never()).startSession(any());
+        verify(sessionWriter, never()).createSession(any(), any(), any(), any(), any(), anyInt(), any());
         verify(replayLogAssembler, never()).assemble(anyString());
-        verify(sessionWriter).createSession(any(), any(), any(), any(), any(), eq(6), eq(null));
+        verify(firstQuestionPoller, never()).pollAndDeliver(anyString(), anyString(), any());
     }
 
     @Test
-    void 옵션_변경으로_일반_전환되면_응답의_replayApplied_가_false_다() {
+    void documentId_가_다르면_400으로_거부한다() {
+        assertReplayRejectedWhenPolicyThrows();
+    }
+
+    @Test
+    void companyId_가_다르면_400으로_거부한다() {
+        assertReplayRejectedWhenPolicyThrows();
+    }
+
+    @Test
+    void jobRole_이_다르면_400으로_거부한다() {
+        assertReplayRejectedWhenPolicyThrows();
+    }
+
+    @Test
+    void questionCount_가_다르면_400으로_거부한다() {
+        assertReplayRejectedWhenPolicyThrows();
+    }
+
+    @Test
+    void persona_가_다르면_400으로_거부한다() {
+        assertReplayRejectedWhenPolicyThrows();
+    }
+
+    /**
+     * 각 고정 옵션(문서·기업·직무·문항수·페르소나) 불일치는 ReplayOptionPolicy 가 던지는
+     * INVALID_REQUEST 로 수렴한다. 옵션별 비교 로직 자체는 ReplayOptionPolicyTest 가 검증하고,
+     * 여기서는 서비스가 그 예외를 그대로 전파해 거부하는지만 확인한다.
+     */
+    private void assertReplayRejectedWhenPolicyThrows() {
         InterviewSession root = completedRoot(SOURCE_SESSION_ID);
         when(sessionQueryService.getOwnedSession(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
         when(sessionQueryService.getRootForReplay(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
-        when(replayOptionPolicy.keepsReplay(any(), anyInt(), any(), any(), any())).thenReturn(false);
-        AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_dgf", "task_dgf", 6);
-        when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
-                .thenReturn(fakeSession("sess_dgf"));
+        doThrow(new BusinessException(ErrorCode.INVALID_REQUEST, "조건이 다릅니다"))
+                .when(replayOptionPolicy)
+                .enforceFixedOptions(any(), anyInt(), any(), any(), any());
 
-        InterviewStartResponse response = service.start(USER_ID, replayRequest(SOURCE_SESSION_ID));
+        assertThatThrownBy(() -> service.start(USER_ID, replayRequest(SOURCE_SESSION_ID)))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.INVALID_REQUEST);
 
-        assertThat(response.replayApplied()).isFalse();
+        verify(aiClient, never()).startSession(any());
+        verify(sessionWriter, never()).createSession(any(), any(), any(), any(), any(), anyInt(), any());
     }
 
     @Test

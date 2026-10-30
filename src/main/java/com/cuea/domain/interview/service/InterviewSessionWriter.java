@@ -44,8 +44,9 @@ public class InterviewSessionWriter {
                 .user(user)
                 .company(company)
                 .document(document)
-                // 재면접이 실제로 적용된 경우에만 root 세션 연관을 저장합니다. 옵션 변경으로
-                // 일반 면접으로 전환됐으면 null 이라 일반 세션과 동일하게 저장됩니다.
+                // 정상 재면접일 때만 root 세션 연관을 저장합니다. 일반 면접이면 null 이
+                // 넘어와 일반 세션과 동일하게 저장됩니다(재면접 요청의 고정 옵션이 다르면
+                // 세션 저장 전에 400 으로 거부되므로 여기까지 오지 않습니다).
                 .retryOfSession(retryOfSession)
                 .mode("PRACTICE")
                 .jobRole(request.jobRole())

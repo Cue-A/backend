@@ -44,8 +44,9 @@ public class InterviewController {
                     + "즉시 202 로 응답합니다. 첫 질문은 백그라운드 폴링 후 WebSocket 으로 전달됩니다. "
                     + "문서는 status=READY 여야 하고(파일·마크다운 모두 가능), 기업을 선택했다면 verified=true 여야 합니다. "
                     + "sourceSessionId 를 주면 그 세션의 최초 세션을 기준으로 재면접(replay)을 시작합니다. "
-                    + "문항 수·페르소나·문서·기업·직무가 원본과 다르면 일반 면접으로 전환되며, 이때 응답의 "
-                    + "replayApplied 는 false 입니다. 정상 재면접이면 replayApplied=true 입니다.")
+                    + "재면접은 최초 세션과 같은 조건으로만 가능하며, 문항 수·페르소나·이력서·기업·직무가 하나라도 "
+                    + "다르면 400 으로 거부합니다(일반 면접으로 자동 전환하지 않습니다). 질문 텍스트 숨김·타이머는 "
+                    + "변경할 수 있습니다. 정상 재면접이면 응답의 replayApplied=true, 일반 면접이면 false 입니다.")
     @PostMapping
     @ResponseStatus(HttpStatus.ACCEPTED)
     @RateLimit(key = "session-start", limit = 10, windowSeconds = 60)

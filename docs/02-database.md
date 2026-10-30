@@ -550,6 +550,10 @@ updated_at       DATE          NOT NULL  -- ★ 수정 시각이 아니라 수�
 created_at       TIMESTAMPTZ   NOT NULL
 ```
 
+> 면접 설정용 기업 목록은 `GET /api/companies` 로 내려줍니다(Issue #85).
+> `verified=true` 기업만, 기업명 오름차순으로, `companyId`·`name` 만 반환합니다.
+> `core_values` 등 나머지 컬럼은 노출하지 않습니다. `company` 테이블을 직접 조회합니다.
+
 ```sql
 user_company_interest
 id            BIGINT        PK

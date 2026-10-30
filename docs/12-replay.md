@@ -184,15 +184,73 @@ String rootId = sourceSession.getRetryOfSessionId() != null
 
 - `replayApplied` 는 **재연습 적용 여부를 확인하는 결과 필드**일 뿐입니다. 최초 세션의
   옵션을 조회하거나 프론트에서 옵션을 고정하는 용도가 아닙니다.
-- 재연습용 세션 옵션 조회 API 는 아직 미구현이며 **별도 이슈**로 개발 예정입니다(아래
-  "프론트 연동" 참고).
+- 재연습용 세션 옵션 조회 API 는 **별도 이슈(Issue #83)로 구현**됐습니다. 아래
+  "재연습용 세션 옵션 조회 API" 절 참고.
 
 ### 프론트 연동
 
 프론트는 재면접 시작 전에 **최초 세션의 고정 옵션을 불러와 그대로 고정**해 보내야 합니다.
-사용자가 옵션을 바꾸면 400 으로 거부되기 때문입니다. 재연습용 세션 옵션 조회 API 는
-이번 범위가 아니라 **별도 이슈**로 개발 예정입니다. 그 전까지는 프론트가 가진 최초 세션
+사용자가 옵션을 바꾸면 400 으로 거부되기 때문입니다. 이를 위한 **재연습용 세션 옵션 조회
+API 는 Issue #83 으로 구현**됐습니다(아래 절). 프론트가 그 응답으로 옵션을 자동 채우고
+변경 불가로 잠그는 UI 는 **아직 별도 작업**이며, 그 전까지는 프론트가 가진 최초 세션
 정보로 옵션을 채웁니다.
+
+---
+
+## 재연습용 세션 옵션 조회 API (Issue #83 구현)
+
+재면접을 시작하기 전에 **최초(root) 세션의 고정 옵션**을 불러오는 조회 API 입니다.
+프론트는 이 값을 자동으로 채운 뒤 재면접을 시작합니다.
+
+```
+GET /api/interviews/{sessionId}/replay-options
+```
+
+- **인증 필요**(`@CurrentUser`). 공통 응답 `Result<T>` 로 감쌉니다.
+- 경로의 `sessionId` 에는 **어느 회차(1·2·3…)의 세션 ID 를 넣어도** 됩니다. 응답은 항상
+  그 묶음의 **최초 root 세션** 옵션입니다(2·3회차 ID 로 조회해도 1회차 값).
+- **AI 서버를 호출하지 않습니다.** 백엔드 DB 에 저장된 세션 정보만 읽습니다(재연습의
+  진실 소스는 백엔드 DB).
+
+### 응답 필드 (8개)
+
+| 필드 | 타입 | 설명 |
+|---|---|---|
+| `rootSessionId` | string | 최초 root 세션 ID |
+| `documentId` | string(UUID) | 이력서 문서 식별자(`public_id`). document 는 NOT NULL 이라 항상 값 있음 |
+| `companyId` | number\|null | 기업 PK. 기업 미선택 연습 모드면 `null` |
+| `jobRole` | string | 직무 |
+| `questionCount` | number | 문항 수(DB 저장 정규화 값, 3·6·9) |
+| `persona` | string | `FRIENDLY`\|`PRESSURE` (재면접 시작 요청과 같은 형식) |
+| `documentTitle` | string | 이력서 제목(표시용) |
+| `companyName` | string\|null | 기업명(표시용). 기업 미선택이면 `null` |
+
+고정 옵션 5개(`documentId`·`companyId`·`jobRole`·`questionCount`·`persona`)를 그대로
+`POST /api/interviews` 에 실으면 `ReplayOptionPolicy` 비교를 통과합니다. 타이머와
+`hideQuestionText` 는 **담지 않습니다**(타이머는 프론트 전용, `hideQuestionText` 는 변경
+허용 옵션이라 고정 옵션이 아님).
+
+### 예외
+
+| 상황 | 결과 |
+|---|---|
+| 없는 세션 / 다른 사용자 세션 | `SESSION_NOT_FOUND`(404) |
+| 완료되지 않은(IN_PROGRESS·ABORTED) 세션 | `SESSION_NOT_COMPLETED`(409) |
+| root 가 없거나 남의 세션(참조 깨짐) | `SESSION_NOT_FOUND`(404) |
+| 기업 미선택 연습 모드 | 정상 응답(`companyId`·`companyName` = null) |
+
+**삭제된 문서·`verified=false` 기업이 연결된 과거 세션이어도 조회는 막지 않습니다.**
+과거 세션 정보 조회와 실제 재면접 시작 가능 여부는 별개이며, 시작 가능 여부는 재면접
+시작 API 가 최종 판정합니다(`findUsableFileDocument` → `DOCUMENT_NOT_FOUND`,
+`findVerifiedCompany` → `INVALID_REQUEST`).
+
+### 구현 메모
+
+- 소유권 검증(`getOwnedSession`)·root 결정(`rootSessionId()`)·root fetch join 조회
+  (`getRootForReplay`·`findRootForReplay`)는 재면접 시작 흐름의 로직을 **그대로 재사용**합니다.
+  새 쿼리나 소유권 로직을 중복 구현하지 않습니다.
+- root 조회는 `document`·`company` 를 fetch join 으로 초기화하므로 `open-in-view=false`
+  에서도 안전하게 DTO 로 변환합니다.
 
 ---
 

@@ -37,12 +37,17 @@ public class InterviewSessionWriter {
     public InterviewSession createSession(User user, Document document, Company company,
                                            InterviewStartRequest request,
                                            AiSessionStartResponse aiResponse,
-                                           int fallbackQuestionCount) {
+                                           int fallbackQuestionCount,
+                                           InterviewSession retryOfSession) {
         InterviewSession session = InterviewSession.builder()
                 .sessionId(aiResponse.sessionId())
                 .user(user)
                 .company(company)
                 .document(document)
+                // 정상 재면접일 때만 root 세션 연관을 저장합니다. 일반 면접이면 null 이
+                // 넘어와 일반 세션과 동일하게 저장됩니다(재면접 요청의 고정 옵션이 다르면
+                // 세션 저장 전에 400 으로 거부되므로 여기까지 오지 않습니다).
+                .retryOfSession(retryOfSession)
                 .mode("PRACTICE")
                 .jobRole(request.jobRole())
                 .questionCount(aiResponse.questionTotal() != null

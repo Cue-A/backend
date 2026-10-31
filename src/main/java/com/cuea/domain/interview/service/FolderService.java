@@ -105,9 +105,7 @@ public class FolderService {
     @Transactional
     public FolderMoveResponse moveSessions(String userId, List<String> sessionIds, UUID folderId) {
         Set<String> requested = distinct(sessionIds);
-        Folder folder = folderId == null ? null
-                : folderRepository.findByPublicIdAndUser_UserId(folderId, userId)
-                        .orElseThrow(() -> new BusinessException(ErrorCode.FOLDER_NOT_FOUND));
+        Folder folder = folderId == null ? null : getOwnedFolder(userId, folderId);
 
         List<InterviewSession> selected = sessionRepository.findAllBySessionIdInAndUser_UserIdAndStatusIn(
                 requested, userId, SessionStatus.LISTED);
@@ -145,7 +143,11 @@ public class FolderService {
 
     /** 없는 폴더 · 남의 폴더 · UUID 가 아닌 값은 구별하지 않고 404 입니다. */
     private Folder getOwnedFolder(String userId, String folderId) {
-        return folderRepository.findByPublicIdAndUser_UserId(parsePublicId(folderId), userId)
+        return getOwnedFolder(userId, parsePublicId(folderId));
+    }
+
+    private Folder getOwnedFolder(String userId, UUID publicId) {
+        return folderRepository.findByPublicIdAndUser_UserId(publicId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.FOLDER_NOT_FOUND));
     }
 

@@ -143,6 +143,10 @@ public record ReportDetailResponse(
     }
 
     public record Resilience(Integer score, Integer display, String comment) {
+
+        static Resilience from(AiReportResult.Resilience r) {
+            return r == null ? null : new Resilience(r.score(), r.display(), r.comment());
+        }
     }
 
     /**
@@ -157,20 +161,17 @@ public record ReportDetailResponse(
     ) {
     }
 
-    /**
-     * @param questionTexts 질문 ID → 질문 원문
-     * @param retry         재시도 상태. 재시도한 적이 없거나 성공했으면 null
-     */
+    /** @param retry 재시도 상태. 재시도한 적이 없거나 성공했으면 null */
     public static ReportDetailResponse of(Report report, AiReportResult result,
-                                          Map<String, String> questionTexts, ReportRetryInfo retry) {
+                                          ReportQuestions questions, ReportRetryInfo retry) {
         return new ReportDetailResponse(
                 report.getPublicId().toString(),
                 report.getSession().getSessionId(),
                 report.getStatus(),
                 overall(result.overall()),
                 axes(result.axes()),
-                map(result.questions(), q -> question(q, questionTexts.get(q.questionId()))),
-                resilience(result.resilience()),
+                map(result.questions(), q -> question(q, questions.textOf(q.questionId()))),
+                Resilience.from(result.resilience()),
                 result.companyComment(),
                 map(result.improvedAnswers(), a -> new ImprovedAnswer(
                         a.questionId(), a.originalExcerpt(), a.suggestion(), a.tStart(), a.tEnd())),
@@ -213,10 +214,6 @@ public record ReportDetailResponse(
                 s == null ? new AxisScores(null, null, null)
                         : new AxisScores(s.content(), s.speech(), s.gaze()),
                 q.transcript(), q.durationSec(), q.wordCount(), q.wasTimeout(), q.hadReask());
-    }
-
-    private static Resilience resilience(AiReportResult.Resilience r) {
-        return r == null ? null : new Resilience(r.score(), r.display(), r.comment());
     }
 
     /** 글로 된 칸은 생성에 실패하면 빈 배열이 원칙이지만, 키가 빠져도 null 대신 빈 배열로 내려줍니다. */

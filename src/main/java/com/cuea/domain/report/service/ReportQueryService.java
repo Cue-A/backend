@@ -2,10 +2,10 @@ package com.cuea.domain.report.service;
 
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
-import com.cuea.domain.interview.entity.Question;
 import com.cuea.domain.interview.service.InterviewSessionQueryService;
 import com.cuea.domain.report.dto.response.ReportDetailResponse;
 import com.cuea.domain.report.dto.response.ReportImprovementsResponse;
+import com.cuea.domain.report.dto.response.ReportQuestions;
 import com.cuea.domain.report.dto.response.ReportRetryInfo;
 import com.cuea.domain.report.dto.response.ReportTimelineResponse;
 import com.cuea.domain.report.entity.Report;
@@ -14,10 +14,6 @@ import com.cuea.infrastructure.ai.dto.AiReportResult;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.Map;
-import java.util.function.Function;
-import java.util.stream.Collectors;
 
 /**
  * 끝난 리포트의 조회. <b>본인 리포트만 보입니다.</b>
@@ -41,7 +37,7 @@ public class ReportQueryService {
     public ReportDetailResponse getDetail(String userId, String reportId) {
         Report report = reportFinder.getOwned(userId, reportId);
         AiReportResult result = readFinished(report);
-        return ReportDetailResponse.of(report, result, questionTexts(questions(report)), retryInfo(report, result));
+        return ReportDetailResponse.of(report, result, questions(report), retryInfo(report, result));
     }
 
     @Transactional(readOnly = true)
@@ -80,19 +76,9 @@ public class ReportQueryService {
         return resultReader.read(report.getReportData());
     }
 
-    /**
-     * 질문 ID → 질문. 되묻기도 들어갑니다.
-     *
-     * <p>다른 도메인이라 리포지토리가 아니라 면접 서비스로 읽습니다. 소유권은 위에서 리포트를 본인 것으로
-     * 찾았으므로 확인됐습니다. (session_id, question_id) 가 PK 라 ID 가 겹치지 않습니다.
-     */
-    private Map<String, Question> questions(Report report) {
-        return sessionQueryService.findQuestionsInOrderForInternal(report.getSession().getSessionId()).stream()
-                .collect(Collectors.toMap(Question::getQuestionId, Function.identity()));
-    }
-
-    private static Map<String, String> questionTexts(Map<String, Question> questions) {
-        return questions.values().stream()
-                .collect(Collectors.toMap(Question::getQuestionId, Question::getText));
+    /** 되묻기 포함. 다른 도메인이라 면접 서비스로 읽고, 소유권은 리포트를 찾을 때 확인했습니다. */
+    private ReportQuestions questions(Report report) {
+        String sessionId = report.getSession().getSessionId();
+        return ReportQuestions.of(sessionQueryService.findQuestionsInOrderForInternal(sessionId));
     }
 }

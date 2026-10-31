@@ -104,15 +104,9 @@ public class ReportController {
     @Operation(
             summary = "XAI 타임라인·회복력 조회",
             description = """
-                    끝난 리포트(COMPLETED · PARTIAL)의 근거 구간을 문항별로 묶어 돌려줍니다. 회복력도 함께 들어갑니다.
-                    되묻기 답변에서 나온 근거도 원 질문 아래에 들어가고 isReask 가 true 입니다.
-
-                    tStart · tEnd 는 면접 전체가 아니라 그 답변 오디오 시작부터의 초입니다.
-                    한 줄로 그릴 때는 앞 문항들의 durationSec 를 더해 위치를 잡으세요.
-                    근거가 비어 있는 이유는 axes 의 축 상태(ok · failed · skipped)로 구분합니다.
-
-                    아직 분석 중이면 202 REPORT_NOT_READY, 실패한 리포트면 409 REPORT_FAILED 입니다.
-                    본인 리포트가 아니거나 없으면 404 REPORT_NOT_FOUND 입니다.""")
+                    근거 구간을 원 질문별로 묶어 회복력과 함께 돌려줍니다. 되묻기 근거는 isReask 가 true 입니다.
+                    tStart · tEnd 는 그 답변 오디오 기준 초라, 한 줄로 그릴 때는 앞 문항의 durationSec 를 더하세요.
+                    상태별 응답(202 · 409 · 404)은 상세 조회와 같습니다.""")
     @GetMapping("/reports/{reportId}/timeline")
     @RateLimit(key = "report-timeline", limit = 60, windowSeconds = 60)
     public Result<ReportTimelineResponse> timeline(@CurrentUser String userId,
@@ -123,16 +117,9 @@ public class ReportController {
     @Operation(
             summary = "개선 답변 예시 조회",
             description = """
-                    끝난 리포트(COMPLETED · PARTIAL)의 개선 답변 예시를 돌려줍니다.
-                    내용 점수가 낮은 문항부터 최대 2개이며, 모두 잘 답했거나 생성에 실패하면 빈 배열입니다.
-                    PARTIAL 이어도 내용 축은 항상 성공한 리포트라 개선 답변이 나옵니다.
-
-                    되묻기 답변에서 발췌했으면 questionId 가 되묻기 ID(예: q_1r)이고 isReask 가 true 입니다.
-                    문항 카드와 연결할 때는 originalQuestionId 를 쓰세요.
-                    tStart · tEnd 는 questionId 답변 오디오 시작부터의 초입니다.
-
-                    아직 분석 중이면 202 REPORT_NOT_READY, 실패한 리포트면 409 REPORT_FAILED 입니다.
-                    본인 리포트가 아니거나 없으면 404 REPORT_NOT_FOUND 입니다.""")
+                    내용 점수가 낮은 문항부터 최대 2개. 없으면 빈 배열입니다.
+                    되묻기에서 발췌했으면 questionId 가 되묻기 ID 이고, 문항과 연결할 때는 originalQuestionId 를 쓰세요.
+                    상태별 응답(202 · 409 · 404)은 상세 조회와 같습니다.""")
     @GetMapping("/reports/{reportId}/improvements")
     @RateLimit(key = "report-improvements", limit = 60, windowSeconds = 60)
     public Result<ReportImprovementsResponse> improvements(@CurrentUser String userId,

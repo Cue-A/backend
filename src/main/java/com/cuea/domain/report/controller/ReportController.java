@@ -4,9 +4,11 @@ import com.cuea.common.annotation.RateLimit;
 import com.cuea.common.result.Result;
 import com.cuea.common.security.CurrentUser;
 import com.cuea.domain.report.dto.response.ReportDetailResponse;
+import com.cuea.domain.report.dto.response.ReportImprovementsResponse;
 import com.cuea.domain.report.dto.response.ReportRequestResponse;
 import com.cuea.domain.report.dto.response.ReportRetryResponse;
 import com.cuea.domain.report.dto.response.ReportStatusResponse;
+import com.cuea.domain.report.dto.response.ReportTimelineResponse;
 import com.cuea.domain.report.service.ReportQueryService;
 import com.cuea.domain.report.service.ReportRequestService;
 import com.cuea.domain.report.service.ReportRetryService;
@@ -97,6 +99,32 @@ public class ReportController {
     public Result<ReportDetailResponse> detail(@CurrentUser String userId,
                                                @PathVariable String reportId) {
         return Result.ok(reportQueryService.getDetail(userId, reportId));
+    }
+
+    @Operation(
+            summary = "XAI 타임라인·회복력 조회",
+            description = """
+                    근거 구간을 원 질문별로 묶어 회복력과 함께 돌려줍니다. 되묻기 근거는 isReask 가 true 입니다.
+                    tStart · tEnd 는 그 답변 오디오 기준 초라, 한 줄로 그릴 때는 앞 문항의 durationSec 를 더하세요.
+                    상태별 응답(202 · 409 · 404)은 상세 조회와 같습니다.""")
+    @GetMapping("/reports/{reportId}/timeline")
+    @RateLimit(key = "report-timeline", limit = 60, windowSeconds = 60)
+    public Result<ReportTimelineResponse> timeline(@CurrentUser String userId,
+                                                   @PathVariable String reportId) {
+        return Result.ok(reportQueryService.getTimeline(userId, reportId));
+    }
+
+    @Operation(
+            summary = "개선 답변 예시 조회",
+            description = """
+                    내용 점수가 낮은 문항부터 최대 2개. 없으면 빈 배열입니다.
+                    되묻기에서 발췌했으면 questionId 가 되묻기 ID 이고, 문항과 연결할 때는 originalQuestionId 를 쓰세요.
+                    상태별 응답(202 · 409 · 404)은 상세 조회와 같습니다.""")
+    @GetMapping("/reports/{reportId}/improvements")
+    @RateLimit(key = "report-improvements", limit = 60, windowSeconds = 60)
+    public Result<ReportImprovementsResponse> improvements(@CurrentUser String userId,
+                                                           @PathVariable String reportId) {
+        return Result.ok(reportQueryService.getImprovements(userId, reportId));
     }
 
     @Operation(

@@ -202,6 +202,11 @@ public class Question extends BaseCreatedEntity {
         this.bookmarked = bookmarked;
     }
 
+    /** 원 질문 ID. 되묻기면 {@link #reaskOf}, 아니면 자기 자신입니다. */
+    public String originalQuestionId() {
+        return reaskOf != null ? reaskOf : questionId;
+    }
+
     /** 문항 수에 포함되는 질문인지. 되묻기만 제외됩니다. */
     public boolean countsTowardQuestionCount() {
         return type.countsTowardQuestionCount();

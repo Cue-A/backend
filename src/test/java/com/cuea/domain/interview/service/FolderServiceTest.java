@@ -3,8 +3,10 @@ package com.cuea.domain.interview.service;
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.dto.response.FolderListResponse;
+import com.cuea.domain.interview.dto.response.FolderMoveResponse;
 import com.cuea.domain.interview.dto.response.FolderResponse;
 import com.cuea.domain.interview.entity.Folder;
+import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.interview.entity.SessionStatus;
 import com.cuea.domain.interview.repository.FolderRepository;
 import com.cuea.domain.interview.repository.FolderSessionCount;
@@ -17,15 +19,20 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.OffsetDateTime;
+import java.util.Collections;
 import java.util.List;
 import java.util.Optional;
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.IntStream;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -166,6 +173,87 @@ class FolderServiceTest {
         assertThat(response.totalCount()).isEqualTo(12);
         assertThat(response.folders()).extracting(FolderResponse::folderName, FolderResponse::sessionCount)
                 .containsExactly(tuple("삼성전자", 5L), tuple("기타", 0L));
+    }
+
+    /** 2회차만 보내도 1회차와 다른 재연습이 같은 폴더로 갑니다. */
+    @Test
+    void 보낸_회차가_속한_면접의_회차를_모두_옮긴다() {
+        Folder folder = givenFolder("삼성전자");
+        InterviewSession root = session("root", null);
+        InterviewSession second = session("second", root);
+        InterviewSession third = session("third", root);
+        when(sessionRepository.findAllBySessionIdInAndUser_UserIdAndStatusIn(
+                Set.of("second"), USER_ID, SessionStatus.LISTED)).thenReturn(List.of(second));
+        when(sessionRepository.findInterviewsOf(USER_ID, Set.of("root"), SessionStatus.LISTED))
+                .thenReturn(List.of(root, second, third));
+
+        FolderMoveResponse response = service.moveSessions(USER_ID, List.of("second"), PUBLIC_ID);
+
+        assertThat(response.folderId()).isEqualTo(PUBLIC_ID.toString());
+        assertThat(response.movedSessionIds()).containsExactly("root", "second", "third");
+        assertThat(List.of(root, second, third)).allSatisfy(s -> assertThat(s.getFolder()).isSameAs(folder));
+    }
+
+    @Test
+    void folderId_가_null_이면_폴더에서_뺀다() {
+        InterviewSession root = session("root", null);
+        root.moveTo(folder(1L, UUID.randomUUID(), "카카오"));
+        when(sessionRepository.findAllBySessionIdInAndUser_UserIdAndStatusIn(
+                Set.of("root"), USER_ID, SessionStatus.LISTED)).thenReturn(List.of(root));
+        when(sessionRepository.findInterviewsOf(USER_ID, Set.of("root"), SessionStatus.LISTED))
+                .thenReturn(List.of(root));
+
+        FolderMoveResponse response = service.moveSessions(USER_ID, List.of("root"), null);
+
+        assertThat(response.folderId()).isNull();
+        assertThat(root.getFolder()).isNull();
+        verify(folderRepository, never()).findByPublicIdAndUser_UserId(any(), anyString());
+    }
+
+    /** 하나라도 못 찾으면 아무것도 옮기지 않습니다. 남의 세션 · 중단된 세션도 조회에서 빠져 여기로 옵니다. */
+    @Test
+    void 보낸_세션을_하나라도_못_찾으면_SESSION_NOT_FOUND() {
+        givenFolder("삼성전자");
+        when(sessionRepository.findAllBySessionIdInAndUser_UserIdAndStatusIn(
+                Set.of("mine", "others"), USER_ID, SessionStatus.LISTED)).thenReturn(List.of(session("mine", null)));
+
+        assertErrorCode(() -> service.moveSessions(USER_ID, List.of("mine", "others"), PUBLIC_ID),
+                ErrorCode.SESSION_NOT_FOUND);
+        verify(sessionRepository, never()).findInterviewsOf(anyString(), anyCollection(), any());
+    }
+
+    @Test
+    void 폴더가_없거나_남의_것이면_FOLDER_NOT_FOUND() {
+        when(folderRepository.findByPublicIdAndUser_UserId(PUBLIC_ID, USER_ID)).thenReturn(Optional.empty());
+
+        assertErrorCode(() -> service.moveSessions(USER_ID, List.of("root"), PUBLIC_ID), ErrorCode.FOLDER_NOT_FOUND);
+    }
+
+    /** 중복을 빼고 셉니다. 같은 ID 를 두 번 보내도 못 찾은 것으로 보지 않습니다. */
+    @Test
+    void 같은_세션을_두_번_보내도_한_번으로_본다() {
+        givenFolder("삼성전자");
+        InterviewSession root = session("root", null);
+        when(sessionRepository.findAllBySessionIdInAndUser_UserIdAndStatusIn(
+                Set.of("root"), USER_ID, SessionStatus.LISTED)).thenReturn(List.of(root));
+        when(sessionRepository.findInterviewsOf(eq(USER_ID), anyCollection(), any())).thenReturn(List.of(root));
+
+        assertThat(service.moveSessions(USER_ID, List.of("root", "root"), PUBLIC_ID).movedSessionIds())
+                .containsExactly("root");
+    }
+
+    @Test
+    void sessionIds_가_비었거나_100개를_넘으면_INVALID_REQUEST() {
+        List<String> tooMany = IntStream.rangeClosed(1, 101).mapToObj(i -> "sess_" + i).toList();
+
+        assertErrorCode(() -> service.moveSessions(USER_ID, Collections.emptyList(), PUBLIC_ID), ErrorCode.INVALID_REQUEST);
+        assertErrorCode(() -> service.moveSessions(USER_ID, null, PUBLIC_ID), ErrorCode.INVALID_REQUEST);
+        assertErrorCode(() -> service.moveSessions(USER_ID, tooMany, PUBLIC_ID), ErrorCode.INVALID_REQUEST);
+    }
+
+    private static InterviewSession session(String id, InterviewSession root) {
+        return InterviewSession.builder().sessionId(id).retryOfSession(root)
+                .status(SessionStatus.COMPLETED).createdAt(T0).build();
     }
 
     private Folder givenFolder(String name) {

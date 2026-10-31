@@ -26,7 +26,7 @@ Read: docs/01-conventions.md
 - 스코프는 **건드린 곳**이다. 도메인이나 계층 이름을 쓴다.
 
   ```
-  도메인   auth  user  document  interview  report  growth  company
+  도메인   auth  user  document  interview  report  record  growth  company
   계층     common  ai  websocket  storage  redis  security  config
   기타     build  docker  github  domain  guide
   ```

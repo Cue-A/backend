@@ -82,7 +82,7 @@ class FolderRepositoryTest extends PostgresRepositoryTest {
         session(user, null, SessionStatus.ABORTED);
         flushAndClear();
 
-        assertThat(sessionRepository.countByFolder(user.getUserId(), SessionStatus.LISTED))
+        assertThat(sessionRepository.countSessionsPerFolder(user.getUserId(), SessionStatus.LISTED))
                 .extracting(FolderSessionCount::folderId, FolderSessionCount::sessionCount)
                 .containsExactly(tuple(samsung.getFolderId(), 2L));
         assertThat(sessionRepository.countByFolder_FolderIdAndStatusIn(empty.getFolderId(), SessionStatus.LISTED))

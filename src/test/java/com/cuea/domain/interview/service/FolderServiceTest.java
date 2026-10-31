@@ -157,7 +157,7 @@ class FolderServiceTest {
         Folder etc = folder(2L, UUID.randomUUID(), "기타");
         when(folderRepository.findAllByUser_UserIdOrderByCreatedAtAscFolderIdAsc(USER_ID))
                 .thenReturn(List.of(samsung, etc));
-        when(sessionRepository.countByFolder(USER_ID, SessionStatus.LISTED))
+        when(sessionRepository.countSessionsPerFolder(USER_ID, SessionStatus.LISTED))
                 .thenReturn(List.of(new FolderSessionCount(1L, 5L)));
         when(sessionRepository.countByUser_UserIdAndStatusIn(USER_ID, SessionStatus.LISTED)).thenReturn(12L);
 

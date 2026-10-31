@@ -76,8 +76,8 @@ public interface InterviewSessionRepository extends Repository<InterviewSession,
                and s.status in :statuses
              group by s.folder.folderId
             """)
-    List<FolderSessionCount> countByFolder(@Param("userId") String userId,
-                                           @Param("statuses") Collection<SessionStatus> statuses);
+    List<FolderSessionCount> countSessionsPerFolder(@Param("userId") String userId,
+                                                    @Param("statuses") Collection<SessionStatus> statuses);
 
     long countByUser_UserIdAndStatusIn(String userId, Collection<SessionStatus> statuses);
 

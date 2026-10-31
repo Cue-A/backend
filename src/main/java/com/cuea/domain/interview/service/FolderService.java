@@ -39,7 +39,7 @@ public class FolderService {
     /** 만든 순서대로. 세션 수는 연습 기록 목록과 같은 기준입니다. */
     @Transactional(readOnly = true)
     public FolderListResponse list(String userId) {
-        Map<Long, Long> counts = sessionRepository.countByFolder(userId, SessionStatus.LISTED).stream()
+        Map<Long, Long> counts = sessionRepository.countSessionsPerFolder(userId, SessionStatus.LISTED).stream()
                 .collect(Collectors.toMap(FolderSessionCount::folderId, FolderSessionCount::sessionCount));
         List<FolderResponse> folders = folderRepository.findAllByUser_UserIdOrderByCreatedAtAscFolderIdAsc(userId)
                 .stream()

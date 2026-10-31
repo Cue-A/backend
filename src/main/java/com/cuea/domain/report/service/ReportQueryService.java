@@ -6,6 +6,7 @@ import com.cuea.domain.interview.entity.Question;
 import com.cuea.domain.interview.service.InterviewSessionQueryService;
 import com.cuea.domain.report.dto.response.ReportDetailResponse;
 import com.cuea.domain.report.dto.response.ReportRetryInfo;
+import com.cuea.domain.report.dto.response.ReportTimelineResponse;
 import com.cuea.domain.report.entity.Report;
 import com.cuea.infrastructure.ai.AiReportResultReader;
 import com.cuea.infrastructure.ai.dto.AiReportResult;
@@ -40,6 +41,13 @@ public class ReportQueryService {
         Report report = reportFinder.getOwned(userId, reportId);
         AiReportResult result = readFinished(report);
         return ReportDetailResponse.of(report, result, questionTexts(questions(report)), retryInfo(report, result));
+    }
+
+    @Transactional(readOnly = true)
+    public ReportTimelineResponse getTimeline(String userId, String reportId) {
+        Report report = reportFinder.getOwned(userId, reportId);
+        AiReportResult result = readFinished(report);
+        return ReportTimelineResponse.of(report, result, questions(report), retryInfo(report, result));
     }
 
     /** 끝난 리포트의 AI 결과. 진행 중 · 실패한 리포트는 여기서 막습니다. */

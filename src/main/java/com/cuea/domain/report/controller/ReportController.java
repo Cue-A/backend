@@ -7,6 +7,7 @@ import com.cuea.domain.report.dto.response.ReportDetailResponse;
 import com.cuea.domain.report.dto.response.ReportRequestResponse;
 import com.cuea.domain.report.dto.response.ReportRetryResponse;
 import com.cuea.domain.report.dto.response.ReportStatusResponse;
+import com.cuea.domain.report.dto.response.ReportTimelineResponse;
 import com.cuea.domain.report.service.ReportQueryService;
 import com.cuea.domain.report.service.ReportRequestService;
 import com.cuea.domain.report.service.ReportRetryService;
@@ -97,6 +98,25 @@ public class ReportController {
     public Result<ReportDetailResponse> detail(@CurrentUser String userId,
                                                @PathVariable String reportId) {
         return Result.ok(reportQueryService.getDetail(userId, reportId));
+    }
+
+    @Operation(
+            summary = "XAI 타임라인·회복력 조회",
+            description = """
+                    끝난 리포트(COMPLETED · PARTIAL)의 근거 구간을 문항별로 묶어 돌려줍니다. 회복력도 함께 들어갑니다.
+                    되묻기 답변에서 나온 근거도 원 질문 아래에 들어가고 isReask 가 true 입니다.
+
+                    tStart · tEnd 는 면접 전체가 아니라 그 답변 오디오 시작부터의 초입니다.
+                    한 줄로 그릴 때는 앞 문항들의 durationSec 를 더해 위치를 잡으세요.
+                    근거가 비어 있는 이유는 axes 의 축 상태(ok · failed · skipped)로 구분합니다.
+
+                    아직 분석 중이면 202 REPORT_NOT_READY, 실패한 리포트면 409 REPORT_FAILED 입니다.
+                    본인 리포트가 아니거나 없으면 404 REPORT_NOT_FOUND 입니다.""")
+    @GetMapping("/reports/{reportId}/timeline")
+    @RateLimit(key = "report-timeline", limit = 60, windowSeconds = 60)
+    public Result<ReportTimelineResponse> timeline(@CurrentUser String userId,
+                                                   @PathVariable String reportId) {
+        return Result.ok(reportQueryService.getTimeline(userId, reportId));
     }
 
     @Operation(

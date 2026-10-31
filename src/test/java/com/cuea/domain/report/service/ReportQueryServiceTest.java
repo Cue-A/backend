@@ -4,8 +4,10 @@ import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.interview.entity.Question;
+import com.cuea.domain.interview.entity.QuestionType;
 import com.cuea.domain.interview.service.InterviewSessionQueryService;
 import com.cuea.domain.report.dto.response.ReportDetailResponse;
+import com.cuea.domain.report.dto.response.ReportTimelineResponse;
 import com.cuea.domain.report.entity.Report;
 import com.cuea.domain.report.entity.ReportRetryStatus;
 import com.cuea.domain.report.entity.ReportStatus;
@@ -16,6 +18,7 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
@@ -28,6 +31,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -81,6 +85,38 @@ class ReportQueryServiceTest {
                 { "question_id": "q_3", "original_excerpt": "낙관적 락을 썼습니다.",
                   "suggestion": "선택 이유와 대안 비교를 함께 언급하면...", "t_start": 12.4, "t_end": 19.8 }
               ]
+            }
+            """;
+
+    /**
+     * 되묻기가 있는 결과. q_1 의 근거가 원 답변(q_1)과 되묻기 답변(q_1r)에 나뉘어 있고,
+     * q_3 은 근거가 없습니다. 시선 근거는 내용 근거보다 앞에 둔 순서를 섞었습니다.
+     */
+    private static final String REASK_RESULT = """
+            {
+              "report_status": "complete",
+              "overall": { "score": 72, "display": 4, "gated": false, "partial": false,
+                           "axes_used": ["content", "speech", "gaze"], "axes_failed": [] },
+              "axes": {
+                "content": { "status": "ok", "score": 72, "display": 4, "metrics": {}, "evidence": [
+                  { "question_id": "q_1r", "t_start": 3.1, "t_end": 8.0, "kind": "strength",
+                    "label": "구체적 사례", "comment": "되묻기에서 사례를 보완했습니다." },
+                  { "question_id": "q_1", "t_start": 12.4, "t_end": 19.8, "kind": "weakness",
+                    "label": "근거 부족", "comment": "결과 수치가 없습니다." },
+                  { "question_id": "q_2", "t_start": 5.0, "t_end": 9.0, "kind": "weakness",
+                    "label": "논리 비약", "comment": "..." } ] },
+                "speech": { "status": "ok", "score": 61, "display": 4, "metrics": {}, "evidence": [] },
+                "gaze": { "status": "ok", "score": 70, "display": 4, "metrics": {}, "evidence": [
+                  { "question_id": "q_1", "t_start": 1.0, "t_end": 2.5, "kind": "weakness",
+                    "label": "시선 회피", "comment": "..." } ] }
+              },
+              "questions": [
+                { "question_id": "q_1", "question_number": 1, "duration_sec": 46.2, "had_reask": true },
+                { "question_id": "q_2", "question_number": 2, "duration_sec": 52.0, "had_reask": false },
+                { "question_id": "q_3", "question_number": 3, "duration_sec": 30.0, "had_reask": false }
+              ],
+              "resilience": null,
+              "improved_answers": []
             }
             """;
 
@@ -330,11 +366,129 @@ class ReportQueryServiceTest {
                 .containsEntry("rateDetail", Map.of("wordsPerMin", 120));
     }
 
+    // --- 타임라인 ---
+
+    /** 되묻기 근거는 되묻기 ID 로 오지만 원 질문 아래에 들어가고, 원 답변 근거 뒤에 섭니다. */
+    @Test
+    void 타임라인은_근거를_원_질문별로_묶고_되묻기_근거는_원_질문_아래에_둔다() throws Exception {
+        givenReport(finished(ReportStatus.COMPLETED, REASK_RESULT));
+        givenQuestionsInDb();
+
+        ReportTimelineResponse response = service.getTimeline(USER_ID, PUBLIC_ID.toString());
+
+        ReportTimelineResponse.TimelineQuestion first = response.questions().get(0);
+        assertThat(first.questionId()).isEqualTo("q_1");
+        assertThat(first.questionText()).isEqualTo("지원 동기를 말씀해 주세요");
+        assertThat(first.durationSec()).isEqualTo(46.2);
+        assertThat(first.hadReask()).isTrue();
+        assertThat(first.evidence())
+                .extracting("axis", "questionId", "isReask", "tStart")
+                .containsExactly(
+                        tuple("gaze", "q_1", false, 1.0),
+                        tuple("content", "q_1", false, 12.4),
+                        tuple("content", "q_1r", true, 3.1));
+        assertThat(response.questions().get(1).evidence()).singleElement()
+                .satisfies(e -> assertThat(e.questionId()).isEqualTo("q_2"));
+    }
+
+    /** 타임라인 구간을 그려야 하므로 근거가 없는 문항도 빠지지 않습니다. */
+    @Test
+    void 타임라인은_근거가_없는_문항도_빈_배열로_준다() throws Exception {
+        givenReport(finished(ReportStatus.COMPLETED, REASK_RESULT));
+        givenQuestionsInDb();
+
+        ReportTimelineResponse response = service.getTimeline(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.questions()).extracting(ReportTimelineResponse.TimelineQuestion::questionId)
+                .containsExactly("q_1", "q_2", "q_3");
+        assertThat(response.questions().get(2).evidence()).isEmpty();
+        assertThat(response.questions().get(2).durationSec()).isEqualTo(30.0);
+    }
+
+    /** 근거가 빈 이유(근거 없음 · 분석 실패 · 카메라 미사용)를 축 상태로 구분할 수 있어야 합니다. */
+    @Test
+    void 타임라인은_축_상태와_회복력을_준다() throws Exception {
+        givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
+
+        ReportTimelineResponse response = service.getTimeline(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.status()).isEqualTo(ReportStatus.PARTIAL);
+        assertThat(response.axes().content()).isEqualTo("ok");
+        assertThat(response.axes().gaze()).isEqualTo("failed");
+        assertThat(response.resilience().score()).isEqualTo(58);
+        assertThat(response.retry()).isNull();
+    }
+
+    /** 계약 예시의 q_3 근거는 questions[] 에 q_3 이 없어 붙을 문항이 없습니다. */
+    @Test
+    void 타임라인에서_문항을_찾지_못한_근거는_빠진다() throws Exception {
+        givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
+
+        ReportTimelineResponse response = service.getTimeline(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.questions()).singleElement()
+                .satisfies(q -> assertThat(q.evidence()).isEmpty());
+    }
+
+    @Test
+    void 타임라인_재시도_중이면_retry_에_축을_준다() throws Exception {
+        Report report = finished(ReportStatus.PARTIAL, CONTRACT_RESULT);
+        givenReport(Report.builder().reportId(10L).publicId(PUBLIC_ID).session(report.getSession())
+                .status(ReportStatus.PARTIAL).retryStatus(ReportRetryStatus.PROCESSING).attempt(2)
+                .reportData(report.getReportData()).createdAt(CREATED_AT).completedAt(COMPLETED_AT).build());
+
+        ReportTimelineResponse response = service.getTimeline(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.retry().status()).isEqualTo(ReportRetryStatus.PROCESSING);
+        assertThat(response.retry().axes()).containsExactly("gaze");
+    }
+
+    @Test
+    void 타임라인_응답_JSON_키는_camelCase_다() throws Exception {
+        givenReport(finished(ReportStatus.COMPLETED, REASK_RESULT));
+        givenQuestionsInDb();
+
+        JsonNode json = objectMapper.valueToTree(service.getTimeline(USER_ID, PUBLIC_ID.toString()));
+
+        JsonNode evidence = json.path("questions").get(0).path("evidence").get(2);
+        assertThat(evidence.path("isReask").asBoolean()).isTrue();
+        assertThat(evidence.has("tStart")).isTrue();
+        assertThat(json.path("questions").get(0).has("hadReask")).isTrue();
+        assertThat(fieldNames(json)).noneMatch(name -> name.contains("_"));
+    }
+
+    @Test
+    void 타임라인도_분석_중이면_REPORT_NOT_READY_실패면_REPORT_FAILED() {
+        givenReport(report(ReportStatus.PROCESSING, null, null));
+        assertErrorCode(() -> service.getTimeline(USER_ID, PUBLIC_ID.toString()), ErrorCode.REPORT_NOT_READY);
+
+        givenReport(report(ReportStatus.FAILED, null, COMPLETED_AT));
+        assertErrorCode(() -> service.getTimeline(USER_ID, PUBLIC_ID.toString()), ErrorCode.REPORT_FAILED);
+    }
+
     private void assertErrorCode(ErrorCode expected) {
-        assertThatThrownBy(() -> service.getDetail(USER_ID, PUBLIC_ID.toString()))
+        assertErrorCode(() -> service.getDetail(USER_ID, PUBLIC_ID.toString()), expected);
+    }
+
+    private void assertErrorCode(ThrowingCallable call, ErrorCode expected) {
+        assertThatThrownBy(call)
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(expected);
+    }
+
+    /** REASK_RESULT 의 질문들. q_1r 은 q_1 의 되묻기라 문항 번호가 같습니다. */
+    private void givenQuestionsInDb() {
+        when(sessionQueryService.findQuestionsInOrderForInternal(SESSION_ID)).thenReturn(List.of(
+                question("q_1", QuestionType.QUESTION, 1, null, "지원 동기를 말씀해 주세요"),
+                question("q_1r", QuestionType.REASK, 1, "q_1", "조금 더 구체적으로 말씀해 주시겠어요?"),
+                question("q_2", QuestionType.QUESTION, 2, null, "가장 어려웠던 협업 경험은 무엇인가요?"),
+                question("q_3", QuestionType.FOLLOWUP, 3, null, "그때 본인의 역할은 무엇이었나요?")));
+    }
+
+    private static Question question(String id, QuestionType type, int number, String reaskOf, String text) {
+        return Question.builder().sessionId(SESSION_ID).questionId(id).type(type)
+                .questionNumber(number).reaskOf(reaskOf).text(text).build();
     }
 
     private void givenReport(Report report) {

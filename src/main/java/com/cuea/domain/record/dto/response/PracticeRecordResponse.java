@@ -1,5 +1,6 @@
 package com.cuea.domain.record.dto.response;
 
+import com.cuea.domain.interview.entity.Folder;
 import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.interview.entity.Persona;
 import com.cuea.domain.interview.entity.SessionStatus;
@@ -32,11 +33,22 @@ public record PracticeRecordResponse(
 
         OffsetDateTime createdAt,
 
+        @Schema(description = "들어 있는 폴더. 폴더에 넣지 않았으면 null")
+        FolderRef folder,
+
         @Schema(description = "리포트 요약. 리포트를 요청하지 않았으면 null")
         ReportSummary report
 ) {
 
-    /** 회사는 목록 조회에서 함께 로드됩니다. */
+    /** @param folderId 폴더 목록 · 폴더 옮기기에 쓰는 ID 와 같습니다 */
+    public record FolderRef(String folderId, String folderName) {
+
+        static FolderRef from(Folder folder) {
+            return folder == null ? null : new FolderRef(folder.getPublicId().toString(), folder.getFolderName());
+        }
+    }
+
+    /** 회사와 폴더는 목록 조회에서 함께 로드됩니다. */
     public static PracticeRecordResponse of(InterviewSession session, int round, ReportSummary report) {
         return new PracticeRecordResponse(
                 session.getSessionId(),
@@ -47,6 +59,7 @@ public record PracticeRecordResponse(
                 session.getStatus(),
                 round,
                 session.getCreatedAt(),
+                FolderRef.from(session.getFolder()),
                 report);
     }
 }

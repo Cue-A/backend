@@ -3,6 +3,9 @@ package com.cuea.domain.record.controller;
 import com.cuea.common.annotation.RateLimit;
 import com.cuea.common.result.Result;
 import com.cuea.common.security.CurrentUser;
+import com.cuea.domain.interview.dto.response.FolderMoveResponse;
+import com.cuea.domain.interview.service.FolderService;
+import com.cuea.domain.record.dto.request.PracticeRecordFolderRequest;
 import com.cuea.domain.record.dto.request.PracticeRecordStatus;
 import com.cuea.domain.record.dto.response.PracticeRecordListResponse;
 import com.cuea.domain.record.service.PracticeRecordQueryService;
@@ -10,6 +13,8 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
@@ -23,6 +28,7 @@ import java.util.UUID;
 public class PracticeRecordController {
 
     private final PracticeRecordQueryService practiceRecordQueryService;
+    private final FolderService folderService;
 
     @Operation(
             summary = "연습 기록 목록",
@@ -41,5 +47,21 @@ public class PracticeRecordController {
             @RequestParam(required = false) Integer size) {
 
         return Result.ok(practiceRecordQueryService.list(userId, status, folderId, keyword, page, size));
+    }
+
+    @Operation(
+            summary = "연습 기록 폴더 옮기기",
+            description = """
+                    sessionIds 를 folderId 폴더로 옮깁니다. folderId 가 null 이면 폴더에서 뺍니다.
+                    면접 단위로 움직여, 보낸 회차가 속한 면접의 1회차와 재면접이 모두 옮겨집니다.
+                    sessionIds 는 1~100개이고 중복은 무시합니다. 하나라도 없거나 남의 것이거나 중단된 세션이면
+                    아무것도 옮기지 않고 404 SESSION_NOT_FOUND, 폴더가 없거나 남의 것이면 404 FOLDER_NOT_FOUND 입니다.""")
+    @PatchMapping("/folder")
+    @RateLimit(key = "practice-records-folder", limit = 30, windowSeconds = 60)
+    public Result<FolderMoveResponse> moveToFolder(
+            @CurrentUser String userId,
+            @RequestBody PracticeRecordFolderRequest request) {
+
+        return Result.ok(folderService.moveSessions(userId, request.sessionIds(), request.folderId()));
     }
 }

@@ -89,10 +89,7 @@ class ReportQueryServiceTest {
             }
             """;
 
-    /**
-     * 되묻기가 있는 결과. q_1 의 근거가 원 답변(q_1)과 되묻기 답변(q_1r)에 나뉘어 있고,
-     * q_3 은 근거가 없습니다. 시선 근거는 내용 근거보다 앞에 둔 순서를 섞었습니다.
-     */
+    /** q_1 근거가 원 답변(q_1)과 되묻기(q_1r)에 나뉘고, q_3 은 근거가 없습니다. */
     private static final String REASK_RESULT = """
             {
               "report_status": "complete",
@@ -369,7 +366,6 @@ class ReportQueryServiceTest {
 
     // --- 타임라인 ---
 
-    /** 되묻기 근거는 되묻기 ID 로 오지만 원 질문 아래에 들어가고, 원 답변 근거 뒤에 섭니다. */
     @Test
     void 타임라인은_근거를_원_질문별로_묶고_되묻기_근거는_원_질문_아래에_둔다() throws Exception {
         givenReport(finished(ReportStatus.COMPLETED, REASK_RESULT));
@@ -392,7 +388,6 @@ class ReportQueryServiceTest {
                 .satisfies(e -> assertThat(e.questionId()).isEqualTo("q_2"));
     }
 
-    /** 타임라인 구간을 그려야 하므로 근거가 없는 문항도 빠지지 않습니다. */
     @Test
     void 타임라인은_근거가_없는_문항도_빈_배열로_준다() throws Exception {
         givenReport(finished(ReportStatus.COMPLETED, REASK_RESULT));
@@ -406,7 +401,6 @@ class ReportQueryServiceTest {
         assertThat(response.questions().get(2).durationSec()).isEqualTo(30.0);
     }
 
-    /** 근거가 빈 이유(근거 없음 · 분석 실패 · 카메라 미사용)를 축 상태로 구분할 수 있어야 합니다. */
     @Test
     void 타임라인은_축_상태와_회복력을_준다() throws Exception {
         givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
@@ -420,7 +414,7 @@ class ReportQueryServiceTest {
         assertThat(response.retry()).isNull();
     }
 
-    /** 계약 예시의 q_3 근거는 questions[] 에 q_3 이 없어 붙을 문항이 없습니다. */
+    /** 계약 예시의 q_3 근거는 questions[] 에 q_3 이 없습니다. */
     @Test
     void 타임라인에서_문항을_찾지_못한_근거는_빠진다() throws Exception {
         givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
@@ -442,6 +436,40 @@ class ReportQueryServiceTest {
 
         assertThat(response.retry().status()).isEqualTo(ReportRetryStatus.PROCESSING);
         assertThat(response.retry().axes()).containsExactly("gaze");
+    }
+
+    @Test
+    void 타임라인은_축이_빠져도_문항을_빈_근거로_준다() throws Exception {
+        givenReport(finished(ReportStatus.COMPLETED, """
+                { "report_status": "complete", "overall": { "score": 50 },
+                  "questions": [ { "question_number": 1, "duration_sec": 10.0 },
+                                 { "question_id": "q_2", "question_number": 2, "duration_sec": 20.0 } ] }
+                """));
+
+        ReportTimelineResponse response = service.getTimeline(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.axes()).isEqualTo(new ReportTimelineResponse.AxisStatuses(null, null, null));
+        assertThat(response.questions()).hasSize(2)
+                .allSatisfy(q -> assertThat(q.evidence()).isEmpty());
+        assertThat(response.resilience()).isNull();
+    }
+
+    @Test
+    void 타임라인에서_시작_시각이_없는_근거는_같은_답변_근거_중_맨_뒤다() throws Exception {
+        givenReport(finished(ReportStatus.COMPLETED, """
+                { "report_status": "complete",
+                  "axes": { "content": { "status": "ok", "evidence": [
+                    { "question_id": "q_1", "t_start": null, "kind": "weakness" },
+                    { "question_id": "q_1", "t_start": 7.0, "kind": "weakness" },
+                    { "question_id": "q_1", "t_start": 2.0, "kind": "strength" } ] } },
+                  "questions": [ { "question_id": "q_1", "question_number": 1 } ] }
+                """));
+
+        ReportTimelineResponse response = service.getTimeline(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.questions().get(0).evidence())
+                .extracting(ReportTimelineResponse.TimelineEvidence::tStart)
+                .containsExactly(2.0, 7.0, null);
     }
 
     @Test
@@ -469,7 +497,6 @@ class ReportQueryServiceTest {
 
     // --- 개선 답변 ---
 
-    /** 되묻기 답변에서 따온 발췌는 되묻기 ID 로 오지만, 문항 번호와 원문은 원 질문 것을 붙입니다. */
     @Test
     void 개선_답변은_되묻기에서_발췌했으면_원_질문을_붙인다() throws Exception {
         givenReport(finished(ReportStatus.COMPLETED, improvements("""
@@ -514,7 +541,6 @@ class ReportQueryServiceTest {
                 });
     }
 
-    /** 모두 잘 답했거나 생성에 실패하면 AI 가 빈 배열을 주고, 키가 빠져도 빈 배열로 내려줍니다. */
     @Test
     void 개선_답변이_없으면_빈_배열이다() throws Exception {
         givenReport(finished(ReportStatus.COMPLETED, """
@@ -546,7 +572,18 @@ class ReportQueryServiceTest {
         assertErrorCode(() -> service.getImprovements(USER_ID, PUBLIC_ID.toString()), ErrorCode.REPORT_FAILED);
     }
 
-    /** improved_answers 만 바꾼 결과. 나머지 칸은 저장 전 검증을 통과하는 최소한만 둡니다. */
+    @Test
+    void 타임라인과_개선_답변도_남의_리포트나_UUID_가_아니면_REPORT_NOT_FOUND() {
+        when(reportRepository.findByPublicIdAndSession_User_UserId(any(), anyString()))
+                .thenReturn(Optional.empty());
+
+        assertErrorCode(() -> service.getTimeline(USER_ID, PUBLIC_ID.toString()), ErrorCode.REPORT_NOT_FOUND);
+        assertErrorCode(() -> service.getImprovements(USER_ID, PUBLIC_ID.toString()), ErrorCode.REPORT_NOT_FOUND);
+        assertErrorCode(() -> service.getTimeline(USER_ID, "not-a-uuid"), ErrorCode.REPORT_NOT_FOUND);
+        assertErrorCode(() -> service.getImprovements(USER_ID, "not-a-uuid"), ErrorCode.REPORT_NOT_FOUND);
+    }
+
+    /** improved_answers 만 채운 최소 결과. */
     private static String improvements(String items) {
         return """
                 { "report_status": "complete", "overall": { "score": 70 },
@@ -566,7 +603,7 @@ class ReportQueryServiceTest {
                 .isEqualTo(expected);
     }
 
-    /** REASK_RESULT 의 질문들. q_1r 은 q_1 의 되묻기라 문항 번호가 같습니다. */
+    /** REASK_RESULT 의 질문들. q_1r 은 q_1 의 되묻기입니다. */
     private void givenQuestionsInDb() {
         when(sessionQueryService.findQuestionsInOrderForInternal(SESSION_ID)).thenReturn(List.of(
                 question("q_1", QuestionType.QUESTION, 1, null, "지원 동기를 말씀해 주세요"),

@@ -4,6 +4,7 @@ import com.cuea.common.annotation.RateLimit;
 import com.cuea.common.result.Result;
 import com.cuea.common.security.CurrentUser;
 import com.cuea.domain.report.dto.response.ReportDetailResponse;
+import com.cuea.domain.report.dto.response.ReportImprovementsResponse;
 import com.cuea.domain.report.dto.response.ReportRequestResponse;
 import com.cuea.domain.report.dto.response.ReportRetryResponse;
 import com.cuea.domain.report.dto.response.ReportStatusResponse;
@@ -117,6 +118,26 @@ public class ReportController {
     public Result<ReportTimelineResponse> timeline(@CurrentUser String userId,
                                                    @PathVariable String reportId) {
         return Result.ok(reportQueryService.getTimeline(userId, reportId));
+    }
+
+    @Operation(
+            summary = "개선 답변 예시 조회",
+            description = """
+                    끝난 리포트(COMPLETED · PARTIAL)의 개선 답변 예시를 돌려줍니다.
+                    내용 점수가 낮은 문항부터 최대 2개이며, 모두 잘 답했거나 생성에 실패하면 빈 배열입니다.
+                    PARTIAL 이어도 내용 축은 항상 성공한 리포트라 개선 답변이 나옵니다.
+
+                    되묻기 답변에서 발췌했으면 questionId 가 되묻기 ID(예: q_1r)이고 isReask 가 true 입니다.
+                    문항 카드와 연결할 때는 originalQuestionId 를 쓰세요.
+                    tStart · tEnd 는 questionId 답변 오디오 시작부터의 초입니다.
+
+                    아직 분석 중이면 202 REPORT_NOT_READY, 실패한 리포트면 409 REPORT_FAILED 입니다.
+                    본인 리포트가 아니거나 없으면 404 REPORT_NOT_FOUND 입니다.""")
+    @GetMapping("/reports/{reportId}/improvements")
+    @RateLimit(key = "report-improvements", limit = 60, windowSeconds = 60)
+    public Result<ReportImprovementsResponse> improvements(@CurrentUser String userId,
+                                                           @PathVariable String reportId) {
+        return Result.ok(reportQueryService.getImprovements(userId, reportId));
     }
 
     @Operation(

@@ -7,6 +7,7 @@ import com.cuea.domain.interview.entity.Question;
 import com.cuea.domain.interview.entity.QuestionType;
 import com.cuea.domain.interview.service.InterviewSessionQueryService;
 import com.cuea.domain.report.dto.response.ReportDetailResponse;
+import com.cuea.domain.report.dto.response.ReportImprovementsResponse;
 import com.cuea.domain.report.dto.response.ReportTimelineResponse;
 import com.cuea.domain.report.entity.Report;
 import com.cuea.domain.report.entity.ReportRetryStatus;
@@ -464,6 +465,94 @@ class ReportQueryServiceTest {
 
         givenReport(report(ReportStatus.FAILED, null, COMPLETED_AT));
         assertErrorCode(() -> service.getTimeline(USER_ID, PUBLIC_ID.toString()), ErrorCode.REPORT_FAILED);
+    }
+
+    // --- 개선 답변 ---
+
+    /** 되묻기 답변에서 따온 발췌는 되묻기 ID 로 오지만, 문항 번호와 원문은 원 질문 것을 붙입니다. */
+    @Test
+    void 개선_답변은_되묻기에서_발췌했으면_원_질문을_붙인다() throws Exception {
+        givenReport(finished(ReportStatus.COMPLETED, improvements("""
+                { "question_id": "q_1r", "original_excerpt": "그냥 열심히 했습니다.",
+                  "suggestion": "맡은 역할을 먼저 말해 보세요.", "t_start": 3.1, "t_end": 8.0 },
+                { "question_id": "q_2", "original_excerpt": "같이 잘 해결했습니다.",
+                  "suggestion": "갈등의 원인을 구체적으로 말해 보세요.", "t_start": 5.0, "t_end": 9.0 }
+                """)));
+        givenQuestionsInDb();
+
+        ReportImprovementsResponse response = service.getImprovements(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.reportId()).isEqualTo(PUBLIC_ID.toString());
+        assertThat(response.improvedAnswers())
+                .extracting("questionId", "originalQuestionId", "isReask", "questionNumber", "questionText")
+                .containsExactly(
+                        tuple("q_1r", "q_1", true, 1, "지원 동기를 말씀해 주세요"),
+                        tuple("q_2", "q_2", false, 2, "가장 어려웠던 협업 경험은 무엇인가요?"));
+        assertThat(response.improvedAnswers().get(0))
+                .satisfies(a -> {
+                    assertThat(a.originalExcerpt()).isEqualTo("그냥 열심히 했습니다.");
+                    assertThat(a.suggestion()).isEqualTo("맡은 역할을 먼저 말해 보세요.");
+                    assertThat(a.tStart()).isEqualTo(3.1);
+                    assertThat(a.tEnd()).isEqualTo(8.0);
+                });
+    }
+
+    @Test
+    void 개선_답변의_질문을_못_찾으면_번호와_원문만_비고_나머지는_그대로다() throws Exception {
+        givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
+
+        ReportImprovementsResponse response = service.getImprovements(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.improvedAnswers()).singleElement()
+                .satisfies(a -> {
+                    assertThat(a.questionId()).isEqualTo("q_3");
+                    assertThat(a.originalQuestionId()).isEqualTo("q_3");
+                    assertThat(a.isReask()).isFalse();
+                    assertThat(a.questionNumber()).isNull();
+                    assertThat(a.questionText()).isNull();
+                    assertThat(a.originalExcerpt()).isEqualTo("낙관적 락을 썼습니다.");
+                });
+    }
+
+    /** 모두 잘 답했거나 생성에 실패하면 AI 가 빈 배열을 주고, 키가 빠져도 빈 배열로 내려줍니다. */
+    @Test
+    void 개선_답변이_없으면_빈_배열이다() throws Exception {
+        givenReport(finished(ReportStatus.COMPLETED, """
+                { "report_status": "complete", "overall": { "score": 50 }, "axes": {} }
+                """));
+
+        assertThat(service.getImprovements(USER_ID, PUBLIC_ID.toString()).improvedAnswers()).isEmpty();
+    }
+
+    @Test
+    void 개선_답변_응답_JSON_키는_camelCase_다() throws Exception {
+        givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
+
+        JsonNode json = objectMapper.valueToTree(service.getImprovements(USER_ID, PUBLIC_ID.toString()));
+
+        JsonNode answer = json.path("improvedAnswers").get(0);
+        assertThat(answer.has("isReask")).isTrue();
+        assertThat(answer.has("originalQuestionId")).isTrue();
+        assertThat(answer.has("tStart")).isTrue();
+        assertThat(fieldNames(json)).noneMatch(name -> name.contains("_"));
+    }
+
+    @Test
+    void 개선_답변도_분석_중이면_REPORT_NOT_READY_실패면_REPORT_FAILED() {
+        givenReport(report(ReportStatus.PROCESSING, null, null));
+        assertErrorCode(() -> service.getImprovements(USER_ID, PUBLIC_ID.toString()), ErrorCode.REPORT_NOT_READY);
+
+        givenReport(report(ReportStatus.FAILED, null, COMPLETED_AT));
+        assertErrorCode(() -> service.getImprovements(USER_ID, PUBLIC_ID.toString()), ErrorCode.REPORT_FAILED);
+    }
+
+    /** improved_answers 만 바꾼 결과. 나머지 칸은 저장 전 검증을 통과하는 최소한만 둡니다. */
+    private static String improvements(String items) {
+        return """
+                { "report_status": "complete", "overall": { "score": 70 },
+                  "axes": { "content": { "status": "ok" }, "speech": { "status": "ok" }, "gaze": { "status": "ok" } },
+                  "questions": [], "improved_answers": [ %s ] }
+                """.formatted(items);
     }
 
     private void assertErrorCode(ErrorCode expected) {

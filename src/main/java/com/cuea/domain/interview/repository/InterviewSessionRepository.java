@@ -66,4 +66,20 @@ public interface InterviewSessionRepository extends Repository<InterviewSession,
     List<InterviewSession> findRetriesOf(@Param("userId") String userId,
                                          @Param("rootIds") Collection<String> rootIds,
                                          @Param("aborted") SessionStatus aborted);
+
+    /** 폴더별 세션 수. 세션이 없는 폴더는 나오지 않습니다. */
+    @Query("""
+            select new com.cuea.domain.interview.repository.FolderSessionCount(s.folder.folderId, count(s))
+              from InterviewSession s
+             where s.user.userId = :userId
+               and s.folder is not null
+               and s.status in :statuses
+             group by s.folder.folderId
+            """)
+    List<FolderSessionCount> countByFolder(@Param("userId") String userId,
+                                           @Param("statuses") Collection<SessionStatus> statuses);
+
+    long countByUser_UserIdAndStatusIn(String userId, Collection<SessionStatus> statuses);
+
+    long countByFolder_FolderIdAndStatusIn(Long folderId, Collection<SessionStatus> statuses);
 }

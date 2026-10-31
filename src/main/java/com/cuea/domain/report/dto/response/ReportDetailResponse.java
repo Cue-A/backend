@@ -31,6 +31,9 @@ public record ReportDetailResponse(
 
         Overall overall,
 
+        @Schema(description = "한 줄 총평. 없으면 null")
+        String summary,
+
         Axes axes,
 
         @Schema(description = "문항별 결과. 되묻기는 원 질문에 합쳐지고 hadReask 가 true 입니다")
@@ -119,6 +122,7 @@ public record ReportDetailResponse(
      * @param questionText 질문 원문. AI 결과에 없어 Backend 가 붙입니다. 찾지 못하면 null
      * @param axes         축별 점수. 실패·미사용 축은 null
      * @param wasTimeout   true 면 감점 없이 "시간 초과로 중단됨" 으로 표시
+     * @param comment      문항 코멘트. 없으면 null
      */
     public record QuestionResult(
             String questionId,
@@ -135,7 +139,8 @@ public record ReportDetailResponse(
             Double durationSec,
             Integer wordCount,
             boolean wasTimeout,
-            boolean hadReask
+            boolean hadReask,
+            String comment
     ) {
     }
 
@@ -168,6 +173,7 @@ public record ReportDetailResponse(
                 report.getSession().getSessionId(),
                 report.getStatus(),
                 overall(result.overall()),
+                result.summary(),
                 axes(result.axes()),
                 map(result.questions(), q -> question(q, questionTexts.get(q.questionId()))),
                 resilience(result.resilience()),
@@ -212,7 +218,7 @@ public record ReportDetailResponse(
                 q.isReplay(), q.isSpareTopic(), q.score(), q.display(),
                 s == null ? new AxisScores(null, null, null)
                         : new AxisScores(s.content(), s.speech(), s.gaze()),
-                q.transcript(), q.durationSec(), q.wordCount(), q.wasTimeout(), q.hadReask());
+                q.transcript(), q.durationSec(), q.wordCount(), q.wasTimeout(), q.hadReask(), q.comment());
     }
 
     private static Resilience resilience(AiReportResult.Resilience r) {

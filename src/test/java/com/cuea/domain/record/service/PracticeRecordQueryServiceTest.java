@@ -2,6 +2,7 @@ package com.cuea.domain.record.service;
 
 import com.cuea.common.paging.PageRequests;
 import com.cuea.domain.company.entity.Company;
+import com.cuea.domain.interview.entity.Folder;
 import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.interview.entity.Persona;
 import com.cuea.domain.interview.entity.SessionStatus;
@@ -54,8 +55,10 @@ class PracticeRecordQueryServiceTest {
 
     @Test
     void 세션에_회차와_리포트_요약을_붙인다() {
+        Folder folder = Folder.builder().publicId(UUID.randomUUID()).folderName("삼성").build();
         InterviewSession withReport = session("sess_1", Company.builder().companyName("삼성전자").build(),
                 SessionStatus.COMPLETED);
+        withReport.moveTo(folder);
         InterviewSession running = session("sess_2", null, SessionStatus.IN_PROGRESS);
         givenSessions(new PageImpl<>(List.of(withReport, running), PageRequest.of(0, 2), 12));
         when(sessionQueryService.roundsOf(USER_ID, List.of(withReport, running)))
@@ -75,11 +78,14 @@ class PracticeRecordQueryServiceTest {
         assertThat(first.round()).isEqualTo(1);
         assertThat(first.createdAt()).isEqualTo(CREATED_AT);
         assertThat(first.report()).isEqualTo(summary);
+        assertThat(first.folder()).isEqualTo(
+                new PracticeRecordResponse.FolderRef(folder.getPublicId().toString(), "삼성"));
         PracticeRecordResponse second = response.records().get(1);
         assertThat(second.companyName()).isNull();
         assertThat(second.status()).isEqualTo(SessionStatus.IN_PROGRESS);
         assertThat(second.round()).isEqualTo(2);
         assertThat(second.report()).isNull();
+        assertThat(second.folder()).isNull();
     }
 
     @Test

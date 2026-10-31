@@ -33,30 +33,23 @@ public interface InterviewSessionRepository extends Repository<InterviewSession,
 
     InterviewSession save(InterviewSession session);
 
+    /** 연습 기록 목록과 그 개수 쿼리가 같이 쓰는 조건. 폴더는 조건에만 써서 left join 입니다. */
+    String RECORDS_CONDITION = """
+              left join s.folder f
+             where s.user.userId = :userId
+               and s.status in :statuses
+               and (:folderId is null or f.publicId = :folderId)
+               and (lower(c.companyName) like :pattern escape '!' or lower(s.jobRole) like :pattern escape '!')
+            """;
+
     /**
-     * 연습 기록 목록. 회사는 이름을 보여주므로 함께 가져오고, 폴더는 조건에만 써서 left join 입니다.
+     * 연습 기록 목록. 회사는 이름을 보여주므로 함께 가져옵니다.
      *
      * @param folderId null 이면 폴더를 보지 않습니다
      * @param pattern  회사명 · 직무에 거는 소문자 LIKE 패턴. 검색어가 없으면 {@code %}
      */
-    @Query(value = """
-            select s from InterviewSession s
-              left join fetch s.company c
-              left join s.folder f
-             where s.user.userId = :userId
-               and s.status in :statuses
-               and (:folderId is null or f.publicId = :folderId)
-               and (lower(c.companyName) like :pattern escape '!' or lower(s.jobRole) like :pattern escape '!')
-            """,
-            countQuery = """
-            select count(s) from InterviewSession s
-              left join s.company c
-              left join s.folder f
-             where s.user.userId = :userId
-               and s.status in :statuses
-               and (:folderId is null or f.publicId = :folderId)
-               and (lower(c.companyName) like :pattern escape '!' or lower(s.jobRole) like :pattern escape '!')
-            """)
+    @Query(value = "select s from InterviewSession s left join fetch s.company c" + RECORDS_CONDITION,
+            countQuery = "select count(s) from InterviewSession s left join s.company c" + RECORDS_CONDITION)
     Page<InterviewSession> findRecords(@Param("userId") String userId,
                                        @Param("statuses") Collection<SessionStatus> statuses,
                                        @Param("folderId") UUID folderId,

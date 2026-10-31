@@ -22,7 +22,7 @@ import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
- * 끝난 세션을 다른 도메인이 읽어갈 때의 창구입니다.
+ * 세션을 다른 도메인이 읽어갈 때의 창구입니다.
  *
  * <p>도메인 간 참조는 서비스 레벨에서만 하므로, 리포트 도메인이 면접 리포지토리를
  * 직접 보지 않도록 여기를 거칩니다. docs/01-conventions.md 참고.
@@ -33,6 +33,11 @@ import java.util.stream.Collectors;
 @Service
 @RequiredArgsConstructor
 public class InterviewSessionQueryService {
+
+    /** 같은 루트 안에서 먼저 시작한 세션이 앞 회차입니다. */
+    private static final Comparator<InterviewSession> STARTED_FIRST = Comparator
+            .comparing(InterviewSession::getCreatedAt)
+            .thenComparing(InterviewSession::getSessionId);
 
     private final InterviewSessionRepository sessionRepository;
     private final QuestionRepository questionRepository;
@@ -53,11 +58,6 @@ public class InterviewSessionQueryService {
         return sessionRepository.findBySessionIdForInternal(sessionId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND));
     }
-
-    /** 같은 루트 안에서 먼저 시작한 세션이 앞 회차입니다. */
-    private static final Comparator<InterviewSession> STARTED_FIRST = Comparator
-            .comparing(InterviewSession::getCreatedAt)
-            .thenComparing(InterviewSession::getSessionId);
 
     /**
      * 본인 세션 목록. 회사가 함께 로드됩니다.

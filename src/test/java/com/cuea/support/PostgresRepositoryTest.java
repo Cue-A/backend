@@ -4,7 +4,6 @@ import org.springframework.boot.test.autoconfigure.jdbc.AutoConfigureTestDatabas
 import org.springframework.boot.test.autoconfigure.orm.jpa.DataJpaTest;
 import org.springframework.boot.testcontainers.service.connection.ServiceConnection;
 import org.testcontainers.containers.PostgreSQLContainer;
-import org.testcontainers.junit.jupiter.Container;
 import org.testcontainers.junit.jupiter.Testcontainers;
 
 /**
@@ -15,14 +14,20 @@ import org.testcontainers.junit.jupiter.Testcontainers;
  * {@code jsonb} 컬럼 때문에 스키마가 만들어지지 않아서입니다.
  *
  * <p>Docker 가 없으면 실패하지 않고 건너뜁니다. 나머지 테스트는 여전히 Docker 없이 돕니다.
- * 컨테이너는 클래스마다 새로 띄우지 않도록 static 으로 한 번만 띄웁니다.
+ *
+ * <p>컨테이너는 한 번 띄우고 끄지 않습니다. {@code @Container} 로 두면 하위 클래스마다 껐다
+ * 켜지면서 포트가 바뀌는데, 캐시된 스프링 컨텍스트는 옛 포트를 들고 있어 두 번째 클래스부터
+ * 연결이 안 됩니다. 테스트가 끝나면 Testcontainers 가 정리합니다.
  */
 @DataJpaTest
 @AutoConfigureTestDatabase(replace = AutoConfigureTestDatabase.Replace.NONE)
 @Testcontainers(disabledWithoutDocker = true)
 public abstract class PostgresRepositoryTest {
 
-    @Container
     @ServiceConnection
     static final PostgreSQLContainer<?> POSTGRES = new PostgreSQLContainer<>("postgres:16");
+
+    static {
+        POSTGRES.start();
+    }
 }

@@ -2,6 +2,7 @@ package com.cuea.domain.document.service;
 
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
+import com.cuea.common.paging.PageRequests;
 import com.cuea.domain.document.dto.response.DocumentDetailResponse;
 import com.cuea.domain.document.dto.response.DocumentListResponse;
 import com.cuea.domain.document.dto.response.DocumentResponse;
@@ -12,7 +13,6 @@ import com.cuea.domain.document.repository.DocumentRepository;
 import com.cuea.infrastructure.file.PresignedUrlIssuer;
 import lombok.RequiredArgsConstructor;
 import org.springframework.data.domain.Page;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
@@ -35,16 +35,6 @@ import java.util.UUID;
 @RequiredArgsConstructor
 public class DocumentQueryService {
 
-    static final int DEFAULT_PAGE_SIZE = 20;
-
-    /**
-     * 한 번에 가져갈 수 있는 최대 개수.
-     *
-     * <p>상한이 없으면 {@code size=100000} 한 방으로 전부 긁어갈 수 있습니다.
-     * 문서가 사용자당 20개라 지금은 여유가 있지만, 상한은 지금 두는 게 쌉니다.
-     */
-    static final int MAX_PAGE_SIZE = 100;
-
     /** 최신 문서를 먼저 보여줍니다. 방금 올린 자소서를 찾으러 뒤로 넘기게 하지 않습니다. */
     private static final Sort NEWEST_FIRST = Sort.by(Sort.Direction.DESC, "createdAt");
 
@@ -53,7 +43,7 @@ public class DocumentQueryService {
 
     @Transactional(readOnly = true)
     public DocumentListResponse list(String userId, DocType documentType, Integer page, Integer size) {
-        Pageable pageable = PageRequest.of(pageOf(page), sizeOf(size), NEWEST_FIRST);
+        Pageable pageable = PageRequests.of(page, size, NEWEST_FIRST);
 
         Page<Document> documents = documentType == null
                 ? documentRepository.findByUser_UserId(userId, pageable)
@@ -96,16 +86,5 @@ public class DocumentQueryService {
         } catch (IllegalArgumentException e) {
             throw new BusinessException(ErrorCode.DOCUMENT_NOT_FOUND);
         }
-    }
-
-    private int pageOf(Integer page) {
-        return page == null || page < 0 ? 0 : page;
-    }
-
-    private int sizeOf(Integer size) {
-        if (size == null || size < 1) {
-            return DEFAULT_PAGE_SIZE;
-        }
-        return Math.min(size, MAX_PAGE_SIZE);
     }
 }

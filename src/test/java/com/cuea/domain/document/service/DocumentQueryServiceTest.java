@@ -2,6 +2,7 @@ package com.cuea.domain.document.service;
 
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
+import com.cuea.common.paging.PageRequests;
 import com.cuea.domain.document.dto.response.DocumentDetailResponse;
 import com.cuea.domain.document.dto.response.DocumentListResponse;
 import com.cuea.domain.document.entity.DocType;
@@ -87,7 +88,7 @@ class DocumentQueryServiceTest {
     @Test
     void 문서가_없어도_빈_목록을_돌려준다() {
         when(documentRepository.findByUser_UserId(anyString(), any(Pageable.class)))
-                .thenReturn(Page.empty(PageRequest.of(0, DocumentQueryService.DEFAULT_PAGE_SIZE)));
+                .thenReturn(Page.empty(PageRequest.of(0, PageRequests.DEFAULT_SIZE)));
 
         DocumentListResponse response = service.list(USER_ID, null, null, null);
 
@@ -104,7 +105,7 @@ class DocumentQueryServiceTest {
 
         Pageable pageable = capturePageable();
         assertThat(pageable.getPageNumber()).isZero();
-        assertThat(pageable.getPageSize()).isEqualTo(DocumentQueryService.DEFAULT_PAGE_SIZE);
+        assertThat(pageable.getPageSize()).isEqualTo(PageRequests.DEFAULT_SIZE);
     }
 
     /** 상한이 없으면 size=100000 한 방으로 전부 긁어갈 수 있습니다. */
@@ -114,7 +115,7 @@ class DocumentQueryServiceTest {
 
         service.list(USER_ID, null, 0, 100_000);
 
-        assertThat(capturePageable().getPageSize()).isEqualTo(DocumentQueryService.MAX_PAGE_SIZE);
+        assertThat(capturePageable().getPageSize()).isEqualTo(PageRequests.MAX_SIZE);
     }
 
     @Test
@@ -125,7 +126,7 @@ class DocumentQueryServiceTest {
 
         Pageable pageable = capturePageable();
         assertThat(pageable.getPageNumber()).isZero();
-        assertThat(pageable.getPageSize()).isEqualTo(DocumentQueryService.DEFAULT_PAGE_SIZE);
+        assertThat(pageable.getPageSize()).isEqualTo(PageRequests.DEFAULT_SIZE);
     }
 
     /** 방금 올린 자소서를 찾으러 뒤 페이지로 넘기게 하지 않습니다. */

@@ -56,6 +56,7 @@ STT, LLM, TTS, 시선 분석은 전부 별도 Python AI 서버에서 처리하�
 | 면접 세션, 질문·답변 | `docs/11-interview.md` |
 | 재연습 | `docs/12-replay.md` |
 | 리포트, 성장 추적 | `docs/13-report.md` |
+| 연습 기록 목록 | `docs/14-record.md` |
 | 파일 업로드, S3 | `docs/20-storage.md` |
 | 배포, 실제 S3·AI 전환 | `docs/30-deploy.md` |
 | 결정되지 않은 것 확인 | `docs/90-open-questions.md` |
@@ -126,6 +127,7 @@ com/cuea/
 │   ├── config/          CORS, S3, WebSocket, Jackson, OpenAPI
 │   ├── annotation/      @RateLimit
 │   ├── aspect/          RateLimitAspect
+│   ├── paging/          목록 page · size 규칙
 │   └── security/        JWT, AI 서버 시크릿
 ├── infrastructure/      기술 계층
 │   ├── ai/              AI 서버 클라이언트 (요청·폴링·타임아웃·에러분류)
@@ -139,6 +141,7 @@ com/cuea/
     ├── document/        이력서·포트폴리오
     ├── interview/       면접 세션, 질문·답변 로그, 재연습
     ├── report/          리포트
+    ├── record/          연습 기록 (세션 + 리포트 요약 목록)
     ├── growth/          회차 비교
     └── company/         회사 목록 (AI 프록시)
 ```

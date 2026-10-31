@@ -8,6 +8,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -34,6 +36,17 @@ public interface ReportRepository extends Repository<Report, Long> {
     Optional<Report> findByIdForInternal(@Param("reportId") Long reportId);
 
     Report save(Report report);
+
+    /** 본인 세션들의 리포트 요약. 연습 기록 목록용입니다. */
+    @Query("""
+            select new com.cuea.domain.report.repository.ReportSummaryRow(
+                   r.session.sessionId, r.publicId, r.status, r.scoreTotal)
+              from Report r
+             where r.session.user.userId = :userId
+               and r.session.sessionId in :sessionIds
+            """)
+    List<ReportSummaryRow> findSummaries(@Param("userId") String userId,
+                                         @Param("sessionIds") Collection<String> sessionIds);
 
     /**
      * 실패한 리포트를 다시 {@code PROCESSING} 으로 되돌립니다.

@@ -202,6 +202,16 @@ public class Question extends BaseCreatedEntity {
         this.bookmarked = bookmarked;
     }
 
+    /**
+     * 이 질문이 속한 원 질문의 ID. 되묻기면 {@link #reaskOf}, 아니면 자기 자신입니다.
+     *
+     * <p>리포트는 되묻기를 원 질문에 합쳐 내보내므로, 되묻기 답변에서 나온 근거를
+     * 원 질문에 붙일 때 씁니다.
+     */
+    public String originalQuestionId() {
+        return reaskOf != null ? reaskOf : questionId;
+    }
+
     /** 문항 수에 포함되는 질문인지. 되묻기만 제외됩니다. */
     public boolean countsTowardQuestionCount() {
         return type.countsTowardQuestionCount();

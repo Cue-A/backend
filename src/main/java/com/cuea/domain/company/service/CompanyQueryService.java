@@ -24,8 +24,6 @@ public class CompanyQueryService {
     /** 비어 있으면 빈 목록을 그대로 돌려줍니다. 예외가 아닙니다. */
     @Transactional(readOnly = true)
     public List<CompanyResponse> list() {
-        return companyRepository.findByVerifiedTrueOrderByCompanyNameAsc().stream()
-                .map(CompanyResponse::from)
-                .toList();
+        return companyRepository.findVerifiedCompanyList();
     }
 }

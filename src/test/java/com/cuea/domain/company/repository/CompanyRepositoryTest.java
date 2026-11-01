@@ -1,5 +1,6 @@
 package com.cuea.domain.company.repository;
 
+import com.cuea.domain.company.dto.response.CompanyResponse;
 import com.cuea.domain.company.entity.Company;
 import com.cuea.domain.company.entity.ValuesFormat;
 import com.cuea.support.PostgresRepositoryTest;
@@ -17,8 +18,13 @@ import static org.assertj.core.api.Assertions.assertThat;
  * verified 필터와 기업명 정렬이 실제 PostgreSQL 에서 작동하는지 봅니다.
  * mock 리포지토리로는 WHERE/ORDER BY 가 검증되지 않습니다(docs/01-conventions.md).
  *
- * <p>{@code core_values} 가 jsonb 라 H2 를 쓰지 못합니다. Docker 가 없으면
- * {@code PostgresRepositoryTest} 가 건너뜁니다.
+ * <p>조회는 {@code CompanyResponse} 생성자 프로젝션({@code select new ...})이라
+ * 엔티티 전체가 아니라 {@code company_id}·{@code company_name} 두 컬럼만
+ * select 합니다. 실제 PostgreSQL 에서 이 프로젝션 JPQL 이 깨지지 않는지도 함께
+ * 검증합니다.
+ *
+ * <p>테이블에 {@code core_values} jsonb 등이 있어 H2 를 쓰지 못합니다. Docker 가
+ * 없으면 {@code PostgresRepositoryTest} 가 건너뜁니다.
  */
 class CompanyRepositoryTest extends PostgresRepositoryTest {
 
@@ -50,17 +56,19 @@ class CompanyRepositoryTest extends PostgresRepositoryTest {
         em.persist(company("미검증기업", false));
         em.flush();
 
-        List<Company> result = companyRepository.findByVerifiedTrueOrderByCompanyNameAsc();
+        List<CompanyResponse> result = companyRepository.findVerifiedCompanyList();
 
         // verified=true 3곳만, 기업명 오름차순.
         assertThat(result)
-                .extracting(Company::getCompanyName)
+                .extracting(CompanyResponse::name)
                 .containsExactly("가나기업", "나다기업", "다라기업");
         // 결과가 실제로 오름차순인지(DB collation 기준)도 함께 확인합니다.
         assertThat(result)
-                .extracting(Company::getCompanyName)
+                .extracting(CompanyResponse::name)
                 .isSorted();
-        assertThat(result).noneMatch(c -> c.getCompanyName().equals("미검증기업"));
+        assertThat(result).noneMatch(c -> c.name().equals("미검증기업"));
+        // 프로젝션이 companyId 도 함께 채우는지 확인합니다(식별자 누락 방지).
+        assertThat(result).allSatisfy(c -> assertThat(c.companyId()).isNotNull());
     }
 
     @Test
@@ -68,6 +76,6 @@ class CompanyRepositoryTest extends PostgresRepositoryTest {
         em.persist(company("미검증기업", false));
         em.flush();
 
-        assertThat(companyRepository.findByVerifiedTrueOrderByCompanyNameAsc()).isEmpty();
+        assertThat(companyRepository.findVerifiedCompanyList()).isEmpty();
     }
 }

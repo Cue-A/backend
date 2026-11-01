@@ -1,6 +1,5 @@
 package com.cuea.domain.company.dto.response;
 
-import com.cuea.domain.company.entity.Company;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 /**
@@ -13,7 +12,9 @@ import io.swagger.v3.oas.annotations.media.Schema;
  * {@code CompanyProfileFormatter} 로 조립해 AI 에 넘기며, 이 응답과는 별개입니다.
  *
  * <p>엔티티 필드명은 {@code companyName} 이지만 프론트 계약에 맞춰 {@code name}
- * 으로 내보냅니다.
+ * 으로 내보냅니다. 조회는 {@code CompanyRepository} 의 생성자 프로젝션
+ * ({@code select new ...})이 이 레코드를 바로 채우므로, 엔티티 전체를 읽지
+ * 않고 {@code company_id}·{@code company_name} 두 컬럼만 select 합니다.
  */
 @Schema(description = "기업 목록 항목")
 public record CompanyResponse(
@@ -24,8 +25,4 @@ public record CompanyResponse(
         @Schema(description = "기업명", example = "SK하이닉스")
         String name
 ) {
-
-    public static CompanyResponse from(Company company) {
-        return new CompanyResponse(company.getCompanyId(), company.getCompanyName());
-    }
 }

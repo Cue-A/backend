@@ -458,4 +458,6 @@ Idempotency-Key: rpt_{sessionId}_{attempt}
 - `round` 는 연속인지 보지 않습니다. 같은 번호만 두 번 보내지 않으면 되고, 1회차는 반드시 1 입니다
 - 응답(`AiReportComparison`)의 모르는 키는 무시합니다. `by_question[].text` 는 자리표시라 읽지 않습니다.
   본문을 레코드로 옮기지 못하면 502 `UNEXPECTED_AI_RESPONSE` 입니다
+- AI 의 오류 응답은 연결 · 지연(503 · 504)만 그대로 두고 나머지는 502 로 바꿉니다. AI 문구는 로그에만 남깁니다
+  (`ReportComparisonService`)
 - LLM 을 쓰지 않아 수 ms 안에 끝납니다. 따로 타임아웃을 두지 않고 공통 `read-timeout`(10초)을 씁니다

@@ -78,7 +78,8 @@ class MockAiClientCompareTest {
     }
 
     /** 저장된 원본처럼 snake_case 키의 Map 입니다. speech 가 null 이면 그 축이 실패한 것입니다. */
-    private static Map<String, Object> report(String status, int overall, Integer speech, List<Map<String, Object>> questions) {
+    private static Map<String, Object> report(String status, int overall, Integer speech,
+                                              List<Map<String, Object>> questions) {
         Map<String, Object> report = new HashMap<>();
         report.put("report_status", status);
         report.put("overall", Map.of("score", overall));

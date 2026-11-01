@@ -18,6 +18,7 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.dao.DataIntegrityViolationException;
 
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -197,6 +198,22 @@ class ReportRepositoryTest extends PostgresRepositoryTest {
 
         assertThat(startRetry(failed, 1, "task_2")).isZero();
         assertThat(reload(failed).getRetryStatus()).isNull();
+    }
+
+    @Test
+    void 요약은_본인_세션의_리포트만_상태와_종합_점수로_준다() {
+        Report partial = partialReport(1, null, null);
+        String sessionId = session.getSessionId();
+
+        List<ReportSummaryRow> mine = reportRepository.findSummaries(session.getUser().getUserId(), List.of(sessionId));
+
+        assertThat(mine).singleElement().satisfies(row -> {
+            assertThat(row.sessionId()).isEqualTo(sessionId);
+            assertThat(row.publicId()).isEqualTo(partial.getPublicId());
+            assertThat(row.status()).isEqualTo(ReportStatus.PARTIAL);
+            assertThat(row.scoreTotal()).isEqualTo(68);
+        });
+        assertThat(reportRepository.findSummaries("someone-else", List.of(sessionId))).isEmpty();
     }
 
     private Report partialReport(int attempt, ReportRetryStatus retryStatus, String errorCode) {

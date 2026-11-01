@@ -340,7 +340,7 @@ chore:    빌드·설정
 **스코프는 어디를 건드렸는지입니다.** 도메인 이름이나 계층 이름을 씁니다.
 
 ```
-도메인   auth  user  document  interview  report  growth  company
+도메인   auth  user  document  interview  report  record  growth  company
 계층     common  ai  websocket  storage  redis  security  config
 기타     build  docker  github  domain  guide
 ```

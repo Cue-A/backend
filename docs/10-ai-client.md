@@ -385,6 +385,13 @@ update question set answer_audio_object_key = 'audio/test/content_fail.webm'
 
 URL 이 그대로면 새 Idempotency-Key 로 다시 요청해도 또 실패합니다(더미 서버와 같음).
 
+### 회차 비교
+
+목은 보낸 리포트 원본의 점수만으로 실제 AI 와 같은 모양을 만듭니다(`MockReportComparison`). 코멘트는
+고정 문구이고 정체 축(`stalled_axes`)은 늘 비어 있습니다. 부분 리포트 · 실패 축은 null, 1회차는 모든 문항 ·
+재면접은 `is_replay` 문항으로 짝 맞추기, 회차가 하나면 `vs_previous` null 은 실제 AI 와 같습니다.
+목 리포트는 `questions` 가 비어 있어 목끼리는 `by_question` 이 늘 빈 배열입니다.
+
 ---
 
 ## 리포트 생성
@@ -430,3 +437,25 @@ Idempotency-Key: rpt_{sessionId}_{attempt}
 `read-timeout` 안에 답이 없으면 504 `AI_TIMEOUT` 을 냅니다. 둘 다
 `ResourceAccessException` 으로 오지만 원인이 `SocketTimeoutException`(연결 타임아웃
 제외)인지로 구분합니다. 질문 생성 호출에도 똑같이 적용됩니다.
+
+---
+
+## 회차 비교
+
+같은 1회차에서 시작한 회차들의 리포트를 비교합니다. Backend 흐름은 [`13-report.md`](./13-report.md) 참고.
+
+| 메서드 | 경로 | 용도 |
+|---|---|---|
+| POST | `/ai/reports/compare` | 회차 비교. **폴링 없이 바로** 결과를 줍니다 |
+
+```json
+{ "reports": [ { "session_id": "sess_1st", "round": 1, "report": { "...": "report_data 원본" } },
+               { "session_id": "sess_3rd", "round": 3, "report": { } } ] }
+```
+
+- AI 는 리포트를 보관하지 않아 **고른 회차의 `report_data` 를 그대로** 보냅니다(`AiReportCompareRequest`).
+  저장된 원본의 키가 이미 snake_case 라 변환하지 않습니다
+- `round` 는 연속인지 보지 않습니다. 같은 번호만 두 번 보내지 않으면 되고, 1회차는 반드시 1 입니다
+- 응답(`AiReportComparison`)의 모르는 키는 무시합니다. `by_question[].text` 는 자리표시라 읽지 않습니다.
+  본문을 레코드로 옮기지 못하면 502 `UNEXPECTED_AI_RESPONSE` 입니다
+- LLM 을 쓰지 않아 수 ms 안에 끝납니다. 따로 타임아웃을 두지 않고 공통 `read-timeout`(10초)을 씁니다

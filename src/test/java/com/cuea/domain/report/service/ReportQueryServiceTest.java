@@ -58,6 +58,7 @@ class ReportQueryServiceTest {
                 "score": 68, "display": 4, "gated": false, "gate_reason": null,
                 "partial": true, "axes_used": ["content", "speech"], "axes_failed": ["gaze"]
               },
+              "summary": "경험은 구체적이지만 근거를 수치로 보여주면 더 좋습니다.",
               "axes": {
                 "content": { "status": "ok", "score": 72, "display": 4, "metrics": {},
                   "evidence": [ { "question_id": "q_3", "t_start": 12.4, "t_end": 19.8,
@@ -73,7 +74,8 @@ class ReportQueryServiceTest {
                   "is_replay": false, "is_spare_topic": false, "score": 70, "display": 4,
                   "axes": { "content": 74, "speech": 63, "gaze": null },
                   "transcript": "저는 데이터가 쌓이고 흐르는 구조에...", "duration_sec": 46.2,
-                  "word_count": 138, "was_timeout": false, "had_reask": true }
+                  "word_count": 138, "was_timeout": false, "had_reask": true,
+                  "comment": "회사와 직무를 연결한 설명이 좋습니다." }
               ],
               "resilience": { "score": 58, "display": 3, "comment": "..." },
               "company_comment": "도전과 협업을 강조하는 인재상에 비추어...",
@@ -118,6 +120,7 @@ class ReportQueryServiceTest {
         assertThat(response.overall().score()).isEqualTo(68);
         assertThat(response.overall().partial()).isTrue();
         assertThat(response.overall().axesFailed()).containsExactly("gaze");
+        assertThat(response.summary()).startsWith("경험은 구체적");
 
         assertThat(response.axes().content().evidence()).singleElement()
                 .satisfies(e -> {
@@ -135,6 +138,7 @@ class ReportQueryServiceTest {
         assertThat(question.axes().gaze()).isNull();
         assertThat(question.durationSec()).isEqualTo(46.2);
         assertThat(question.hadReask()).isTrue();
+        assertThat(question.comment()).startsWith("회사와 직무");
 
         assertThat(response.resilience().score()).isEqualTo(58);
         assertThat(response.companyComment()).startsWith("도전과 협업");
@@ -192,6 +196,8 @@ class ReportQueryServiceTest {
         assertThat(json.path("axes").path("content").path("evidence").get(0).has("tStart")).isTrue();
         assertThat(json.path("overall").has("axesFailed")).isTrue();
         assertThat(json.has("improvedAnswers")).isTrue();
+        assertThat(json.has("summary")).isTrue();
+        assertThat(question.has("comment")).isTrue();
         assertThat(fieldNames(json)).noneMatch(name -> name.contains("_"));
     }
 
@@ -236,6 +242,19 @@ class ReportQueryServiceTest {
         assertThat(response.axes().gaze().errorCode()).isNull();
         assertThat(response.resilience()).isNull();
         assertThat(response.companyComment()).isNull();
+    }
+
+    @Test
+    void 총평과_문항_코멘트가_없으면_null() throws Exception {
+        givenReport(finished(ReportStatus.COMPLETED, """
+                { "report_status": "complete", "overall": { "score": 50 }, "axes": {},
+                  "questions": [ { "question_id": "q_1", "question_number": 1, "score": 50 } ] }
+                """));
+
+        ReportDetailResponse response = service.getDetail(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.summary()).isNull();
+        assertThat(response.questions().get(0).comment()).isNull();
     }
 
     /** 글로 된 칸의 키가 아예 빠져도 null 이 아니라 빈 배열로 내려줍니다. */

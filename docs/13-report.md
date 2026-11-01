@@ -201,6 +201,7 @@ COMPLETED · PARTIAL 이면 부릅니다.
   "reportId": "...", "sessionId": "sess_9f2a1c", "status": "PARTIAL",
   "overall": { "score": 68, "display": 4, "gated": false, "gateReason": null,
                "partial": true, "axesUsed": ["content", "speech"], "axesFailed": ["gaze"] },
+  "summary": "...",
   "axes": {
     "content": { "status": "ok", "errorCode": null, "reason": null, "score": 72, "display": 4,
                  "metrics": {}, "evidence": [ { "questionId": "q_3", "tStart": 12.4, "tEnd": 19.8,
@@ -214,7 +215,8 @@ COMPLETED · PARTIAL 이면 부릅니다.
     { "questionId": "q_1", "questionText": "지원 동기를 말씀해 주세요", "questionNumber": 1,
       "category": "지원동기", "difficulty": "L1", "isReplay": false, "isSpareTopic": false,
       "score": 70, "display": 4, "axes": { "content": 74, "speech": 63, "gaze": null },
-      "transcript": "...", "durationSec": 46.2, "wordCount": 138, "wasTimeout": false, "hadReask": true }
+      "transcript": "...", "durationSec": 46.2, "wordCount": 138, "wasTimeout": false, "hadReask": true,
+      "comment": "..." }
   ],
   "resilience": { "score": 58, "display": 3, "comment": "..." },
   "companyComment": "...",
@@ -235,6 +237,7 @@ COMPLETED · PARTIAL 이면 부릅니다.
   키가 있고 해당하지 않으면 null 입니다
 - 배열(`evidence` · `improvedAnswers` · `axesUsed` · `axesFailed`)은 키가 빠져도
   빈 배열로 내려줍니다. `questions` 는 필수라 저장 전 검증에서 걸립니다(아래)
+- 글로 된 단일 값(`summary` · `questions[].comment` · `companyComment`)은 키가 빠져도 null 로 내려줍니다
 - 원본에 모르는 키가 있어도 무시합니다
 - **모양은 저장 전에 확인합니다**(`AiReportResultReader.validate`). 점수만 맞고 나머지가 어긋난 결과를
   COMPLETED 로 저장하면 상세 조회는 계속 실패하는데 재요청은 FAILED 만 받으므로 빠져나올 길이

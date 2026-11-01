@@ -228,6 +228,7 @@ public class MockAiClient implements AiClient {
         overall.put("partial", partial);
         ArrayNode axesUsed = overall.putArray("axes_used").add("content");
         ArrayNode axesFailed = overall.putArray("axes_failed");
+        result.put("summary", "핵심은 잘 짚었지만 근거를 수치로 보여주면 더 설득력 있습니다.");
 
         ObjectNode axes = result.putObject("axes");
         mockAxis(axes.putObject("content"), 72);

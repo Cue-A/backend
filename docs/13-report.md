@@ -1,7 +1,7 @@
 # 13. 리포트 · 성장 추적
 
 리포트 계약(「리포트생성 API계약」)이 도착해 **생성 흐름**(Issue #47)과 **상태 조회**(Issue #48)를
-반영했습니다. 리포트 조회·부분 재시도·회차 비교는 아직입니다. 아래 "아직 없는 것" 참고.
+반영했습니다. 상세 조회 · 실패 축 재시도 · 회차 비교(Issue #102)는 아래 각 절에 있습니다.
 
 ---
 
@@ -331,15 +331,82 @@ PARTIAL 리포트에서 **실패한 축(말하기·시선)만** 다시 분석합
 
 ---
 
-## 아직 없는 것
+## 회차 비교 · 성장 추이 (`GET /api/reports/{reportId}/comparison`)
 
-| 기능 | 비고 |
+같은 1회차에서 시작한 회차(1회차 + 재면접)를 **이 리포트의 회차까지** 비교합니다. 2회차 리포트에서
+부르면 1~2회차, 3회차 리포트에서 부르면 1~3회차입니다. 세션 · 리포트 두 도메인을 함께 읽어 코드는
+`growth` 에 둡니다(`ReportComparisonService`).
+
+```
+GET  /api/reports/{reportId}/comparison
+ →  POST /ai/reports/compare   { "reports": [ { "session_id", "round", "report"(= report_data) } ] }  회차 오름차순
+```
+
+AI 는 리포트를 보관하지 않아 고른 회차의 원본을 모아 보냅니다. 폴링 없이 바로 응답합니다.
+
+### 비교할 회차
+
+| 대상 | 포함 |
 |---|---|
-| 회차 비교 (`/ai/reports/compare`) | 전체 회차의 `report_data` 를 함께 보냄 |
+| 같은 1회차에서 시작한 세션(1회차 + 재면접) | O |
+| 이 리포트의 세션보다 **늦게 시작한** 회차 | X |
+| 중단(`ABORTED`)된 재면접 | X. 회차로 세지도 않음 |
+| 리포트가 `COMPLETED` · `PARTIAL` | O. 실패 축 재시도 중인 PARTIAL 도 지금 결과 그대로 |
+| 리포트가 없거나 `PROCESSING` · `FAILED` | X. 회차 번호는 그대로 둠 |
 
-### 회차 비교 규칙 (계약 8장)
+- `round` 는 연습 기록 목록의 회차와 같은 번호입니다(`InterviewSessionQueryService.roundsUpTo`,
+  [`14-record.md`](./14-record.md)). **다시 매기지 않습니다.** 2회차 리포트가 없으면 `[1, 3]` 으로 보내고
+  AI 도 그대로 받습니다. 1회차는 꼭 1 이어야 AI 가 재면접 문항과 짝을 맞춥니다
+- 이 리포트 하나뿐이어도 AI 를 부릅니다. `vsPrevious` 가 null, `byQuestion` 이 빈 배열로 옵니다(오류 아님)
+- 문항 비교 대상은 `is_replay` 인 주질문뿐이고 AI 가 거릅니다. `is_spare_topic` 으로 거르지 않습니다
+  ([`12-replay.md`](./12-replay.md)). 1회차 문항은 `is_replay` 가 false 지만 같은 질문 ID 로 짝을 맞춥니다
+- **질문 ID 는 회차마다 같습니다.** 재면접이 1회차 `replay_log` 순서를 그대로 재생해, 다시 나온 주질문은
+  1회차와 같은 ID 를 받습니다. 그래서 2 · 3회차 모두 `replay_log` 는 1회차 것이어야 합니다. `questionText` 는
+  이 리포트 세션의 `question` 에서 찾고, 못 찾으면 null 입니다
 
-- 비교 대상은 `is_replay == true` 인 질문뿐입니다. `is_spare_topic` 으로 거르지 않습니다.
-  [`12-replay.md`](./12-replay.md)
-- 점수 비교는 **직전 회차 기준**, 회차 수 제한 없음
-- `PARTIAL` 회차는 총점 비교에서 빠지고(스케일이 다름) 성공한 축만 비교합니다
+### 응답
+
+```json
+{ "reportId": "...", "latestRound": 3, "comparedRounds": [1, 2, 3], "partialRounds": [2],
+  "rounds": [ { "round": 1, "reportId": "...", "status": "COMPLETED", "createdAt": "2026-10-01T10:00:00Z" } ],
+  "vsPrevious": { "fromRound": 2, "toRound": 3, "overallDelta": null,
+                  "axisDelta": { "content": 6, "speech": 3, "gaze": null },
+                  "improved": ["q_1"], "declined": ["q_3"], "unchanged": ["q_5"], "comment": "..." },
+  "trend": { "overall": [68, null, 74],
+             "axes": { "content": [70, 72, 78], "speech": [61, 60, 63], "gaze": [55, null, 58] },
+             "comment": "...", "stalledAxes": [], "bestRound": 3 },
+  "byQuestion": [ { "questionId": "q_1", "questionText": "지원 동기를 말씀해 주세요", "category": "지원동기",
+                    "scores": [62, 70, 75], "deltaFromPrevious": 5, "deltaFromFirst": 13, "comment": "..." } ] }
+```
+
+- AI 응답을 키만 camelCase 로 옮기고, Backend 가 `rounds`(회차별 리포트 ID · 상태 · 면접 시작 시각)와
+  `byQuestion[].questionText` 를 붙입니다
+- AI 의 `by_question[].text` 는 "1번 지원동기" 같은 자리표시라 **내보내지 않습니다**. `vsPrevious.fromRound` ·
+  `toRound` 와 `byQuestion[].category` 는 처음 명세에 없던 AI 필드지만 내려줍니다. 「N회차 vs M회차」는
+  `toRound` vs `fromRound` 이고 `latestRound - 1` 이 아닙니다
+- 배열의 n번째 값은 `comparedRounds` 의 n번째 회차입니다. **null 과 0 은 다릅니다.** 부분 리포트 회차의
+  `trend.overall`, 실패 · 미사용 축, 한쪽이 없는 변화량(부분 리포트가 끼면 `overallDelta`)이 null 입니다.
+  부분 리포트는 총점 스케일이 달라 총점 비교에서 빠지고 성공한 축만 비교합니다
+- `byQuestion[].scores` 에는 null 이 없습니다. 한 회차라도 없는 문항은 통째로 빠집니다
+- `deltaFromFirst` 는 비교한 첫 회차 기준입니다. 1회차 리포트가 없으면 첫 재면접 기준입니다
+- `bestRound` 는 종합 점수가 있는 회차 중 최고, 전부 null 이면 마지막 회차입니다
+- 배열 키가 빠져 오면 빈 배열로 내려줍니다(`partialRounds` · `improved` · `stalledAxes` · `byQuestion` 등)
+
+### 상태와 오류
+
+| 상황 | 응답 |
+|---|---|
+| COMPLETED · PARTIAL | 200 |
+| PROCESSING | 202 `REPORT_NOT_READY` |
+| FAILED | 409 `REPORT_FAILED` |
+| 없는 것 · 남의 것 · UUID 가 아닌 값 | 404 `REPORT_NOT_FOUND` |
+| AI 응답을 읽을 수 없음 · `trend` 가 없음 · `compared_rounds` 가 보낸 회차와 다름 | 502 `UNEXPECTED_AI_RESPONSE` |
+| AI 연결 실패 · 응답 지연 | 503 `AI_UNAVAILABLE` · 504 `AI_TIMEOUT` |
+
+- **결과를 저장하지 않고 부를 때마다 AI 에 계산을 요청합니다.** AI 는 LLM 을 쓰지 않고 점수 변화로 코멘트를
+  만들어, 같은 입력이면 같은 결과이고 10회차 기준 약 4ms 입니다. 타임아웃은 공통 `read-timeout`(10초)입니다
+- 호출 소요 시간을 남깁니다(`AI 회차 비교 완료 ... elapsedMs=`). 실제 소요가 길면 캐시를 다시 검토합니다
+- `compared_rounds` 가 보낸 회차와 다르면 그래프 점에 다른 회차의 리포트를 걸게 되므로 내보내지 않습니다
+- 읽기는 각 서비스의 짧은 트랜잭션에서 끝내고 AI 호출은 트랜잭션 밖입니다. 리포트와 회차는 엔티티가 아니라
+  값(`FinishedReport` · `SessionRound`)으로 받아 지연 로딩이 걸리지 않습니다
+- 분당 10회로 제한합니다(`@RateLimit`)

@@ -13,7 +13,6 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
@@ -21,6 +20,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.UUID;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * 세션을 다른 도메인이 읽어갈 때의 창구입니다.
@@ -137,7 +137,7 @@ public class InterviewSessionQueryService {
                 : sessionRepository.findRetriesOf(userId, rootIds, SessionStatus.ABORTED).stream()
                         .collect(Collectors.groupingBy(InterviewSession::rootSessionId));
         return sessions.stream().collect(Collectors.toMap(InterviewSession::getSessionId,
-                s -> s.isRetry() ? 2 + countStartedBefore(retriesByRoot, s) : 1));
+                s -> roundOf(s, retriesByRoot.getOrDefault(s.rootSessionId(), List.of()))));
     }
 
     /**
@@ -152,30 +152,25 @@ public class InterviewSessionQueryService {
     public List<SessionRound> roundsUpTo(String userId, String sessionId) {
         InterviewSession session = getOwnedSession(sessionId, userId);
         if (!session.isRetry()) {
-            return List.of(new SessionRound(session.getSessionId(), 1, session.getCreatedAt()));
+            return List.of(new SessionRound(sessionId, 1, session.getCreatedAt()));
         }
-
         String rootId = session.rootSessionId();
-        List<SessionRound> rounds = new ArrayList<>();
-        sessionRepository.findBySessionIdAndUser_UserId(rootId, userId)
-                .ifPresent(root -> rounds.add(new SessionRound(rootId, 1, root.getCreatedAt())));
-        List<InterviewSession> retries = sessionRepository.findRetriesOf(userId, List.of(rootId), SessionStatus.ABORTED)
-                .stream()
+        List<InterviewSession> retries =
+                sessionRepository.findRetriesOf(userId, List.of(rootId), SessionStatus.ABORTED);
+        Stream<InterviewSession> upToThis = retries.stream()
                 .filter(r -> STARTED_FIRST.compare(r, session) <= 0)
-                .sorted(STARTED_FIRST)
+                .sorted(STARTED_FIRST);
+        return Stream.concat(sessionRepository.findBySessionIdAndUser_UserId(rootId, userId).stream(), upToThis)
+                .map(s -> new SessionRound(s.getSessionId(), roundOf(s, retries), s.getCreatedAt()))
                 .toList();
-        for (int i = 0; i < retries.size(); i++) {
-            InterviewSession retry = retries.get(i);
-            rounds.add(new SessionRound(retry.getSessionId(), i + 2, retry.getCreatedAt()));
-        }
-        return rounds;
     }
 
-    private static int countStartedBefore(Map<String, List<InterviewSession>> retriesByRoot,
-                                          InterviewSession session) {
-        return (int) retriesByRoot.getOrDefault(session.rootSessionId(), List.of()).stream()
-                .filter(r -> STARTED_FIRST.compare(r, session) < 0)
-                .count();
+    /** {@code retries} 는 그 루트의 중단되지 않은 재연습입니다. 회차 번호 규칙은 여기 하나뿐입니다. */
+    private static int roundOf(InterviewSession session, List<InterviewSession> retries) {
+        if (!session.isRetry()) {
+            return 1;
+        }
+        return 2 + (int) retries.stream().filter(r -> STARTED_FIRST.compare(r, session) < 0).count();
     }
 
     /** {@code %} · {@code _} 는 글자 그대로 찾도록 {@code !} 로 이스케이프합니다. */
@@ -194,5 +189,15 @@ public class InterviewSessionQueryService {
     @Transactional(readOnly = true)
     public List<Question> findQuestionsInOrderForInternal(String sessionId) {
         return questionRepository.findAllBySessionIdOrderByCreatedAtAsc(sessionId);
+    }
+
+    /**
+     * 질문 ID → 원문. 되묻기 포함. 소유권 확인이 없어 <b>API 경계에서 쓰지 마세요.</b>
+     * (session_id, question_id) 가 PK 라 ID 가 겹치지 않습니다.
+     */
+    @Transactional(readOnly = true)
+    public Map<String, String> findQuestionTextsForInternal(String sessionId) {
+        return questionRepository.findAllBySessionIdOrderByCreatedAtAsc(sessionId).stream()
+                .collect(Collectors.toMap(Question::getQuestionId, Question::getText));
     }
 }

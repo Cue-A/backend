@@ -4,6 +4,7 @@ import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.interview.entity.Persona;
+import com.cuea.domain.interview.entity.Question;
 import com.cuea.domain.interview.entity.SessionStatus;
 import com.cuea.domain.interview.repository.InterviewSessionRepository;
 import com.cuea.domain.interview.repository.QuestionRepository;
@@ -53,12 +54,14 @@ class InterviewSessionQueryServiceTest {
     private static final OffsetDateTime T0 = OffsetDateTime.parse("2026-07-01T00:00:00Z");
 
     private InterviewSessionRepository sessionRepository;
+    private QuestionRepository questionRepository;
     private InterviewSessionQueryService service;
 
     @BeforeEach
     void setUp() {
         sessionRepository = mock(InterviewSessionRepository.class);
-        service = new InterviewSessionQueryService(sessionRepository, mock(QuestionRepository.class));
+        questionRepository = mock(QuestionRepository.class);
+        service = new InterviewSessionQueryService(sessionRepository, questionRepository);
     }
 
     private InterviewSession session(String sessionId, InterviewSession retryOf, SessionStatus status) {
@@ -258,6 +261,18 @@ class InterviewSessionQueryServiceTest {
         assertThatThrownBy(() -> service.roundsUpTo(USER_ID, "other"))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.SESSION_NOT_FOUND);
+    }
+
+    /** 리포트 · 회차 비교가 질문 엔티티 대신 받는 값입니다. 되묻기도 들어갑니다. */
+    @Test
+    void 질문_ID_로_원문을_묶어_준다() {
+        when(questionRepository.findAllBySessionIdOrderByCreatedAtAsc("sess_1")).thenReturn(List.of(
+                Question.builder().sessionId("sess_1").questionId("q_1").text("지원 동기를 말씀해 주세요").build(),
+                Question.builder().sessionId("sess_1").questionId("q_1r").text("조금 더 말씀해 주시겠어요?").build()));
+
+        assertThat(service.findQuestionTextsForInternal("sess_1"))
+                .containsEntry("q_1", "지원 동기를 말씀해 주세요")
+                .containsEntry("q_1r", "조금 더 말씀해 주시겠어요?");
     }
 
     @Test

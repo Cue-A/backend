@@ -8,7 +8,9 @@ import com.cuea.domain.report.entity.ReportStatus;
 import com.cuea.domain.report.service.ReportProgressStore.ReportProgress;
 import com.cuea.infrastructure.ai.AiClient;
 import com.cuea.infrastructure.ai.AiPoller;
+import com.cuea.infrastructure.ai.AiReportResultReader;
 import com.cuea.infrastructure.ai.dto.AiReportRequest;
+import com.cuea.infrastructure.ai.dto.AiReportRetryRequest;
 import com.cuea.infrastructure.ai.dto.AiReportTaskStatusResponse;
 import com.cuea.infrastructure.websocket.ReportSocketHandler;
 import com.cuea.infrastructure.websocket.message.ReportErrorPushMessage;
@@ -16,6 +18,7 @@ import com.cuea.infrastructure.websocket.message.ReportProgressStage;
 import com.cuea.infrastructure.websocket.message.ReportPushMessage;
 import com.cuea.infrastructure.websocket.message.SocketMessage;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -66,7 +69,8 @@ class ReportPollerTest {
         socketHandler = mock(ReportSocketHandler.class);
         progressStore = new FakeReportProgressStore();
         poller = new ReportPoller(aiClient, aiPoller, new ReportProperties(Duration.ofMinutes(10)),
-                requestAssembler, reportWriter, socketHandler, progressStore);
+                requestAssembler, reportWriter, socketHandler, progressStore,
+                new AiReportResultReader(JsonMapper.builder().findAndAddModules().build()));
 
         when(requestAssembler.build(SESSION_ID))
                 .thenReturn(new AiReportRequest("friendly", "백엔드 개발", null, null, List.of()));
@@ -297,6 +301,83 @@ class ReportPollerTest {
         verify(reportWriter, never()).fail(any(), any());
     }
 
+    /** 재시도가 성공하면 생성과 똑같이 결과를 통째로 저장하고 report 를 보냅니다. */
+    @Test
+    void 재시도가_성공하면_결과를_저장하고_report_를_보낸다() throws Exception {
+        givenPollResults(done("complete", 74, 65));
+        when(reportWriter.finish(eq(REPORT_ID), any())).thenReturn(finished(ReportStatus.COMPLETED, 74));
+
+        poller.onRequested(retryEvent());
+
+        verify(reportWriter).finish(eq(REPORT_ID), any());
+        verify(reportWriter, never()).failRetry(any(), any());
+        assertThat(pushed()).isInstanceOf(ReportPushMessage.class);
+    }
+
+    /** 축 하나 때문에 이미 받은 리포트를 잃지 않게, 리포트를 FAILED 로 만들지 않습니다. */
+    @Test
+    void 재시도가_실패하면_리포트는_두고_재시도_실패만_남긴다() throws Exception {
+        when(aiPoller.await(anyString(), any(), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.STT_FAILED));
+
+        poller.onRequested(retryEvent());
+
+        verify(reportWriter).failRetry(REPORT_ID, ErrorCode.STT_FAILED);
+        verify(reportWriter, never()).fail(any(), any());
+        ReportErrorPushMessage error = (ReportErrorPushMessage) pushed();
+        assertThat(error.errorCode()).isEqualTo("STT_FAILED");
+        assertThat(error.message()).isEqualTo(ReportFailurePolicy.retryMessageOf("STT_FAILED"))
+                .doesNotContain("리포트를 만들지 못했습니다");
+    }
+
+    /** 자동 재시도도 생성이 아니라 재시도 엔드포인트를 같은 축으로 부릅니다. */
+    @Test
+    void 재시도_중_자동_재시도는_재시도_엔드포인트를_같은_축으로_부른다() throws Exception {
+        when(aiPoller.await(anyString(), any(), any(), any()))
+                .thenThrow(new BusinessException(ErrorCode.MEDIA_FETCH_FAILED))
+                .thenReturn(done("complete", 74, 65));
+        when(aiClient.retryReport(eq(SESSION_ID), anyString(), any())).thenReturn("task_r3");
+        when(reportWriter.finish(eq(REPORT_ID), any())).thenReturn(finished(ReportStatus.COMPLETED, 74));
+
+        poller.onRequested(retryEvent());
+
+        ArgumentCaptor<AiReportRetryRequest> body = ArgumentCaptor.forClass(AiReportRetryRequest.class);
+        verify(aiClient).retryReport(eq(SESSION_ID), eq("rpt_sess_1_3"), body.capture());
+        assertThat(body.getValue().axes()).containsExactly("gaze");
+        verify(aiClient, never()).requestReport(anyString(), anyString(), any());
+        verify(reportWriter).recordRetry(REPORT_ID, 3, "task_r3");
+    }
+
+    /** 점수는 맞아도 상세 조회가 못 읽는 결과는 COMPLETED 로 남기지 않습니다. 남기면 재요청도 막힙니다. */
+    @Test
+    void 상세_조회가_못_읽는_결과는_저장하지_않고_FAILED() throws Exception {
+        ObjectNode result = (ObjectNode) objectMapper.readTree("""
+                {"report_status":"complete","overall":{"score":68},
+                 "axes":{"content":{"score":72},"speech":{"score":61},"gaze":{"score":null}},
+                 "questions":"배열이어야 하는 자리"}
+                """);
+        givenPollResults(new AiReportTaskStatusResponse("done", null, null, result, null, null));
+
+        poller.onRequested(event());
+
+        verify(reportWriter, never()).finish(any(), any());
+        verify(reportWriter).fail(REPORT_ID, ErrorCode.UNEXPECTED_AI_RESPONSE);
+    }
+
+    /** 키가 빠지면 역직렬화는 null 로 통과합니다. 껍데기 결과를 빈 리포트로 남기지 않습니다. */
+    @Test
+    void 필수_필드가_빠진_결과는_저장하지_않고_FAILED() throws Exception {
+        ObjectNode result = (ObjectNode) objectMapper.readTree("""
+                {"report_status":"complete"}
+                """);
+        givenPollResults(new AiReportTaskStatusResponse("done", null, null, result, null, null));
+
+        poller.onRequested(event());
+
+        verify(reportWriter, never()).finish(any(), any());
+        verify(reportWriter).fail(REPORT_ID, ErrorCode.UNEXPECTED_AI_RESPONSE);
+    }
+
     /** aiPoller 가 단계가 바뀔 때 부르는 콜백을 흉내 냅니다. */
     private void progress(InvocationOnMock invocation, String stage, double progress) {
         Consumer<AiReportTaskStatusResponse> onStageChange = invocation.getArgument(3);
@@ -310,8 +391,10 @@ class ReportPollerTest {
     private AiReportTaskStatusResponse done(String reportStatus, int total, Integer gaze) throws Exception {
         ObjectNode result = (ObjectNode) objectMapper.readTree("""
                 {"report_status":"%s","overall":{"score":%d},
-                 "axes":{"content":{"score":72},"speech":{"score":61},"gaze":{"score":%s}}}
-                """.formatted(reportStatus, total, gaze == null ? "null" : gaze));
+                 "axes":{"content":{"status":"ok","score":72},"speech":{"status":"ok","score":61},
+                         "gaze":{"status":"%s","score":%s}},
+                 "questions":[]}
+                """.formatted(reportStatus, total, gaze == null ? "failed" : "ok", gaze == null ? "null" : gaze));
         return new AiReportTaskStatusResponse("done", null, null, result, null, null);
     }
 
@@ -321,7 +404,12 @@ class ReportPollerTest {
     }
 
     private ReportRequestedEvent event() {
-        return new ReportRequestedEvent(REPORT_ID, PUBLIC_ID, SESSION_ID, "task_r1", 1);
+        return new ReportRequestedEvent(REPORT_ID, PUBLIC_ID, SESSION_ID, "task_r1", 1, null);
+    }
+
+    /** 1회차가 PARTIAL(시선 실패)로 끝나 시선만 재시도하는 이벤트. */
+    private ReportRequestedEvent retryEvent() {
+        return new ReportRequestedEvent(REPORT_ID, PUBLIC_ID, SESSION_ID, "task_r2", 2, List.of("gaze"));
     }
 
     /** 마지막으로 보낸 WebSocket 메시지의 payload. */

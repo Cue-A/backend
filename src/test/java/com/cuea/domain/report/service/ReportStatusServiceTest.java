@@ -5,14 +5,19 @@ import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.report.dto.response.ReportStatusResponse;
 import com.cuea.domain.report.entity.Report;
+import com.cuea.domain.report.entity.ReportRetryStatus;
 import com.cuea.domain.report.entity.ReportStatus;
 import com.cuea.domain.report.repository.ReportRepository;
 import com.cuea.domain.report.service.ReportProgressStore.ReportProgress;
+import com.cuea.infrastructure.ai.AiReportResultReader;
 import com.cuea.infrastructure.websocket.message.ReportProgressStage;
+import com.fasterxml.jackson.databind.json.JsonMapper;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -44,7 +49,8 @@ class ReportStatusServiceTest {
     void setUp() {
         reportRepository = mock(ReportRepository.class);
         progressStore = new FakeReportProgressStore();
-        service = new ReportStatusService(reportRepository, progressStore);
+        service = new ReportStatusService(new ReportFinder(reportRepository), progressStore,
+                new AiReportResultReader(JsonMapper.builder().findAndAddModules().build()));
     }
 
     @Test
@@ -209,6 +215,70 @@ class ReportStatusServiceTest {
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.REPORT_NOT_FOUND);
         verify(reportRepository, never()).findByPublicIdAndSession_User_UserId(any(), anyString());
+    }
+
+    /** 재시도 중에는 리포트가 PARTIAL 그대로이고, 재시도의 진행 단계와 축을 붙입니다. */
+    @Test
+    void PARTIAL_재시도_중이면_진행_단계와_재시도_축을_붙인다() {
+        givenReport(partial(ReportRetryStatus.PROCESSING, null));
+        progressStore.save(PUBLIC_ID.toString(),
+                new ReportProgress(ReportProgressStage.ANALYZING_GAZE, 0.4), null);
+
+        ReportStatusResponse response = service.getStatus(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.status()).isEqualTo(ReportStatus.PARTIAL);
+        assertThat(response.stage()).isEqualTo(ReportProgressStage.ANALYZING_GAZE);
+        assertThat(response.progress()).isEqualTo(0.4);
+        assertThat(response.retry().status()).isEqualTo(ReportRetryStatus.PROCESSING);
+        assertThat(response.retry().axes()).containsExactly("gaze");
+        assertThat(response.errorCode()).isNull();
+    }
+
+    /** 재시도 실패 원인은 리포트 실패 칸이 아니라 retry 안에 들어갑니다. 리포트는 실패가 아닙니다. */
+    @Test
+    void PARTIAL_재시도가_실패했으면_retry_에_원인을_준다() {
+        givenReport(partial(ReportRetryStatus.FAILED, "AI_TIMEOUT"));
+
+        ReportStatusResponse response = service.getStatus(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.status()).isEqualTo(ReportStatus.PARTIAL);
+        assertThat(response.stage()).isNull();
+        assertThat(response.errorCode()).isNull();
+        assertThat(response.retry().status()).isEqualTo(ReportRetryStatus.FAILED);
+        assertThat(response.retry().errorCode()).isEqualTo("AI_TIMEOUT");
+        assertThat(response.retry().message()).isEqualTo(ErrorCode.AI_TIMEOUT.getMessage());
+        assertThat(response.retry().retryable()).isTrue();
+    }
+
+    /** 재시도가 실패해도 리포트는 PARTIAL 로 보이므로 생성 실패 문구를 내려주지 않습니다. */
+    @Test
+    void 재시도_실패_문구는_리포트를_만들지_못했다고_하지_않는다() {
+        givenReport(partial(ReportRetryStatus.FAILED, "STT_FAILED"));
+
+        ReportStatusResponse response = service.getStatus(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.retry().message()).isEqualTo("음성 인식에 실패해 다시 분석하지 못했습니다");
+    }
+
+    @Test
+    void 재시도한_적이_없으면_retry_는_null_이고_남은_진행_단계도_붙이지_않는다() {
+        givenReport(partial(null, null));
+        progressStore.save(PUBLIC_ID.toString(),
+                new ReportProgress(ReportProgressStage.COMPOSING, 0.9), null);
+
+        ReportStatusResponse response = service.getStatus(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.retry()).isNull();
+        assertThat(response.stage()).isNull();
+    }
+
+    private Report partial(ReportRetryStatus retryStatus, String errorCode) {
+        InterviewSession session = InterviewSession.builder().sessionId(SESSION_ID).build();
+        return Report.builder().reportId(10L).publicId(PUBLIC_ID).session(session)
+                .status(ReportStatus.PARTIAL).retryStatus(retryStatus).attempt(2).errorCode(errorCode)
+                .reportData(Map.of("report_status", "partial",
+                        "overall", Map.of("axes_failed", List.of("gaze"))))
+                .createdAt(CREATED_AT).completedAt(COMPLETED_AT).build();
     }
 
     private void givenReport(Report report) {

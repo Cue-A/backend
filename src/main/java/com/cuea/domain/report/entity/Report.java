@@ -42,6 +42,11 @@ import java.util.UUID;
  * 말하기·시선 축은 실패해도 리포트가 만들어지고({@code PARTIAL}) 그 축만 빕니다.
  * 카메라를 안 썼으면 시선은 {@code skipped} 라 역시 null 입니다. 내용 축이 실패하면
  * 리포트 자체가 {@code FAILED} 입니다. docs/13-report.md 참고.
+ *
+ * <h2>실패 축 재시도</h2>
+ * PARTIAL 리포트의 실패한 축만 다시 분석할 때는 {@code status} 를 PARTIAL 로 두고
+ * {@code retryStatus} 만 바꿉니다. 재시도 중에도 원래 결과를 그대로 보여주기 위해서입니다.
+ * 성공하면 {@link #finish} 가 결과를 통째로 교체하고 {@code retryStatus} 를 비웁니다.
  */
 @Entity
 @Table(name = "report")
@@ -102,9 +107,19 @@ public class Report extends BaseCreatedEntity {
     @Column(name = "report_data", columnDefinition = "jsonb")
     private Map<String, Object> reportData;
 
-    /** {@code FAILED} 일 때 원인. AI error_code 또는 Backend 코드({@code AI_TIMEOUT} 등). */
+    /**
+     * 실패 원인. AI error_code 또는 Backend 코드({@code AI_TIMEOUT} 등).
+     *
+     * <p>{@code status = FAILED} 면 리포트 실패 원인, {@code retryStatus = FAILED} 면 재시도
+     * 실패 원인입니다. 재시도는 PARTIAL 에서만 하므로 두 경우가 동시에 생기지 않습니다.
+     */
     @Column(name = "error_code", length = 50)
     private String errorCode;
+
+    /** 실패 축 재시도 상태. 재시도한 적이 없거나 성공했으면 null. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "retry_status", length = 20)
+    private ReportRetryStatus retryStatus;
 
     @Column(name = "completed_at")
     private OffsetDateTime completedAt;
@@ -140,7 +155,14 @@ public class Report extends BaseCreatedEntity {
         this.scoreGaze = scoreGaze;
         this.reportData = reportData;
         this.errorCode = null;
+        this.retryStatus = null;
         this.completedAt = OffsetDateTime.now();
+    }
+
+    /** 실패 축 재시도가 실패했습니다. 리포트 결과와 상태는 그대로 둡니다. */
+    public void failRetry(String errorCode) {
+        this.retryStatus = ReportRetryStatus.FAILED;
+        this.errorCode = errorCode;
     }
 
     public void fail(String errorCode) {

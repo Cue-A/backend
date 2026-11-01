@@ -6,6 +6,7 @@ import com.cuea.infrastructure.ai.dto.AiAnswerSubmitRequest;
 import com.cuea.infrastructure.ai.dto.AiQuestionResult;
 import com.cuea.infrastructure.ai.dto.AiReportAnswer;
 import com.cuea.infrastructure.ai.dto.AiReportRequest;
+import com.cuea.infrastructure.ai.dto.AiReportRetryRequest;
 import com.cuea.infrastructure.ai.dto.AiReportTaskStatusResponse;
 import com.cuea.infrastructure.ai.dto.AiSessionStartRequest;
 import com.cuea.infrastructure.ai.dto.AiSessionStartResponse;
@@ -138,13 +139,45 @@ public class MockAiClient implements AiClient {
         MockReportTask task = reportTasksByKey.computeIfAbsent(idempotencyKey, key -> {
             String taskId = "mock_report_" + UUID.randomUUID().toString().substring(0, 8);
             MockReportTask created = new MockReportTask(taskId, sessionId,
-                    anyContains(request, AiReportAnswer::videoUrl, ""),
-                    anyContains(request, AiReportAnswer::audioUrl, CONTENT_FAIL_MARKER),
-                    anyContains(request, AiReportAnswer::audioUrl, FAIL_MARKER),
-                    anyContains(request, AiReportAnswer::videoUrl, FAIL_MARKER),
+                    anyContains(request.answers(), AiReportAnswer::videoUrl, ""),
+                    anyContains(request.answers(), AiReportAnswer::audioUrl, CONTENT_FAIL_MARKER),
+                    anyContains(request.answers(), AiReportAnswer::audioUrl, FAIL_MARKER),
+                    anyContains(request.answers(), AiReportAnswer::videoUrl, FAIL_MARKER),
                     new AtomicInteger());
             reportTasks.put(taskId, created);
             log.info("[MOCK] 리포트 요청 sessionId={} key={} taskId={}", sessionId, key, taskId);
+            return created;
+        });
+        return task.taskId();
+    }
+
+    /**
+     * 실제 AI 처럼 {@code axes} 가 비면 400 으로 거절합니다. 다시 계산하는 축만 URL 마커 규칙을
+     * 다시 적용하고, 요청하지 않은 축은 이전에 성공했다고 보고 ok 로 둡니다. 내용 축은 다시
+     * 계산하지 않으므로 {@code content_fail} 마커는 보지 않습니다.
+     *
+     * <p>생성과 같은 규칙이라 URL 을 바꾸지 않고 재시도하면 같은 축이 다시 실패합니다.
+     * 성공 흐름을 보려면 답변의 object key 에서 {@code fail} 을 지우고 재시도하세요.
+     */
+    @Override
+    public String retryReport(String sessionId, String idempotencyKey, AiReportRetryRequest request) {
+        if (request.axes() == null || request.axes().isEmpty()) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "axes 가 비어 있습니다");
+        }
+
+        MockReportTask task = reportTasksByKey.computeIfAbsent(idempotencyKey, key -> {
+            String taskId = "mock_report_" + UUID.randomUUID().toString().substring(0, 8);
+            MockReportTask created = new MockReportTask(taskId, sessionId,
+                    anyContains(request.answers(), AiReportAnswer::videoUrl, ""),
+                    false,
+                    request.axes().contains("speech")
+                            && anyContains(request.answers(), AiReportAnswer::audioUrl, FAIL_MARKER),
+                    request.axes().contains("gaze")
+                            && anyContains(request.answers(), AiReportAnswer::videoUrl, FAIL_MARKER),
+                    new AtomicInteger());
+            reportTasks.put(taskId, created);
+            log.info("[MOCK] 리포트 재시도 sessionId={} key={} axes={} taskId={}",
+                    sessionId, key, request.axes(), taskId);
             return created;
         });
         return task.taskId();
@@ -238,10 +271,10 @@ public class MockAiClient implements AiClient {
     }
 
     /** 대소문자 무시. marker 가 빈 문자열이면 값이 하나라도 있는지만 봅니다. */
-    private static boolean anyContains(AiReportRequest request,
+    private static boolean anyContains(List<AiReportAnswer> answers,
                                        Function<AiReportAnswer, String> url,
                                        String marker) {
-        return request.answers().stream()
+        return answers.stream()
                 .map(url)
                 .anyMatch(value -> value != null && value.toLowerCase(Locale.ROOT).contains(marker));
     }

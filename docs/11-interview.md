@@ -79,6 +79,12 @@ Backend 이며 `verified=false` 기업은 조회 자체에서 제외합니다.
 > `public_id`(UUID 문자열)이며 필수입니다. Backend 가 이 문서로 `resume_file_url`
 > presigned GET 을 발급해 AI 에 넘깁니다.
 
+> **진행 방식 선택은 프론트 → Backend REST 요청 전용입니다.** `POST /api/interviews`
+> 요청 본문에 선택값 `hideQuestionText`(boolean)를 받습니다. `true` 면 질문 텍스트를
+> 숨기고 음성만 들려주는 실전 모드로 세션을 저장합니다(`session.hide_question_text`).
+> 생략하면 기본값은 텍스트+음성(`false`)입니다. 이 값은 질문 생성에 영향을 주지 않고
+> 표시 방식만 바꾸므로 AI 세션 시작 요청에는 포함하지 않습니다.
+
 토픽 수는 보내지 않습니다. `question_count` 에서 자동 결정됩니다.
 
 ```

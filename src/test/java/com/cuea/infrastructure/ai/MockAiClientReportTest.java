@@ -4,6 +4,7 @@ import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.infrastructure.ai.dto.AiReportAnswer;
 import com.cuea.infrastructure.ai.dto.AiReportRequest;
+import com.cuea.infrastructure.ai.dto.AiReportRetryRequest;
 import com.cuea.infrastructure.ai.dto.AiReportTaskStatusResponse;
 import com.fasterxml.jackson.databind.JsonNode;
 import org.junit.jupiter.api.Test;
@@ -57,6 +58,42 @@ class MockAiClientReportTest {
         }
         assertThat(status.result().path("report_status").asText()).isEqualTo("complete");
         assertThat(status.result().path("axes").path("gaze").path("status").asText()).isEqualTo("skipped");
+    }
+
+    @Test
+    void 재시도에_axes_가_비면_INVALID_REQUEST() {
+        AiReportRequest base = request(List.of(answer("q_1", "question", null), answer("q_2", "followup", null)));
+
+        assertThatThrownBy(() -> client.retryReport("sess_1", "rpt_sess_1_2", AiReportRetryRequest.of(List.of(), base)))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.INVALID_REQUEST);
+    }
+
+    /** 다시 계산하는 축만 마커를 다시 봅니다. URL 에서 fail 을 지우면 그 축이 살아납니다. */
+    @Test
+    void 재시도는_요청한_축만_다시_계산해_전체_리포트를_준다() {
+        AiReportRequest fixed = request(List.of(
+                answer("q_1", "question", "https://s3/audio/fail.webm", "https://s3/video/ok.mp4"),
+                answer("q_2", "followup", null)));
+
+        String taskId = client.retryReport("sess_1", "rpt_sess_1_2", AiReportRetryRequest.of(List.of("gaze"), fixed));
+        JsonNode result = pollToEnd(taskId).result();
+
+        // 말하기는 요청하지 않았으므로 녹음 URL 에 fail 이 있어도 이전처럼 성공한 것으로 둡니다.
+        assertThat(result.path("report_status").asText()).isEqualTo("complete");
+        assertThat(result.path("axes").path("gaze").path("status").asText()).isEqualTo("ok");
+        assertThat(result.path("axes").path("speech").path("status").asText()).isEqualTo("ok");
+    }
+
+    @Test
+    void 재시도도_URL_이_그대로면_같은_축이_다시_실패한다() {
+        AiReportRequest same = request(List.of(
+                answer("q_1", "question", "https://s3/audio/a.webm", "https://s3/video/fail.mp4"),
+                answer("q_2", "followup", null)));
+
+        String taskId = client.retryReport("sess_1", "rpt_sess_1_2", AiReportRetryRequest.of(List.of("gaze"), same));
+
+        assertThat(pollToEnd(taskId).result().path("overall").path("axes_failed").toString()).isEqualTo("[\"gaze\"]");
     }
 
     @Test

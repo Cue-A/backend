@@ -3,9 +3,13 @@ package com.cuea.domain.report.controller;
 import com.cuea.common.annotation.RateLimit;
 import com.cuea.common.result.Result;
 import com.cuea.common.security.CurrentUser;
+import com.cuea.domain.report.dto.response.ReportDetailResponse;
 import com.cuea.domain.report.dto.response.ReportRequestResponse;
+import com.cuea.domain.report.dto.response.ReportRetryResponse;
 import com.cuea.domain.report.dto.response.ReportStatusResponse;
+import com.cuea.domain.report.service.ReportQueryService;
 import com.cuea.domain.report.service.ReportRequestService;
+import com.cuea.domain.report.service.ReportRetryService;
 import com.cuea.domain.report.service.ReportStatusService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
@@ -33,6 +37,8 @@ public class ReportController {
 
     private final ReportRequestService reportRequestService;
     private final ReportStatusService reportStatusService;
+    private final ReportQueryService reportQueryService;
+    private final ReportRetryService reportRetryService;
 
     @Operation(
             summary = "리포트 분석 작업 등록",
@@ -70,5 +76,48 @@ public class ReportController {
     public Result<ReportStatusResponse> status(@CurrentUser String userId,
                                                @PathVariable String reportId) {
         return Result.ok(reportStatusService.getStatus(userId, reportId));
+    }
+
+    @Operation(
+            summary = "리포트 상세 조회",
+            description = """
+                    끝난 리포트(COMPLETED · PARTIAL)의 전체 결과를 돌려줍니다.
+                    상태 조회나 WebSocket report 메시지로 끝난 걸 확인한 뒤 부르세요.
+
+                    총점·3축(content · speech · gaze)·문항별 결과·근거·개선 답변이 들어갑니다.
+                    PARTIAL 이면 실패한 축의 status 가 failed 이고 점수가 null 입니다.
+                    카메라를 안 썼으면 gaze.status 가 skipped 이며 실패가 아닙니다.
+
+                    아직 분석 중이면 202 REPORT_NOT_READY, 실패한 리포트면 409 REPORT_FAILED 입니다.
+                    실패 원인은 상태 조회로 확인합니다.
+                    본인 리포트가 아니거나 없으면 404 REPORT_NOT_FOUND 입니다.
+                    폴링용이 아니라 분당 60회로 제한합니다. 진행 상황은 WebSocket 과 상태 조회로 봅니다.""")
+    @GetMapping("/reports/{reportId}")
+    @RateLimit(key = "report-detail", limit = 60, windowSeconds = 60)
+    public Result<ReportDetailResponse> detail(@CurrentUser String userId,
+                                               @PathVariable String reportId) {
+        return Result.ok(reportQueryService.getDetail(userId, reportId));
+    }
+
+    @Operation(
+            summary = "실패 축 재시도",
+            description = """
+                    PARTIAL 리포트에서 실패한 축(말하기·시선)만 다시 분석합니다. 즉시 202 로 응답합니다.
+                    다시 분석할 축은 리포트의 overall.axesFailed 그대로이며 요청 본문은 없습니다.
+
+                    재시도 중에도 리포트는 PARTIAL 로 그대로 조회되고 retry.status 가 PROCESSING 입니다.
+                    진행과 결과는 WebSocket /ws/reports/{reportId} 로 받습니다 (progress · report · error).
+                    성공하면 리포트가 새 결과로 통째로 바뀌고(PARTIAL → COMPLETED 가능) retry 는 null 이 됩니다.
+                    실패하면 리포트는 그대로이고 retry.status 가 FAILED 입니다.
+
+                    PARTIAL 이 아니면 409 REPORT_NOT_RETRYABLE 입니다. FAILED 리포트는 분석 작업 등록을 다시 요청하세요.
+                    이미 재시도 중이면 409 REPORT_RETRY_IN_PROGRESS 입니다.
+                    본인 리포트가 아니거나 없으면 404 REPORT_NOT_FOUND 입니다.""")
+    @PostMapping("/reports/{reportId}/retry")
+    @ResponseStatus(HttpStatus.ACCEPTED)
+    @RateLimit(key = "report-retry", limit = 10, windowSeconds = 60)
+    public Result<ReportRetryResponse> retry(@CurrentUser String userId,
+                                             @PathVariable String reportId) {
+        return Result.ok(reportRetryService.retry(userId, reportId));
     }
 }

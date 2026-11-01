@@ -37,7 +37,9 @@ DB 에는 0~100 점수만 컬럼으로 꺼내고, 나머지는 원본(`report_da
 ```
 POST /api/interviews/{sessionId}/reports     → 202 { reportId, sessionId, status, createdAt }
 WS   /ws/reports/{reportId}                  → progress · report · error
-GET  /api/reports/{reportId}/status          → { reportId, sessionId, status, stage, progress, errorCode, message, retryable, createdAt, completedAt }
+GET  /api/reports/{reportId}/status          → { reportId, sessionId, status, stage, progress, errorCode, message, retryable, retry, createdAt, completedAt }
+GET  /api/reports/{reportId}                 → 리포트 상세 (COMPLETED · PARTIAL 만)
+POST /api/reports/{reportId}/retry           → 202 { reportId, status, retry }  (PARTIAL 실패 축 재시도)
 ```
 
 ### 동기 구간 (HTTP 요청 스레드, 1초 이내)
@@ -67,6 +69,7 @@ GET  /api/reports/{reportId}/status          → { reportId, sessionId, status, 
 |---|---|
 | `processing` | stage 가 바뀔 때마다 WS `progress`. 같은 값을 Redis 에도 남김(아래 상태 조회) |
 | `done` + `complete` | `COMPLETED`, 점수·원본 저장, WS `report` |
+| `done` 인데 결과가 계약 모양이 아니거나 필수 필드가 없음 | `FAILED` (`UNEXPECTED_AI_RESPONSE`). 상세 조회가 못 읽을 결과를 저장하지 않음 |
 | `done` + `partial` | `PARTIAL`, 실패 축 점수 null, WS `report` |
 | `CONTENT_FAILED` · `MEDIA_FETCH_FAILED` | **새 키로 자동 재시도 1회.** 또 실패하면 `FAILED` |
 | `STT_FAILED` · 그 외 | `FAILED`, WS `error` |
@@ -137,7 +140,7 @@ WS 메시지는 붙어 있는 연결에만 갑니다. 소켓에 늦게 붙거나
 1. WS /ws/reports/{reportId} 연결
 2. GET /api/reports/{reportId}/status
    PROCESSING          → stage 가 있으면 그 단계로 로딩 화면을 맞추고 WS 를 기다림
-   COMPLETED · PARTIAL → 리포트 화면으로
+   COMPLETED · PARTIAL → 리포트 화면으로. retry.status 가 PROCESSING 이면 그 축 칸만 로딩
    FAILED              → retryable 이면 다시 요청 버튼, 아니면 실패 안내
 ```
 
@@ -156,7 +159,7 @@ WS 메시지는 붙어 있는 연결에만 갑니다. 소켓에 늦게 붙거나
 | status | stage · progress | errorCode · message · retryable |
 |---|---|---|
 | `PROCESSING` | 마지막 WS progress 와 같은 값. 첫 progress 전이면 null | null |
-| `COMPLETED` · `PARTIAL` | null | null |
+| `COMPLETED` · `PARTIAL` | null. 단 PARTIAL 재시도 중이면 재시도의 단계 | null. 재시도 실패 원인은 `retry` 안에 |
 | `FAILED` | null | DB `error_code`. `message` · `retryable` 은 WS `error` 와 같은 값 |
 
 - `sessionId` 는 FAILED 재요청(`POST /api/interviews/{sessionId}/reports`)에 씁니다. 새로고침으로
@@ -181,6 +184,130 @@ WS 메시지는 붙어 있는 연결에만 갑니다. 소켓에 늦게 붙거나
 
 ---
 
+## 상세 조회 (`GET /api/reports/{reportId}`)
+
+끝난 리포트(COMPLETED · PARTIAL)의 전체 결과입니다. WS `report` 를 받았거나 상태 조회가
+COMPLETED · PARTIAL 이면 부릅니다.
+
+| 상황 | 응답 |
+|---|---|
+| COMPLETED · PARTIAL | 200 리포트 상세 |
+| PROCESSING | 202 `REPORT_NOT_READY` |
+| FAILED | 409 `REPORT_FAILED`. 원인(`errorCode` · `retryable`)은 상태 조회로 봅니다 |
+| 없는 것 · 남의 것 · UUID 가 아닌 값 | 404 `REPORT_NOT_FOUND` |
+
+```json
+{
+  "reportId": "...", "sessionId": "sess_9f2a1c", "status": "PARTIAL",
+  "overall": { "score": 68, "display": 4, "gated": false, "gateReason": null,
+               "partial": true, "axesUsed": ["content", "speech"], "axesFailed": ["gaze"] },
+  "axes": {
+    "content": { "status": "ok", "errorCode": null, "reason": null, "score": 72, "display": 4,
+                 "metrics": {}, "evidence": [ { "questionId": "q_3", "tStart": 12.4, "tEnd": 19.8,
+                 "kind": "weakness", "label": "근거 부족", "comment": "..." } ] },
+    "speech":  { "status": "ok", "score": 61, "display": 4,
+                 "metrics": { "hesitationScore": 32, "speechRateCv": 0.284, "repetitionCount": 3 }, "evidence": [] },
+    "gaze":    { "status": "failed", "errorCode": "GAZE_FAILED", "score": null, "display": null,
+                 "metrics": null, "evidence": [] }
+  },
+  "questions": [
+    { "questionId": "q_1", "questionText": "지원 동기를 말씀해 주세요", "questionNumber": 1,
+      "category": "지원동기", "difficulty": "L1", "isReplay": false, "isSpareTopic": false,
+      "score": 70, "display": 4, "axes": { "content": 74, "speech": 63, "gaze": null },
+      "transcript": "...", "durationSec": 46.2, "wordCount": 138, "wasTimeout": false, "hadReask": true }
+  ],
+  "resilience": { "score": 58, "display": 3, "comment": "..." },
+  "companyComment": "...",
+  "improvedAnswers": [ { "questionId": "q_3", "originalExcerpt": "...", "suggestion": "...",
+                         "tStart": 12.4, "tEnd": 19.8 } ],
+  "generatedAt": "2026-09-05T14:22:31Z", "createdAt": "...", "completedAt": "..."
+}
+```
+
+- **모양은 리포트 계약 13장 그대로**이고 키만 camelCase 로 옮깁니다. AI JSON 을 읽는 곳은
+  `infrastructure/ai` 의 `AiReportResultReader` · `AiReportResult` 뿐입니다
+- `questionText` 만 AI 결과에 없어 우리 `question` 테이블에서 붙입니다. 못 찾으면 null
+- AI 문자열 값(`axes.*.status` · `kind` · `category` · `gateReason` 등)은 enum 으로 바꾸지 않고
+  그대로 내려줍니다
+- `metrics` 는 세부 필드가 미확정이라 레코드로 옮기지 않고 **키 이름만 camelCase 로** 바꿉니다
+  ([`90-open-questions.md`](./90-open-questions.md) 의 리포트 계약 절)
+- AI 는 `error_code`(failed 일 때만) · `reason`(skipped 일 때만)을 키째 빼지만, 응답에는 늘
+  키가 있고 해당하지 않으면 null 입니다
+- 배열(`evidence` · `improvedAnswers` · `axesUsed` · `axesFailed`)은 키가 빠져도
+  빈 배열로 내려줍니다. `questions` 는 필수라 저장 전 검증에서 걸립니다(아래)
+- 원본에 모르는 키가 있어도 무시합니다
+- **모양은 저장 전에 확인합니다**(`AiReportResultReader.validate`). 점수만 맞고 나머지가 어긋난 결과를
+  COMPLETED 로 저장하면 상세 조회는 계속 실패하는데 재요청은 FAILED 만 받으므로 빠져나올 길이
+  없습니다. 그래서 폴러가 FAILED(`UNEXPECTED_AI_RESPONSE`)로 남깁니다.
+  역직렬화는 키가 빠져도 null 로 통과하므로 **필수 필드도 봅니다**: `overall.score`, 세 축의
+  `status`, `questions` 배열. 실패·skipped 축의 점수와 글로 된 칸(`resilience` · `company_comment` ·
+  `improved_answers`)은 비어 올 수 있어 보지 않습니다. 그래도 저장된 원본을 못
+  읽으면 우리 DB 문제라 500 `INTERNAL_ERROR` 입니다
+- 폴링용이 아니라 분당 60회로 제한합니다(`@RateLimit`)
+
+---
+
+## 실패 축 재시도 (`POST /api/reports/{reportId}/retry`)
+
+PARTIAL 리포트에서 **실패한 축(말하기·시선)만** 다시 분석합니다. AI 는 요청한 축만 다시 계산하고,
+폴링 결과는 생성과 같은 **전체 리포트**입니다(계약 14장). FAILED 는 이 API 가 아니라 등록 API 재요청으로
+복구합니다.
+
+**재시도 중에도 리포트는 PARTIAL 로 그대로 보입니다.** 화면은 리포트를 그대로 두고 다시 분석하는 축의
+칸에서만 로딩을 보여줍니다. 그래서 리포트 상태(`status`)와 재시도 상태(`retry_status`)를 따로 둡니다.
+
+### 동기 구간
+
+| 단계 | 내용 | 실패 시 |
+|---|---|---|
+| ① | 본인 리포트 조회 | 404 `REPORT_NOT_FOUND` |
+| ② | `status == PARTIAL` 인지 | 409 `REPORT_NOT_RETRYABLE` (PROCESSING · COMPLETED · FAILED) |
+| ③ | 재시도 중이 아닌지 | 409 `REPORT_RETRY_IN_PROGRESS` |
+| ④ | `report_data.overall.axes_failed` 읽기 | 비어 있으면 409 `REPORT_NOT_RETRYABLE`. AI 의 400 을 미리 막음 |
+| ⑤ | AI 재시도 요청 (Idempotency-Key `rpt_{sessionId}_{attempt+1}`) | 503 · 504. **리포트를 바꾸지 않음** |
+| ⑥ | 조건부 UPDATE → `retry_status = PROCESSING`, `attempt+1`, 새 task | 0행이면 409 `REPORT_RETRY_IN_PROGRESS` |
+| ⑦ | 커밋 후 폴링 시작, 202 | |
+
+- AI 호출이 UPDATE 보다 먼저입니다. 등록 API 와 같은 이유로, AI 가 거절하면 리포트를 그대로 둡니다.
+  동시 재시도는 같은 키로 AI 를 부르므로 AI 작업은 하나고 ⑥에서 한쪽만 통과합니다
+- 분당 10회로 제한합니다. **재시도 횟수 상한은 AI 파트와 논의 중**입니다([`90-open-questions.md`](./90-open-questions.md))
+
+### 백그라운드
+
+생성과 같은 `ReportPoller` 가 폴링하고 같은 WS(`progress` · `report` · `error`)를 보냅니다. 다른 점만 적습니다.
+
+| 상황 | 리포트 | `retry_status` | WS |
+|---|---|---|---|
+| 성공 | 새 결과로 통째로 교체 (PARTIAL → COMPLETED 가능) | null | `report` |
+| 실패 | **원래 PARTIAL 그대로** | FAILED, 원인은 `error_code` | `error` |
+
+- 자동 재시도(`CONTENT_FAILED` · `MEDIA_FETCH_FAILED` 1회)도 생성이 아니라 **재시도 엔드포인트**를 같은 축으로 부릅니다
+- 축 하나 때문에 이미 받은 리포트를 잃지 않도록, 재시도 실패는 리포트를 FAILED 로 만들지 않습니다
+
+### `retry` 필드
+
+재시도 · 상세 조회 · 상태 조회 응답에 같은 모양으로 들어갑니다.
+
+```json
+"retry": { "status": "PROCESSING", "axes": ["gaze"], "errorCode": null, "message": null, "retryable": null }
+```
+
+| `retry` | 의미 |
+|---|---|
+| `null` | 재시도한 적 없음, 또는 재시도가 성공해 결과가 교체됨 |
+| `status: PROCESSING` | 재시도 중. `axes` 칸에 로딩 |
+| `status: FAILED` | 마지막 재시도 실패. `errorCode` · `retryable` 은 리포트 실패와 같은 규칙. `message` 는 아래 |
+
+- `axes` 는 리포트의 `overall.axesFailed` 와 같습니다
+- **`message` 는 재시도용 문구입니다**(`ReportFailurePolicy.retryMessageOf`). 재시도가 실패해도
+  리포트는 PARTIAL 로 보이므로 "리포트를 만들지 못했습니다"를 쓰지 않습니다. `STT_FAILED` 는
+  "음성 인식에 실패해 다시 분석하지 못했습니다", 모르는 코드는 "다시 분석하지 못했습니다"이고
+  나머지는 `ErrorCode` 문구 그대로입니다. 재시도 실패 WS `error.message` 도 같은 문구입니다
+- 202 는 재시도를 **시작했다는 응답**입니다. 바뀐 점수는 WS `report` 를 받고 상세 조회로 가져옵니다
+- 처음 생성 때 쓴 소켓은 닫혀 있을 수 있으므로, 프론트는 202 를 받으면 소켓에 다시 붙고 상태 조회를 1회 부릅니다
+
+---
+
 ## 알아둘 제약
 
 - **서버가 재시작되면 폴링이 끊깁니다.** 그 리포트는 `PROCESSING` 으로 남고 재요청도
@@ -192,6 +319,10 @@ WS 메시지는 붙어 있는 연결에만 갑니다. 소켓에 늦게 붙거나
   DB 쓰기가 실패하면(순간적인 DB 장애 등) 행이 `PROCESSING` 으로 남습니다. 소켓은 실패라고
   했는데 상태 조회는 PROCESSING 이고, 재요청은 409 로 막힙니다. 고아 정리 작업이 함께 풀어야
   합니다
+- **재시도도 같습니다.** 폴링이 끊기면 `retry_status = PROCESSING` 이 남아 재시도가 409 로 막힙니다.
+  리포트 자체는 PARTIAL 로 계속 보입니다. 고아 정리 작업이 함께 풀어야 합니다
+- **`attempt` 는 생성 시도 수가 아니라 AI 작업 수**입니다. 생성 재요청 · 자동 재시도 · 실패 축 재시도가
+  같은 번호를 이어 씁니다. Idempotency-Key 가 겹치지 않게 하려는 것입니다
 - AI 서버는 단일 인스턴스라 재배포하면 task 가 사라집니다. 폴링이 `SESSION_NOT_FOUND`
   로 끝나 `FAILED` 가 되고, 사용자가 다시 요청하면 됩니다
 
@@ -201,8 +332,6 @@ WS 메시지는 붙어 있는 연결에만 갑니다. 소켓에 늦게 붙거나
 
 | 기능 | 비고 |
 |---|---|
-| 리포트 조회 API | `report_data` 원본을 DTO 로 옮겨 내보냄 |
-| 실패한 축만 재시도 (`/ai/sessions/{id}/report/retry`) | `PARTIAL` 전용. 만들지 팀 확인 필요 |
 | 회차 비교 (`/ai/reports/compare`) | 전체 회차의 `report_data` 를 함께 보냄 |
 
 ### 회차 비교 규칙 (계약 8장)

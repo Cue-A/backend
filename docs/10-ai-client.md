@@ -395,6 +395,7 @@ Backend 흐름은 [`13-report.md`](./13-report.md) 참고.
 | 메서드 | 경로 | 용도 |
 |---|---|---|
 | POST | `/ai/sessions/{sessionId}/report` | 리포트 생성 요청. `202 { task_id }` |
+| POST | `/ai/sessions/{sessionId}/report/retry` | PARTIAL 리포트의 실패 축만 재계산. 본문 = 생성 본문 + `axes`. `202 { task_id }` |
 | GET | `/ai/tasks/{taskId}` | 진행 상황 (질문과 같은 경로, 결과 모양만 다름) |
 
 ```
@@ -408,6 +409,9 @@ Idempotency-Key: rpt_{sessionId}_{attempt}
   포함돼 질문 생성보다 훨씬 깁니다
 - 결과(`result`)는 해석하지 않고 원본 JSON 으로 받습니다(`AiReportTaskStatusResponse`).
   점수 몇 개만 꺼내고 나머지는 `report.report_data` 에 통째로 둡니다
+- 재시도(`/report/retry`)의 `axes` 는 부분 리포트의 `overall.axes_failed` 그대로이고, 비어 있으면 AI 가
+  400 `INVALID_REQUEST` 입니다. 폴링 결과는 생성과 같은 **전체 리포트**라 같은 방식으로 저장합니다.
+  키 규칙도 같아서 시도 번호를 이어서 올립니다 (`AiReportRetryRequest`)
 - `processing` 응답에는 `stage` 와 `progress`(0~1)가 옵니다. stage 는
   `ReportProgressStage` 로 옮겨 프론트에 보냅니다
 

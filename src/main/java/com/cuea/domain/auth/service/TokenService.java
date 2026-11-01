@@ -43,14 +43,24 @@ public class TokenService {
 
     /** 로그인 성공 후 호출합니다. */
     public TokenResponse issue(User user) {
-        IssuedToken refresh = jwtProvider.createRefreshToken(user.getUserId());
-        refreshTokenStore.save(user.getUserId(), refresh.jti(), jwtProvider.refreshTokenValidity());
+        return issue(UserResponse.from(user));
+    }
+
+    /**
+     * 트랜잭션 밖에서 발급할 때 씁니다. {@link UserResponse#from(User)} 는 LAZY 인
+     * {@code auths} 를 읽으므로, 트랜잭션이 끝난 {@link User} 를 넘기면
+     * {@code LazyInitializationException} 이 납니다. 그럴 땐 트랜잭션 안에서 만든
+     * {@link UserResponse} 를 넘기세요.
+     */
+    public TokenResponse issue(UserResponse user) {
+        IssuedToken refresh = jwtProvider.createRefreshToken(user.userId());
+        refreshTokenStore.save(user.userId(), refresh.jti(), jwtProvider.refreshTokenValidity());
 
         return TokenResponse.of(
-                jwtProvider.createAccessToken(user.getUserId()),
+                jwtProvider.createAccessToken(user.userId()),
                 refresh.token(),
                 jwtProvider.accessTokenValidity().toSeconds(),
-                UserResponse.from(user));
+                user);
     }
 
     /**

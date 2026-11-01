@@ -6,6 +6,7 @@ import com.cuea.common.security.AiSecretFilter;
 import com.cuea.infrastructure.ai.dto.AiAnswerSubmitRequest;
 import com.cuea.infrastructure.ai.dto.AiErrorResponse;
 import com.cuea.infrastructure.ai.dto.AiReportRequest;
+import com.cuea.infrastructure.ai.dto.AiReportRetryRequest;
 import com.cuea.infrastructure.ai.dto.AiReportTaskStatusResponse;
 import com.cuea.infrastructure.ai.dto.AiSessionStartRequest;
 import com.cuea.infrastructure.ai.dto.AiSessionStartResponse;
@@ -112,6 +113,17 @@ public class RealAiClient implements AiClient {
     public String requestReport(String sessionId, String idempotencyKey, AiReportRequest request) {
         AiTaskAcceptedResponse accepted = call(() -> restClient.post()
                 .uri("/ai/sessions/{sessionId}/report", sessionId)
+                .header(IDEMPOTENCY_KEY_HEADER, idempotencyKey)
+                .body(request)
+                .retrieve()
+                .body(AiTaskAcceptedResponse.class));
+        return accepted == null ? null : accepted.taskId();
+    }
+
+    @Override
+    public String retryReport(String sessionId, String idempotencyKey, AiReportRetryRequest request) {
+        AiTaskAcceptedResponse accepted = call(() -> restClient.post()
+                .uri("/ai/sessions/{sessionId}/report/retry", sessionId)
                 .header(IDEMPOTENCY_KEY_HEADER, idempotencyKey)
                 .body(request)
                 .retrieve()

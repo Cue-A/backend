@@ -1,6 +1,7 @@
 package com.cuea.infrastructure;
 
 import com.cuea.infrastructure.ai.dto.AiQuestionResult;
+import com.cuea.infrastructure.ai.dto.AiReplayLogItem;
 import com.cuea.infrastructure.ai.dto.AiSessionStartRequest;
 import com.cuea.infrastructure.websocket.message.ProgressStage;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -58,5 +59,38 @@ class AiSerializationTest {
         assertThat(ProgressStage.from("tts")).isEqualTo(ProgressStage.SYNTHESIZING);
         // AI 가 새 단계를 추가해도 프론트가 깨지지 않게 기본값으로 떨어집니다.
         assertThat(ProgressStage.from("something-new")).isEqualTo(ProgressStage.GENERATING);
+    }
+
+    @Test
+    void 재연습_요청의_replay_log_는_타입별_필드만_snake_case_로_실린다() throws Exception {
+        AiSessionStartRequest request = new AiSessionStartRequest(
+                "https://example.com/resume.pdf", "백엔드 개발", "pressure",
+                null, null, 6, "sess_1st",
+                List.of(
+                        AiReplayLogItem.question("지원 동기를 말씀해 주세요.", "지원동기", "L1", false),
+                        AiReplayLogItem.followup("L2")),
+                null);
+
+        String json = objectMapper.writeValueAsString(request);
+
+        assertThat(json).contains("\"retry_of_session_id\":\"sess_1st\"");
+        // 주질문: text/category/difficulty/is_spare_topic 이 snake_case 로 실린다.
+        assertThat(json).contains("\"type\":\"question\"", "\"text\":\"지원 동기를 말씀해 주세요.\"",
+                "\"category\":\"지원동기\"", "\"difficulty\":\"L1\"", "\"is_spare_topic\":false");
+        // 꼬리질문: difficulty 만. NON_NULL 이라 text/category/is_spare_topic 키는 빠진다.
+        assertThat(json).contains("\"type\":\"followup\"");
+    }
+
+    @Test
+    void 옵션_변경으로_일반_면접이_되면_retry_of_session_id_와_replay_log_키가_모두_빠진다() throws Exception {
+        // 하나만 보내면 안 되는 규칙: 둘 다 null 이면 NON_NULL 로 두 키가 함께 빠진다.
+        AiSessionStartRequest request = new AiSessionStartRequest(
+                "https://example.com/resume.pdf", "백엔드 개발", "pressure",
+                null, null, 9, null, null, null);
+
+        String json = objectMapper.writeValueAsString(request);
+
+        assertThat(json).doesNotContain("retry_of_session_id");
+        assertThat(json).doesNotContain("replay_log");
     }
 }

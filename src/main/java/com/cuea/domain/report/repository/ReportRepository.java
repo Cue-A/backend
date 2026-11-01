@@ -1,6 +1,7 @@
 package com.cuea.domain.report.repository;
 
 import com.cuea.domain.report.entity.Report;
+import com.cuea.domain.report.entity.ReportRetryStatus;
 import com.cuea.domain.report.entity.ReportStatus;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
@@ -61,4 +62,32 @@ public interface ReportRepository extends Repository<Report, Long> {
                      @Param("aiTaskId") String aiTaskId,
                      @Param("processing") ReportStatus processing,
                      @Param("failed") ReportStatus failed);
+
+    /**
+     * PARTIAL 리포트의 실패 축 재시도를 시작합니다. {@code status} 는 PARTIAL 그대로 둡니다.
+     *
+     * <p>{@link #reopenFailed} 와 같은 이유로 조건부 UPDATE 한 번으로 합니다. 재시도를 두 번
+     * 눌러도 {@code attempt} 를 먼저 올린 쪽만 통과합니다. 결과({@code report_data} · 점수)는
+     * 재시도가 실패하면 그대로 보여줘야 하므로 건드리지 않습니다.
+     *
+     * @return 바뀐 행 수. 0 이면 다른 요청이 먼저 시작했습니다
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update Report r
+               set r.retryStatus = :processing,
+                   r.attempt = :nextAttempt,
+                   r.aiTaskId = :aiTaskId,
+                   r.errorCode = null
+             where r.reportId = :reportId
+               and r.status = :partial
+               and r.attempt = :previousAttempt
+               and (r.retryStatus is null or r.retryStatus <> :processing)
+            """)
+    int startRetry(@Param("reportId") Long reportId,
+                   @Param("previousAttempt") int previousAttempt,
+                   @Param("nextAttempt") int nextAttempt,
+                   @Param("aiTaskId") String aiTaskId,
+                   @Param("partial") ReportStatus partial,
+                   @Param("processing") ReportRetryStatus processing);
 }

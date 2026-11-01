@@ -37,6 +37,15 @@ final class ReportFailurePolicy {
     /** 지금 {@link ErrorCode} 에 없는 옛 코드이거나 코드가 비어 있을 때. */
     private static final String UNKNOWN_FAILURE_MESSAGE = "리포트를 만들지 못했습니다";
 
+    /**
+     * 실패 축 재시도용. 재시도가 실패해도 리포트는 PARTIAL 로 보이므로 "리포트를 만들지
+     * 못했다"는 생성 실패 문구를 쓰지 않습니다.
+     */
+    private static final Map<ErrorCode, String> RETRY_MESSAGE_OVERRIDES = Map.of(
+            ErrorCode.STT_FAILED, "음성 인식에 실패해 다시 분석하지 못했습니다");
+
+    private static final String UNKNOWN_RETRY_FAILURE_MESSAGE = "다시 분석하지 못했습니다";
+
     private ReportFailurePolicy() {
     }
 
@@ -74,6 +83,19 @@ final class ReportFailurePolicy {
     /** DB 에 남은 {@code error_code} 로 문구를 만듭니다. 모르는 코드는 공통 문구입니다. */
     static String messageOf(String errorCode) {
         return parse(errorCode).map(ReportFailurePolicy::messageOf).orElse(UNKNOWN_FAILURE_MESSAGE);
+    }
+
+    /**
+     * 실패 축 재시도의 실패 문구. WebSocket {@code error.message} 와 조회 응답의
+     * {@code retry.message} 가 같은 값을 내려주도록 둘 다 여기를 씁니다.
+     */
+    static String retryMessageOf(ErrorCode errorCode) {
+        return RETRY_MESSAGE_OVERRIDES.getOrDefault(errorCode, errorCode.getMessage());
+    }
+
+    /** DB 에 남은 {@code error_code} 로 재시도 실패 문구를 만듭니다. 모르는 코드는 공통 문구입니다. */
+    static String retryMessageOf(String errorCode) {
+        return parse(errorCode).map(ReportFailurePolicy::retryMessageOf).orElse(UNKNOWN_RETRY_FAILURE_MESSAGE);
     }
 
     private static Optional<ErrorCode> parse(String errorCode) {

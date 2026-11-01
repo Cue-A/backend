@@ -27,6 +27,7 @@ public enum ErrorCode {
     REFRESH_TOKEN_REUSED(HttpStatus.UNAUTHORIZED, "보안을 위해 로그아웃되었습니다. 다시 로그인해 주세요"),
     INVALID_CREDENTIALS(HttpStatus.UNAUTHORIZED, "이메일 또는 비밀번호가 올바르지 않습니다"),
     EMAIL_ALREADY_EXISTS(HttpStatus.CONFLICT, "이미 가입된 이메일입니다"),
+    INVALID_PASSWORD_FORMAT(HttpStatus.BAD_REQUEST, "비밀번호는 영문·숫자를 포함해 8~64자여야 합니다"),
     OAUTH_FAILED(HttpStatus.UNAUTHORIZED, "소셜 로그인에 실패했습니다"),
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다"),
 
@@ -74,7 +75,12 @@ public enum ErrorCode {
     REPORT_ALREADY_EXISTS(HttpStatus.CONFLICT, "이미 분석을 요청한 세션입니다"),
     // AI 계약 코드와 같은 이름입니다. 되묻기를 뺀 답변이 2문항 미만이면 AI 가 422 로 거절합니다.
     REPORT_TOO_SHORT(HttpStatus.UNPROCESSABLE_ENTITY, "답변이 부족해 리포트를 만들 수 없습니다"),
-    REPORT_NOT_READY(HttpStatus.ACCEPTED, "리포트를 생성하고 있습니다");
+    REPORT_NOT_READY(HttpStatus.ACCEPTED, "리포트를 생성하고 있습니다"),
+    // 실패 원인은 상태 조회(errorCode · retryable)로 봅니다. 상세 조회는 끝난 리포트만 다룹니다.
+    REPORT_FAILED(HttpStatus.CONFLICT, "리포트를 만들지 못했습니다"),
+    // 실패 축 재시도는 PARTIAL 리포트만 받습니다. FAILED 는 분석 작업 등록을 다시 요청합니다.
+    REPORT_NOT_RETRYABLE(HttpStatus.CONFLICT, "다시 분석할 수 없는 리포트입니다"),
+    REPORT_RETRY_IN_PROGRESS(HttpStatus.CONFLICT, "이미 다시 분석하고 있습니다");
 
     private final HttpStatus status;
     private final String message;

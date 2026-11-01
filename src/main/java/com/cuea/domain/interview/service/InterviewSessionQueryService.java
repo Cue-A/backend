@@ -46,6 +46,56 @@ public class InterviewSessionQueryService {
     }
 
     /**
+     * 재면접 옵션 비교용 root 세션을 읽습니다. 비교에 쓰는 LAZY 연관
+     * ({@code document}·{@code company})을 fetch join 으로 미리 초기화해, 트랜잭션 밖
+     * ({@code open-in-view=false})에서 비교해도 {@code LazyInitializationException} 이
+     * 나지 않게 합니다.
+     *
+     * <p><b>요청 사용자 소유인 root 세션만 돌려줍니다.</b> source 세션 소유권은 호출 전에
+     * 확인하지만, root 가 다른 세션일 수 있으므로 root 도 같은 {@code userId} 소유인지
+     * 조회 조건으로 확인해 교차 사용자 참조를 막습니다. 없거나 남의 세션이면
+     * {@code SESSION_NOT_FOUND}.
+     */
+    @Transactional(readOnly = true)
+    public InterviewSession getRootForReplay(String rootSessionId, String userId) {
+        return sessionRepository.findRootForReplay(rootSessionId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND));
+    }
+
+    /**
+     * 재연습(시작·옵션 조회)의 공통 진입 단계입니다. 전달한 세션을 소유권·완료 상태로
+     * 검증한 뒤, 그 묶음의 <b>최초(root) 세션</b>을 fetch join 으로 읽어 돌려줍니다.
+     *
+     * <ol>
+     *   <li>전달 세션이 요청 사용자 소유인지({@code SESSION_NOT_FOUND}, 404). 없거나 남의
+     *       세션이면 구별 없이 404.</li>
+     *   <li>완료된 세션만 재연습 대상이므로 완료 상태인지({@code SESSION_NOT_COMPLETED}, 409).</li>
+     *   <li>{@link InterviewSession#rootSessionId()} 로 최초 세션을 결정합니다(직전 회차가
+     *       아니라 항상 최초).</li>
+     *   <li>{@link #getRootForReplay} 로 root 를 읽습니다. root 소유권을 다시 확인하고
+     *       ({@code SESSION_NOT_FOUND}), 옵션에 쓰는 LAZY 연관({@code document}·{@code company})을
+     *       fetch join 으로 초기화해 트랜잭션 밖(open-in-view=false)에서도 안전하게 씁니다.</li>
+     * </ol>
+     *
+     * <p><b>재연습 시작({@code InterviewStartService.resolveReplayPlan})과 옵션 조회
+     * ({@code ReplaySessionOptionsService})가 이 메서드 하나를 공유합니다.</b> 1~3단계(소유권·
+     * 완료 상태·root 결정)를 양쪽에서 복사하지 않아, 한쪽만 바뀌어 조회는 되는데 시작은
+     * 실패하는 불일치를 구조적으로 막습니다(docs/12-replay.md "중복 구현하지 않습니다").
+     * 반환한 root 세션의 {@code getSessionId()} 는 root 세션 ID 와 같습니다.
+     */
+    @Transactional(readOnly = true)
+    public InterviewSession getReplayRoot(String sessionId, String userId) {
+        InterviewSession source = getOwnedSession(sessionId, userId);
+
+        if (!source.getStatus().isReportable()) {
+            throw new BusinessException(ErrorCode.SESSION_NOT_COMPLETED,
+                    "완료된 세션만 재연습할 수 있습니다");
+        }
+
+        return getRootForReplay(source.rootSessionId(), userId);
+    }
+
+    /**
      * 나간 순서대로. 되묻기 포함. 소유권 확인이 없어 <b>API 경계에서 쓰지 마세요.</b>
      */
     @Transactional(readOnly = true)

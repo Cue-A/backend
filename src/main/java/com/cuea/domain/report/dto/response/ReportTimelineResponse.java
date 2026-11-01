@@ -12,6 +12,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.UUID;
 import java.util.stream.Collectors;
 
 /**
@@ -82,14 +83,17 @@ public record ReportTimelineResponse(
 
     public static ReportTimelineResponse of(Report report, AiReportResult result,
                                             ReportQuestions questions, ReportRetryInfo retry) {
-        Map<String, List<TimelineEvidence>> evidence = evidenceByOriginalQuestion(result.axes(), questions);
-        List<TimelineQuestion> timeline = result.questions() == null ? List.of()
-                : result.questions().stream()
-                        .map(q -> new TimelineQuestion(q.questionId(), q.questionNumber(),
-                                questions.textOf(q.questionId()), q.durationSec(), q.hadReask(),
-                                evidence.getOrDefault(q.questionId(), List.of())))
-                        .toList();
-        warnDroppedEvidence(report, evidence, timeline);
+        List<AiReportResult.Question> aiQuestions = result.questions() == null ? List.of() : result.questions();
+        Set<String> questionIds = aiQuestions.stream()
+                .map(AiReportResult.Question::questionId)
+                .collect(Collectors.toSet());
+        Map<String, List<TimelineEvidence>> evidence =
+                evidenceByOriginalQuestion(report.getPublicId(), result.axes(), questionIds, questions);
+        List<TimelineQuestion> timeline = aiQuestions.stream()
+                .map(q -> new TimelineQuestion(q.questionId(), q.questionNumber(),
+                        questions.textOf(q.questionId()), q.durationSec(), q.hadReask(),
+                        evidence.getOrDefault(q.questionId(), List.of())))
+                .toList();
         return new ReportTimelineResponse(
                 report.getPublicId().toString(),
                 report.getStatus(),
@@ -97,25 +101,6 @@ public record ReportTimelineResponse(
                 timeline,
                 ReportDetailResponse.Resilience.from(result.resilience()),
                 retry);
-    }
-
-    /**
-     * 정상이라면 빠지는 근거가 없습니다. 빠졌다면 AI 결과의 근거와 questions[] 가 어긋난 것이라 남겨 둡니다.
-     * questionIds 는 근거에 적힌 ID(되묻기면 q_1r) 그대로입니다.
-     */
-    private static void warnDroppedEvidence(Report report, Map<String, List<TimelineEvidence>> evidence,
-                                            List<TimelineQuestion> timeline) {
-        Set<String> attached = timeline.stream().map(TimelineQuestion::questionId).collect(Collectors.toSet());
-        List<TimelineEvidence> dropped = evidence.entrySet().stream()
-                .filter(e -> !attached.contains(e.getKey()))
-                .flatMap(e -> e.getValue().stream())
-                .toList();
-        if (!dropped.isEmpty()) {
-            log.warn("원 질문을 찾지 못해 타임라인에서 뺀 근거가 있습니다 reportId={} questionIds={} count={}",
-                    report.getPublicId(),
-                    dropped.stream().map(TimelineEvidence::questionId).distinct().sorted().toList(),
-                    dropped.size());
-        }
     }
 
     private static AxisStatuses axisStatuses(AiReportResult.Axes a) {
@@ -129,14 +114,31 @@ public record ReportTimelineResponse(
         return axis == null ? null : axis.status();
     }
 
-    /** 원 질문 ID → 근거. 원 질문이 questions[] 에 없는 근거는 붙을 곳이 없어 빠지고, 빠지면 경고 로그를 남깁니다. */
+    /**
+     * 원 질문 ID → 근거. 원 질문이 questions[] 에 없는 근거는 붙을 곳이 없어 뺍니다.
+     * 정상이라면 빠지는 근거가 없으므로, 빠지면 AI 결과의 근거와 questions[] 가 어긋난 원인을 찾을 수 있게
+     * 근거에 적힌 ID(되묻기면 q_1r) 그대로 경고 로그로 남깁니다.
+     *
+     * @param questionIds AI questions[] 의 원 질문 ID
+     */
     private static Map<String, List<TimelineEvidence>> evidenceByOriginalQuestion(
-            AiReportResult.Axes axes, ReportQuestions questions) {
+            UUID reportId, AiReportResult.Axes axes, Set<String> questionIds, ReportQuestions questions) {
         Map<String, List<TimelineEvidence>> grouped = new HashMap<>();
         if (axes != null) {
             addEvidence(grouped, "content", axes.content(), questions);
             addEvidence(grouped, "speech", axes.speech(), questions);
             addEvidence(grouped, "gaze", axes.gaze(), questions);
+        }
+        List<TimelineEvidence> dropped = grouped.entrySet().stream()
+                .filter(e -> !questionIds.contains(e.getKey()))
+                .flatMap(e -> e.getValue().stream())
+                .toList();
+        if (!dropped.isEmpty()) {
+            log.warn("원 질문을 찾지 못해 타임라인에서 뺀 근거가 있습니다 reportId={} questionIds={} count={}",
+                    reportId,
+                    dropped.stream().map(TimelineEvidence::questionId).distinct().sorted().toList(),
+                    dropped.size());
+            grouped.keySet().retainAll(questionIds);
         }
         grouped.values().forEach(list -> list.sort(ANSWER_ORDER));
         return grouped;

@@ -5,6 +5,8 @@ import com.cuea.common.exception.ErrorCode;
 import com.cuea.common.security.AiSecretFilter;
 import com.cuea.infrastructure.ai.dto.AiAnswerSubmitRequest;
 import com.cuea.infrastructure.ai.dto.AiErrorResponse;
+import com.cuea.infrastructure.ai.dto.AiReportCompareRequest;
+import com.cuea.infrastructure.ai.dto.AiReportComparison;
 import com.cuea.infrastructure.ai.dto.AiReportRequest;
 import com.cuea.infrastructure.ai.dto.AiReportRetryRequest;
 import com.cuea.infrastructure.ai.dto.AiReportTaskStatusResponse;
@@ -20,6 +22,7 @@ import org.springframework.http.client.SimpleClientHttpRequestFactory;
 import org.springframework.stereotype.Component;
 import org.springframework.web.client.ResourceAccessException;
 import org.springframework.web.client.RestClient;
+import org.springframework.web.client.RestClientException;
 
 import java.io.InputStream;
 import java.net.SocketTimeoutException;
@@ -137,6 +140,23 @@ public class RealAiClient implements AiClient {
                 .uri("/ai/tasks/{taskId}", taskId)
                 .retrieve()
                 .body(AiReportTaskStatusResponse.class));
+    }
+
+    /**
+     * 연결 · 지연은 {@link #call} 이 503 · 504 로 바꿉니다. 여기서 더 잡는 것은 본문을 레코드로
+     * 옮기지 못한 경우뿐이고, 그대로 두면 500 으로 새므로 502 로 바꿉니다.
+     */
+    @Override
+    public AiReportComparison compareReports(AiReportCompareRequest request) {
+        try {
+            return call(() -> restClient.post()
+                    .uri("/ai/reports/compare")
+                    .body(request)
+                    .retrieve()
+                    .body(AiReportComparison.class));
+        } catch (RestClientException e) {
+            throw new BusinessException(ErrorCode.UNEXPECTED_AI_RESPONSE, "회차 비교 결과를 해석할 수 없습니다", e);
+        }
     }
 
     /**

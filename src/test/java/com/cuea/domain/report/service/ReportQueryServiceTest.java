@@ -3,6 +3,7 @@ package com.cuea.domain.report.service;
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.entity.InterviewSession;
+import com.cuea.domain.interview.entity.Question;
 import com.cuea.domain.interview.service.InterviewSessionQueryService;
 import com.cuea.domain.report.dto.response.ReportDetailResponse;
 import com.cuea.domain.report.entity.Report;
@@ -10,7 +11,6 @@ import com.cuea.domain.report.entity.ReportRetryStatus;
 import com.cuea.domain.report.entity.ReportStatus;
 import com.cuea.domain.report.repository.ReportRepository;
 import com.cuea.infrastructure.ai.AiReportResultReader;
-import com.cuea.support.JsonFieldNames;
 import com.fasterxml.jackson.core.type.TypeReference;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -20,6 +20,7 @@ import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
 import java.time.OffsetDateTime;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -163,7 +164,8 @@ class ReportQueryServiceTest {
     @Test
     void 질문_원문을_우리_DB_에서_붙인다() throws Exception {
         givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
-        when(sessionQueryService.findQuestionTextsForInternal(SESSION_ID)).thenReturn(Map.of("q_1", "지원 동기를 말씀해 주세요"));
+        when(sessionQueryService.findQuestionsInOrderForInternal(SESSION_ID)).thenReturn(List.of(
+                Question.builder().sessionId(SESSION_ID).questionId("q_1").text("지원 동기를 말씀해 주세요").build()));
 
         ReportDetailResponse response = service.getDetail(USER_ID, PUBLIC_ID.toString());
 
@@ -196,9 +198,22 @@ class ReportQueryServiceTest {
         assertThat(json.has("improvedAnswers")).isTrue();
         assertThat(json.has("summary")).isTrue();
         assertThat(question.has("comment")).isTrue();
-        assertThat(JsonFieldNames.of(json)).noneMatch(name -> name.contains("_"));
+        assertThat(fieldNames(json)).noneMatch(name -> name.contains("_"));
     }
 
+    /** 값(GAZE_FAILED 등)은 빼고 키 이름만 모읍니다. */
+    private static List<String> fieldNames(JsonNode node) {
+        List<String> names = new ArrayList<>();
+        if (node.isObject()) {
+            node.fields().forEachRemaining(entry -> {
+                names.add(entry.getKey());
+                names.addAll(fieldNames(entry.getValue()));
+            });
+        } else if (node.isArray()) {
+            node.forEach(child -> names.addAll(fieldNames(child)));
+        }
+        return names;
+    }
 
     /** 카메라 미사용은 실패가 아닙니다. COMPLETED 이고 시선 축만 skipped 입니다. */
     @Test

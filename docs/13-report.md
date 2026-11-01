@@ -378,7 +378,7 @@ PARTIAL 리포트에서 **실패한 축(말하기·시선)만** 다시 분석합
 | 상황 | 응답 |
 |---|---|
 | COMPLETED · PARTIAL | 200 |
-| PROCESSING · FAILED | 202 `REPORT_NOT_READY` · 409 `REPORT_FAILED` (상세 조회와 같은 `ReportFinder.getFinished`) |
+| PROCESSING · FAILED | 202 `REPORT_NOT_READY` · 409 `REPORT_FAILED` (상세 조회와 같은 규칙) |
 | 없는 것 · 남의 것 · UUID 가 아닌 값 | 404 `REPORT_NOT_FOUND` |
 | AI 응답을 읽을 수 없음 · `trend` 가 없음 · `compared_rounds` 가 보낸 회차와 다름 · AI 가 거절 | 502 `UNEXPECTED_AI_RESPONSE` |
 | AI 연결 실패 · 응답 지연 | 503 `AI_UNAVAILABLE` · 504 `AI_TIMEOUT` |

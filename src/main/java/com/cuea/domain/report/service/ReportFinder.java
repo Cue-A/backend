@@ -29,7 +29,7 @@ class ReportFinder {
     }
 
     /**
-     * 끝난(COMPLETED · PARTIAL) 본인 리포트. 결과를 읽는 조회(상세 · 회차 비교)가 같은 규칙을 씁니다.
+     * 끝난(COMPLETED · PARTIAL) 본인 리포트. 회차 비교가 쓰고, 규칙은 상세 조회({@link ReportQueryService})와 같습니다.
      * 진행 중이면 202 {@code REPORT_NOT_READY}, 실패했으면 409 {@code REPORT_FAILED} 입니다.
      */
     Report getFinished(String userId, String reportId) {

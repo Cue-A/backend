@@ -444,7 +444,7 @@ class InterviewStartServiceTest {
         assertThat(captor.getValue().retryOfSessionId()).isNull();
         assertThat(captor.getValue().replayLog()).isNull();
         // 재면접 경로를 타지 않았으므로 조회/조립이 호출되지 않는다.
-        verify(sessionQueryService, never()).getOwnedSession(anyString(), anyString());
+        verify(sessionQueryService, never()).getReplayRoot(anyString(), anyString());
         verify(replayLogAssembler, never()).assemble(anyString());
         // 일반 세션이라 retryOfSession 은 null 로 저장된다.
         verify(sessionWriter).createSession(any(), any(), any(), any(), any(), eq(6), eq(null));
@@ -453,8 +453,7 @@ class InterviewStartServiceTest {
     @Test
     void 정상_재면접은_root_세션_ID_와_replay_log_를_AI_에_보내고_연관을_저장한다() {
         InterviewSession root = completedRoot(SOURCE_SESSION_ID);
-        when(sessionQueryService.getOwnedSession(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
-        when(sessionQueryService.getRootForReplay(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
+        when(sessionQueryService.getReplayRoot(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
         when(replayLogAssembler.assemble(SOURCE_SESSION_ID)).thenReturn(sampleReplayLog());
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_r2", "task_r2", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
@@ -469,16 +468,15 @@ class InterviewStartServiceTest {
         assertThat(captor.getValue().replayLog()).containsExactlyElementsOf(sampleReplayLog());
         // 재면접이 실제 적용됐으므로 root 세션을 연관으로 저장한다.
         verify(sessionWriter).createSession(any(), any(), any(), any(), any(), eq(6), eq(root));
-        // root 는 fetch-join 조회(getRootForReplay)로 읽어야 트랜잭션 밖 옵션 비교에서
-        // LazyInitializationException 이 나지 않는다. 이 경로를 고정한다.
-        verify(sessionQueryService).getRootForReplay(SOURCE_SESSION_ID, USER_ID);
+        // 소유권·완료·root fetch-join 조회는 공용 getReplayRoot 가 처리한다. 조회 API 와
+        // 같은 메서드를 공유해 조회·시작 판정이 어긋나지 않게 고정한다.
+        verify(sessionQueryService).getReplayRoot(SOURCE_SESSION_ID, USER_ID);
     }
 
     @Test
     void 정상_재면접이면_응답의_replayApplied_가_true_다() {
         InterviewSession root = completedRoot(SOURCE_SESSION_ID);
-        when(sessionQueryService.getOwnedSession(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
-        when(sessionQueryService.getRootForReplay(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
+        when(sessionQueryService.getReplayRoot(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
         when(replayLogAssembler.assemble(SOURCE_SESSION_ID)).thenReturn(sampleReplayLog());
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_ra", "task_ra", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
@@ -493,21 +491,9 @@ class InterviewStartServiceTest {
     @Test
     void 재면접의_재면접이면_직전이_아니라_최초_root_세션을_retryOfSessionId_로_보낸다() {
         // source 는 2회차(retryOfSession=root), root 는 1회차.
+        // 공용 getReplayRoot 가 2회차 ID 로 들어와도 최초 root 로 환원해 돌려준다.
         InterviewSession root = completedRoot("sess_root_origin");
-        InterviewSession second = InterviewSession.builder()
-                .sessionId("sess_second")
-                .user(user)
-                .document(document)
-                .retryOfSession(root)
-                .mode("PRACTICE")
-                .jobRole("백엔드 개발")
-                .questionCount(6)
-                .persona(Persona.PRESSURE)
-                .hideQuestionText(false)
-                .status(SessionStatus.COMPLETED)
-                .build();
-        when(sessionQueryService.getOwnedSession("sess_second", USER_ID)).thenReturn(second);
-        when(sessionQueryService.getRootForReplay("sess_root_origin", USER_ID)).thenReturn(root);
+        when(sessionQueryService.getReplayRoot("sess_second", USER_ID)).thenReturn(root);
         when(replayLogAssembler.assemble("sess_root_origin")).thenReturn(sampleReplayLog());
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_third", "task_3", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
@@ -527,8 +513,7 @@ class InterviewStartServiceTest {
     @Test
     void 고정_옵션이_다른_재면접_요청은_400으로_거부하고_AI_호출_세션저장을_하지_않는다() {
         InterviewSession root = completedRoot(SOURCE_SESSION_ID);
-        when(sessionQueryService.getOwnedSession(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
-        when(sessionQueryService.getRootForReplay(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
+        when(sessionQueryService.getReplayRoot(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
         // 정책이 불일치로 INVALID_REQUEST 를 던지도록 강제(void 메서드라 doThrow 사용).
         doThrow(new BusinessException(ErrorCode.INVALID_REQUEST, "조건이 다릅니다"))
                 .when(replayOptionPolicy)
@@ -577,8 +562,7 @@ class InterviewStartServiceTest {
      */
     private void assertReplayRejectedWhenPolicyThrows() {
         InterviewSession root = completedRoot(SOURCE_SESSION_ID);
-        when(sessionQueryService.getOwnedSession(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
-        when(sessionQueryService.getRootForReplay(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
+        when(sessionQueryService.getReplayRoot(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
         doThrow(new BusinessException(ErrorCode.INVALID_REQUEST, "조건이 다릅니다"))
                 .when(replayOptionPolicy)
                 .enforceFixedOptions(any(), anyInt(), any(), any(), any());
@@ -593,7 +577,7 @@ class InterviewStartServiceTest {
 
     @Test
     void 존재하지_않거나_타인_세션이면_SESSION_NOT_FOUND_로_거부하고_AI_를_호출하지_않는다() {
-        when(sessionQueryService.getOwnedSession(SOURCE_SESSION_ID, USER_ID))
+        when(sessionQueryService.getReplayRoot(SOURCE_SESSION_ID, USER_ID))
                 .thenThrow(new BusinessException(ErrorCode.SESSION_NOT_FOUND));
 
         assertThatThrownBy(() -> service.start(USER_ID, replayRequest(SOURCE_SESSION_ID)))
@@ -606,8 +590,9 @@ class InterviewStartServiceTest {
 
     @Test
     void 완료되지_않은_세션으로는_재면접할_수_없다() {
-        InterviewSession inProgress = fakeSession(SOURCE_SESSION_ID); // IN_PROGRESS
-        when(sessionQueryService.getOwnedSession(SOURCE_SESSION_ID, USER_ID)).thenReturn(inProgress);
+        // 공용 getReplayRoot 가 완료 상태를 확인해 IN_PROGRESS·ABORTED 면 409 를 던진다.
+        when(sessionQueryService.getReplayRoot(SOURCE_SESSION_ID, USER_ID))
+                .thenThrow(new BusinessException(ErrorCode.SESSION_NOT_COMPLETED));
 
         assertThatThrownBy(() -> service.start(USER_ID, replayRequest(SOURCE_SESSION_ID)))
                 .isInstanceOf(BusinessException.class)
@@ -619,8 +604,7 @@ class InterviewStartServiceTest {
     @Test
     void root_질문_로그가_비어_있으면_일반_면접으로_전환하지_않고_오류를_낸다() {
         InterviewSession root = completedRoot(SOURCE_SESSION_ID);
-        when(sessionQueryService.getOwnedSession(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
-        when(sessionQueryService.getRootForReplay(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
+        when(sessionQueryService.getReplayRoot(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
         // 조립기가 유효한 QUESTION 없음으로 INTERNAL_ERROR(저장 데이터 무결성 문제)를 던진다.
         when(replayLogAssembler.assemble(SOURCE_SESSION_ID))
                 .thenThrow(new BusinessException(ErrorCode.INTERNAL_ERROR));
@@ -635,21 +619,8 @@ class InterviewStartServiceTest {
     @Test
     void root_세션이_타인_소유면_SESSION_NOT_FOUND_로_차단한다() {
         // source 는 소유하지만(2회차), root(1회차)가 다른 사용자 소유인 교차 참조 상황.
-        // getRootForReplay 가 userId 조건으로 걸러 빈 값을 돌려주면 SESSION_NOT_FOUND.
-        InterviewSession second = InterviewSession.builder()
-                .sessionId("sess_second")
-                .user(user)
-                .document(document)
-                .retryOfSession(completedRoot("sess_root_other"))
-                .mode("PRACTICE")
-                .jobRole("백엔드 개발")
-                .questionCount(6)
-                .persona(Persona.PRESSURE)
-                .hideQuestionText(false)
-                .status(SessionStatus.COMPLETED)
-                .build();
-        when(sessionQueryService.getOwnedSession("sess_second", USER_ID)).thenReturn(second);
-        when(sessionQueryService.getRootForReplay("sess_root_other", USER_ID))
+        // 공용 getReplayRoot 안의 getRootForReplay 가 userId 조건으로 걸러 404 를 낸다.
+        when(sessionQueryService.getReplayRoot("sess_second", USER_ID))
                 .thenThrow(new BusinessException(ErrorCode.SESSION_NOT_FOUND));
 
         assertThatThrownBy(() -> service.start(USER_ID, replayRequest("sess_second")))

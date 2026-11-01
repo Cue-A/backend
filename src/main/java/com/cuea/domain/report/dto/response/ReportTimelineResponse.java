@@ -4,17 +4,21 @@ import com.cuea.domain.report.entity.Report;
 import com.cuea.domain.report.entity.ReportStatus;
 import com.cuea.infrastructure.ai.dto.AiReportResult;
 import io.swagger.v3.oas.annotations.media.Schema;
+import lombok.extern.slf4j.Slf4j;
 
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * XAI 타임라인. 축별 근거를 원 질문별로 묶습니다. 되묻기 근거(q_1r)도 원 질문 아래로 들어갑니다.
  * 시간은 그 답변 오디오 기준 초 그대로입니다.
  */
+@Slf4j
 @Schema(description = "XAI 타임라인 · 회복력")
 public record ReportTimelineResponse(
 
@@ -85,6 +89,7 @@ public record ReportTimelineResponse(
                                 questions.textOf(q.questionId()), q.durationSec(), q.hadReask(),
                                 evidence.getOrDefault(q.questionId(), List.of())))
                         .toList();
+        warnDroppedEvidence(report, evidence, timeline);
         return new ReportTimelineResponse(
                 report.getPublicId().toString(),
                 report.getStatus(),
@@ -92,6 +97,25 @@ public record ReportTimelineResponse(
                 timeline,
                 ReportDetailResponse.Resilience.from(result.resilience()),
                 retry);
+    }
+
+    /**
+     * 정상이라면 빠지는 근거가 없습니다. 빠졌다면 AI 결과의 근거와 questions[] 가 어긋난 것이라 남겨 둡니다.
+     * questionIds 는 근거에 적힌 ID(되묻기면 q_1r) 그대로입니다.
+     */
+    private static void warnDroppedEvidence(Report report, Map<String, List<TimelineEvidence>> evidence,
+                                            List<TimelineQuestion> timeline) {
+        Set<String> attached = timeline.stream().map(TimelineQuestion::questionId).collect(Collectors.toSet());
+        List<TimelineEvidence> dropped = evidence.entrySet().stream()
+                .filter(e -> !attached.contains(e.getKey()))
+                .flatMap(e -> e.getValue().stream())
+                .toList();
+        if (!dropped.isEmpty()) {
+            log.warn("원 질문을 찾지 못해 타임라인에서 뺀 근거가 있습니다 reportId={} questionIds={} count={}",
+                    report.getPublicId(),
+                    dropped.stream().map(TimelineEvidence::questionId).distinct().sorted().toList(),
+                    dropped.size());
+        }
     }
 
     private static AxisStatuses axisStatuses(AiReportResult.Axes a) {
@@ -105,7 +129,7 @@ public record ReportTimelineResponse(
         return axis == null ? null : axis.status();
     }
 
-    /** 원 질문 ID → 근거. 원 질문이 questions[] 에 없는 근거는 붙을 곳이 없어 빠집니다. */
+    /** 원 질문 ID → 근거. 원 질문이 questions[] 에 없는 근거는 붙을 곳이 없어 빠지고, 빠지면 경고 로그를 남깁니다. */
     private static Map<String, List<TimelineEvidence>> evidenceByOriginalQuestion(
             AiReportResult.Axes axes, ReportQuestions questions) {
         Map<String, List<TimelineEvidence>> grouped = new HashMap<>();

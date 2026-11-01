@@ -22,6 +22,9 @@ import com.fasterxml.jackson.databind.json.JsonMapper;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -414,15 +417,18 @@ class ReportQueryServiceTest {
         assertThat(response.retry()).isNull();
     }
 
-    /** 계약 예시의 q_3 근거는 questions[] 에 q_3 이 없습니다. */
+    /** 계약 예시의 q_3 근거는 questions[] 에 q_3 이 없습니다. 빠진 근거는 원인을 찾을 수 있게 로그로 남깁니다. */
     @Test
-    void 타임라인에서_문항을_찾지_못한_근거는_빠진다() throws Exception {
+    @ExtendWith(OutputCaptureExtension.class)
+    void 타임라인에서_문항을_찾지_못한_근거는_빠진다(CapturedOutput output) throws Exception {
         givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
 
         ReportTimelineResponse response = service.getTimeline(USER_ID, PUBLIC_ID.toString());
 
         assertThat(response.questions()).singleElement()
                 .satisfies(q -> assertThat(q.evidence()).isEmpty());
+        assertThat(output).contains("원 질문을 찾지 못해 타임라인에서 뺀 근거가 있습니다",
+                "reportId=" + PUBLIC_ID, "questionIds=[q_3]", "count=1");
     }
 
     @Test

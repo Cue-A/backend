@@ -13,6 +13,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
@@ -137,6 +138,37 @@ public class InterviewSessionQueryService {
                         .collect(Collectors.groupingBy(InterviewSession::rootSessionId));
         return sessions.stream().collect(Collectors.toMap(InterviewSession::getSessionId,
                 s -> s.isRetry() ? 2 + countStartedBefore(retriesByRoot, s) : 1));
+    }
+
+    /**
+     * 본인 세션까지의 회차. 같은 루트의 1회차와 중단되지 않은 재연습 중, 이 세션보다 늦게 시작하지 않은
+     * 것을 시작한 순서로 돌려줍니다. 번호는 {@link #roundsOf} 와 같습니다.
+     *
+     * <p>1회차는 상태와 상관없이 1 입니다. 회차 비교는 리포트가 끝난 회차만 고르므로 여기서는 거르지 않습니다.
+     *
+     * @throws BusinessException 없거나 남의 세션이면 {@code SESSION_NOT_FOUND}
+     */
+    @Transactional(readOnly = true)
+    public List<SessionRound> roundsUpTo(String userId, String sessionId) {
+        InterviewSession session = getOwnedSession(sessionId, userId);
+        if (!session.isRetry()) {
+            return List.of(new SessionRound(session.getSessionId(), 1, session.getCreatedAt()));
+        }
+
+        String rootId = session.rootSessionId();
+        List<SessionRound> rounds = new ArrayList<>();
+        sessionRepository.findBySessionIdAndUser_UserId(rootId, userId)
+                .ifPresent(root -> rounds.add(new SessionRound(rootId, 1, root.getCreatedAt())));
+        List<InterviewSession> retries = sessionRepository.findRetriesOf(userId, List.of(rootId), SessionStatus.ABORTED)
+                .stream()
+                .filter(r -> STARTED_FIRST.compare(r, session) <= 0)
+                .sorted(STARTED_FIRST)
+                .toList();
+        for (int i = 0; i < retries.size(); i++) {
+            InterviewSession retry = retries.get(i);
+            rounds.add(new SessionRound(retry.getSessionId(), i + 2, retry.getCreatedAt()));
+        }
+        return rounds;
     }
 
     private static int countStartedBefore(Map<String, List<InterviewSession>> retriesByRoot,

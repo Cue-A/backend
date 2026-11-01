@@ -11,6 +11,7 @@ import com.cuea.domain.interview.service.ReplaySessionOptionsService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 
+import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
@@ -61,7 +62,8 @@ class InterviewControllerReplayOptionsTest {
         UUID docPublicId = UUID.randomUUID();
         ReplaySessionOptionsResponse dto = new ReplaySessionOptionsResponse(
                 "sess_root", docPublicId.toString(), 12L, "백엔드 개발", 6,
-                Persona.PRESSURE, "홍길동 자소서", "현대엔지니어링");
+                Persona.PRESSURE, "홍길동 자소서", "현대엔지니어링",
+                true, List.of());
         when(replaySessionOptionsService.getReplayOptions(USER_ID, SESSION_ID)).thenReturn(dto);
 
         Result<ReplaySessionOptionsResponse> result =
@@ -80,7 +82,8 @@ class InterviewControllerReplayOptionsTest {
     void 연습모드_응답도_그대로_전달한다_companyId_companyName_null() {
         ReplaySessionOptionsResponse practice = new ReplaySessionOptionsResponse(
                 "sess_root", UUID.randomUUID().toString(), null, "데이터 분석", 3,
-                Persona.FRIENDLY, "직접작성 이력서", null);
+                Persona.FRIENDLY, "직접작성 이력서", null,
+                true, List.of());
         when(replaySessionOptionsService.getReplayOptions(USER_ID, "sess_root")).thenReturn(practice);
 
         Result<ReplaySessionOptionsResponse> result =

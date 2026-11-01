@@ -212,7 +212,7 @@ GET /api/interviews/{sessionId}/replay-options
 - **AI 서버를 호출하지 않습니다.** 백엔드 DB 에 저장된 세션 정보만 읽습니다(재연습의
   진실 소스는 백엔드 DB).
 
-### 응답 필드 (8개)
+### 응답 필드 (10개)
 
 | 필드 | 타입 | 설명 |
 |---|---|---|
@@ -224,11 +224,16 @@ GET /api/interviews/{sessionId}/replay-options
 | `persona` | string | `FRIENDLY`\|`PRESSURE` (재면접 시작 요청과 같은 형식) |
 | `documentTitle` | string | 이력서 제목(표시용) |
 | `companyName` | string\|null | 기업명(표시용). 기업 미선택이면 `null` |
+| `replayable` | boolean | **지금 이 조건으로 재연습을 시작할 수 있는지(참고 정보).** 최종 판정은 시작 API |
+| `replayBlockReasons` | array | 재연습 불가 사유 목록. 가능하면 `[]`. 각 원소는 `{ code, message }` |
 
 고정 옵션 5개(`documentId`·`companyId`·`jobRole`·`questionCount`·`persona`)를 그대로
 `POST /api/interviews` 에 실으면 `ReplayOptionPolicy` 비교를 통과합니다. 타이머와
 `hideQuestionText` 는 **담지 않습니다**(타이머는 프론트 전용, `hideQuestionText` 는 변경
 허용 옵션이라 고정 옵션이 아님).
+
+`replayable`·`replayBlockReasons` 는 Issue #83 리뷰에서 추가된 필드입니다. 기존 8개 필드의
+이름·타입·의미는 그대로이며 뒤에 덧붙였을 뿐이라 **하위 호환됩니다.**
 
 ### 예외
 
@@ -243,6 +248,30 @@ GET /api/interviews/{sessionId}/replay-options
 과거 세션 정보 조회와 실제 재면접 시작 가능 여부는 별개이며, 시작 가능 여부는 재면접
 시작 API 가 최종 판정합니다(`findUsableFileDocument` → `DOCUMENT_NOT_FOUND`,
 `findVerifiedCompany` → `INVALID_REQUEST`).
+
+### 조회 가능 여부 ≠ 재연습 가능 여부
+
+둘은 다른 축입니다. **조회 가능 여부**는 "이 세션의 과거 옵션을 볼 수 있는가"이고,
+**재연습 가능 여부**는 "지금 이 옵션 그대로 시작 API 를 호출하면 통과하는가"입니다.
+
+| 상황 | 조회(HTTP) | `replayable` | `replayBlockReasons` |
+|---|---|---|---|
+| 유효한 문서 + (기업 없음 \| 검증된 기업) | 200 | `true` | `[]` |
+| 삭제된 문서가 연결된 세션 | 200 | `false` | `[{ "code": "DOCUMENT_DELETED", ... }]` |
+| `verified=false` 기업이 연결된 세션 | 200 | `false` | `[{ "code": "COMPANY_UNVERIFIED", ... }]` |
+| 삭제 문서 + 미검증 기업 동시 | 200 | `false` | 사유 2개 모두 |
+| 없는/남의/미완료 세션 | 404·409 | — (응답 없음) | — |
+
+- `replayBlockReasons` 의 `code` 는 시작 API 가 실제로 던지는 거부와 1:1 입니다
+  (`DOCUMENT_DELETED` → 시작 시 `DOCUMENT_NOT_FOUND`, `COMPANY_UNVERIFIED` → 시작 시
+  `INVALID_REQUEST`). **시작 API 에 없는 거부 사유를 조회에서 새로 만들지 않습니다.**
+- 판정은 root 세션에 이미 fetch join 으로 로딩된 `document`·`company` 로만 하므로 **추가
+  쿼리가 없습니다.**
+- **재연습 옵션은 사용자가 바꿀 수 없습니다**(질문 재활용 기능의 기획 정책). 삭제된 문서나
+  미검증 기업을 다른 것으로 교체해 시작하는 경로는 제공하지 않습니다. `replayable=false` 면
+  프론트는 "현재 조건으로는 재연습을 시작할 수 없다"고 안내하고 시작 버튼을 비활성화합니다.
+- `replayable` 은 어디까지나 **참고 정보**입니다. 조회와 시작 사이에 문서·기업 상태가 바뀔 수
+  있으므로 최종 판정은 언제나 시작 API 가 합니다.
 
 ### 구현 메모
 

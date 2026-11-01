@@ -70,7 +70,11 @@ public class InterviewController {
                     + "존재하지 않거나 다른 사용자의 세션이면 404(SESSION_NOT_FOUND), 완료되지 않은 세션이면 "
                     + "409(SESSION_NOT_COMPLETED) 입니다. 기업을 고르지 않은 연습 모드 세션은 companyId·companyName 이 "
                     + "null 인 정상 응답입니다. 삭제된 문서·미검증 기업이 연결돼 있어도 조회는 저장된 옵션을 그대로 "
-                    + "반환하며, 실제 재연습 시작 가능 여부는 시작 API 가 판정합니다.")
+                    + "반환하며, 실제 재연습 시작 가능 여부는 시작 API 가 판정합니다. "
+                    + "응답의 replayable·replayBlockReasons 로 지금 이 조건에서 재연습을 시작할 수 있는지 미리 알 수 "
+                    + "있습니다(참고 정보). 삭제된 이력서(DOCUMENT_DELETED)나 미검증 기업(COMPANY_UNVERIFIED)이 "
+                    + "연결돼 있으면 replayable=false 와 사유가 내려가고, 두 조건이 겹치면 사유가 둘 다 담깁니다. "
+                    + "재연습 옵션은 변경할 수 없으므로 프론트는 경고 문구 표시·시작 버튼 비활성화에 활용합니다.")
     @GetMapping("/{sessionId}/replay-options")
     @RateLimit(key = "replay-options", limit = 60, windowSeconds = 60)
     public Result<ReplaySessionOptionsResponse> getReplayOptions(@CurrentUser String userId,

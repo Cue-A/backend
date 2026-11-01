@@ -62,6 +62,11 @@ dependencies {
 
     runtimeOnly 'org.postgresql:postgresql'
 
+    // 스키마는 src/main/resources/db/migration 의 마이그레이션으로만 바꿉니다.
+    // Flyway 10 부터 PostgreSQL 지원이 별도 모듈로 나뉘어 둘 다 필요합니다.
+    implementation 'org.flywaydb:flyway-core'
+    runtimeOnly 'org.flywaydb:flyway-database-postgresql'
+
     testImplementation 'org.springframework.boot:spring-boot-starter-test'
     // DB 제약·조건부 UPDATE 로 갈리는 분기를 실제 PostgreSQL 로 검증합니다(@DataJpaTest).
     // jsonb 컬럼이 있어 H2 로는 스키마가 만들어지지 않습니다.

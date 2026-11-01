@@ -85,6 +85,60 @@ Backend 이며 `verified=false` 기업은 조회 자체에서 제외합니다.
 > 생략하면 기본값은 텍스트+음성(`false`)입니다. 이 값은 질문 생성에 영향을 주지 않고
 > 표시 방식만 바꾸므로 AI 세션 시작 요청에는 포함하지 않습니다.
 
+> **답변 제한 시간도 프론트 → Backend REST 요청 전용입니다(Issue #99).** `POST /api/interviews`
+> 요청 본문에 선택값 `answerTimeLimitSec`(Integer)를 받습니다. 허용값은 `60`·`90`·`120`·`null`
+> 이며(프론트 프리셋과 일치), `null` 은 "제한 없음"을 뜻합니다. 그 외 값은 AI 호출·세션 저장
+> 전에 `INVALID_REQUEST`(400)로 거부합니다(`question_count` 화이트리스트와 같은 방식). 저장
+> 컬럼은 기존 `session.duration_limit`(nullable)을 그대로 씁니다(스키마 변경 없음).
+>
+> 필드를 보내지 않은 경우(누락)와 명시적 `null` 은 Jackson 역직렬화상 구별되지 않아 **둘 다
+> "제한 없음(null)"**으로 저장합니다. `hideQuestionText` 와 같은 관례입니다. **백엔드는 기본값
+> (90초)을 적용하지 않습니다.** 기본값은 프론트 UI 선택값(`DEFAULT_ANSWER_SECONDS=90`)으로
+> 요청에 실려 오므로, 정상 신규 클라이언트는 항상 60·90·120·null 중 하나를 명시적으로
+> 보냅니다. 타이머는 UI 표시 설정이라 AI 세션 시작 요청에는 포함하지 않으며, 서버가 타이머를
+> 직접 실행하거나 자동 제출하지도 않습니다(저장·반환만 담당).
+
+> **시작 응답에 확정 옵션이 함께 내려갑니다(Issue #99).** `POST /api/interviews` 응답
+> (`InterviewStartResponse`)은 기존 `sessionId`·`questionTotal`·`replayApplied` 에 더해, **실제
+> 저장된 세션의** `hideQuestionText`·`interviewerStyle`·`answerTimeLimitSec` 를 함께 돌려줍니다.
+> 요청값이 아니라 저장값 기준이라 응답과 DB 가 어긋나지 않습니다. `interviewerStyle` 은 프론트
+> 계약에 맞춰 소문자(`friendly`·`pressure`)로 내려갑니다(엔티티 enum 은 대문자, `Persona.toAiValue()`
+> 로 변환). 기존 필드는 그대로라 이 필드들을 읽지 않는 기존 클라이언트는 영향받지 않습니다
+> (필드 추가뿐, 하위 호환).
+
+### 세션 옵션 조회 — `GET /api/interviews/{sessionId}` (Issue #99)
+
+진행 중이거나 완료된 세션의 **현재 진행 옵션**을 조회합니다. 프론트 면접 화면이 시작 시 보낸
+옵션을 자체 보관하지 않아도(새 탭·새로고침·다른 기기) 서버 저장값을 진실 소스로 읽기 위한
+API 입니다. **AI 서버를 호출하지 않고** 저장된 세션만 읽습니다.
+
+| 항목 | 값 |
+|---|---|
+| 인증 | `Authorization: Bearer <accessToken>` 필요. 본인 세션만 |
+| 없음/남의 세션 | `SESSION_NOT_FOUND`(404) |
+| 완료 상태 제약 | **없음.** 진행 중(IN_PROGRESS)·완료·중단 모두 조회 가능 |
+| 재면접 세션 | 최초 세션이 아니라 **그 회차 세션 자신**의 옵션(변경된 숨김·타이머 포함) |
+
+응답(`Result` 공통 포맷의 `data`):
+
+```json
+{
+  "sessionId": "sess_example",
+  "hideQuestionText": true,
+  "interviewerStyle": "pressure",
+  "answerTimeLimitSec": 90
+}
+```
+
+- `interviewerStyle` 은 소문자(`friendly`·`pressure`).
+- `answerTimeLimitSec` 은 `60`·`90`·`120` 중 하나이거나, 제한 없음이면 `null`. **타이머 저장이
+  연결되기 전(Issue #99 이전) 생성된 과거 세션은 저장된 값이 없어 `null`(제한 없음)로 내려갑니다.**
+  과거 데이터는 실제 설정값을 알 수 없어 마이그레이션하지 않습니다.
+- 이 API 는 **현재 세션의 진행 옵션** 조회입니다. 재연습 시작을 위한 **최초 세션의 고정 옵션**은
+  목적이 다른 `GET /api/interviews/{sessionId}/replay-options`([`12-replay.md`](./12-replay.md))를
+  쓰세요. 두 API 는 공존하며 서로 대체하지 않습니다.
+
+
 토픽 수는 보내지 않습니다. `question_count` 에서 자동 결정됩니다.
 
 ```

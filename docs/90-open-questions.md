@@ -50,6 +50,7 @@ AI 결과를 `report.report_data` 에 원본 그대로 저장하므로 기다릴
 | 타임아웃 | 세션 시작 90초 / 답변 60초 | `10-ai-client.md` |
 | 재연습 데이터 전달 | `replay_log` 배열. 진실 소스는 백엔드 DB | `12-replay.md` |
 | 재연습 옵션 고정 정책 (Issue #26, PR #78) | **팀 확정.** 이력서·기업·직무·문항 수·면접관 스타일은 최초 세션 값으로 **고정**. 재면접 요청에서 하나라도 다르면 `INVALID_REQUEST`(400)로 **거부**(일반 면접 자동 전환 안 함). 질문 텍스트 숨김·타이머는 변경 허용. 3회차 이상도 최초 root 기준. 재연습용 옵션 조회 API 는 Issue #83 으로 구현(`GET /api/interviews/{sessionId}/replay-options`) | `12-replay.md` |
+| 답변 제한 시간 저장·조회 (Issue #99) | **확정.** 허용값 `60`·`90`·`120`·`null`(제한 없음), 그 외 `INVALID_REQUEST`(400). 기존 `session.duration_limit` 재사용(스키마 변경 없음). 필드 누락과 명시적 null 은 **구별하지 않고 둘 다 제한 없음(null)**; 백엔드 기본값(90) 미적용(기본값은 프론트 UI 선택값). `interviewerStyle` 응답은 소문자(`friendly`·`pressure`). 과거 `duration_limit=null` 세션은 그대로 null 반환(마이그레이션 없음). 시작 응답 확장 + `GET /api/interviews/{sessionId}` 조회 API 신설. 서버 타이머 실행·자동 제출은 범위 밖 | `11-interview.md` |
 | 가상 경쟁자 (다대다 면접) | **MVP 범위에서 제외.** 구현하지 않습니다 | — |
 | 꼬리질문 `difficulty` | 포함 필수 | `12-replay.md` |
 | `retry_of_session_id` | 항상 최초 세션 | `12-replay.md` |

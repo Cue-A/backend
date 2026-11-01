@@ -248,7 +248,7 @@ class InterviewSessionWriterTest {
         when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         writer.createSession(mock(User.class), mock(Document.class), null,
-                startRequest(true), aiStartResponse(), 6, null);
+                startRequest(true), aiStartResponse(), 6, null, null);
 
         verify(sessionRepository).save(captor.capture());
         assertThat(captor.getValue().isHideQuestionText()).isTrue();
@@ -260,7 +260,7 @@ class InterviewSessionWriterTest {
         when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         writer.createSession(mock(User.class), mock(Document.class), null,
-                startRequest(false), aiStartResponse(), 6, null);
+                startRequest(false), aiStartResponse(), 6, null, null);
 
         verify(sessionRepository).save(captor.capture());
         assertThat(captor.getValue().isHideQuestionText()).isFalse();
@@ -272,7 +272,7 @@ class InterviewSessionWriterTest {
         when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         writer.createSession(mock(User.class), mock(Document.class), null,
-                startRequest(null), aiStartResponse(), 6, null);
+                startRequest(null), aiStartResponse(), 6, null, null);
 
         verify(sessionRepository).save(captor.capture());
         assertThat(captor.getValue().isHideQuestionText()).isFalse();
@@ -285,7 +285,7 @@ class InterviewSessionWriterTest {
         InterviewSession root = inProgressSession();
 
         writer.createSession(mock(User.class), mock(Document.class), null,
-                startRequest(false), aiStartResponse(), 6, root);
+                startRequest(false), aiStartResponse(), 6, null, root);
 
         verify(sessionRepository).save(captor.capture());
         assertThat(captor.getValue().getRetryOfSession()).isSameAs(root);
@@ -298,17 +298,41 @@ class InterviewSessionWriterTest {
         when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
 
         writer.createSession(mock(User.class), mock(Document.class), null,
-                startRequest(false), aiStartResponse(), 6, null);
+                startRequest(false), aiStartResponse(), 6, null, null);
 
         verify(sessionRepository).save(captor.capture());
         assertThat(captor.getValue().getRetryOfSession()).isNull();
         assertThat(captor.getValue().isRetry()).isFalse();
     }
 
+    @Test
+    void createSession_은_전달받은_답변_제한_시간을_durationLimit_으로_저장한다() {
+        ArgumentCaptor<InterviewSession> captor = ArgumentCaptor.forClass(InterviewSession.class);
+        when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        writer.createSession(mock(User.class), mock(Document.class), null,
+                startRequest(false), aiStartResponse(), 6, 90, null);
+
+        verify(sessionRepository).save(captor.capture());
+        assertThat(captor.getValue().getDurationLimit()).isEqualTo(90);
+    }
+
+    @Test
+    void createSession_은_답변_제한_시간이_null_이면_durationLimit_을_null_로_저장한다() {
+        ArgumentCaptor<InterviewSession> captor = ArgumentCaptor.forClass(InterviewSession.class);
+        when(sessionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
+
+        writer.createSession(mock(User.class), mock(Document.class), null,
+                startRequest(false), aiStartResponse(), 6, null, null);
+
+        verify(sessionRepository).save(captor.capture());
+        assertThat(captor.getValue().getDurationLimit()).isNull();
+    }
+
     private InterviewStartRequest startRequest(Boolean hideQuestionText) {
         return new InterviewStartRequest(
                 "11111111-1111-1111-1111-111111111111", null, "백엔드", Persona.FRIENDLY, 6,
-                hideQuestionText, null);
+                hideQuestionText, null, null);
     }
 
     private AiSessionStartResponse aiStartResponse() {

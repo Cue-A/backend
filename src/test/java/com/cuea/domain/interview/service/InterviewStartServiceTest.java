@@ -135,7 +135,29 @@ class InterviewStartServiceTest {
 
     private InterviewStartRequest request(Long companyId) {
         return new InterviewStartRequest(
-                DOCUMENT_PUBLIC_ID.toString(), companyId, "백엔드 개발", Persona.PRESSURE, 6, null, null);
+                DOCUMENT_PUBLIC_ID.toString(), companyId, "백엔드 개발", Persona.PRESSURE, 6, null, null, null);
+    }
+
+    /** answerTimeLimitSec 만 바꿔 보내는 요청(나머지는 request() 와 동일). */
+    private InterviewStartRequest requestWithTimer(Integer answerTimeLimitSec) {
+        return new InterviewStartRequest(
+                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.PRESSURE, 6, null,
+                answerTimeLimitSec, null);
+    }
+
+    private InterviewSession fakeSessionWithTimer(String sessionId, Integer durationLimit) {
+        return InterviewSession.builder()
+                .sessionId(sessionId)
+                .user(user)
+                .document(document)
+                .mode("PRACTICE")
+                .jobRole("백엔드 개발")
+                .questionCount(6)
+                .persona(Persona.PRESSURE)
+                .hideQuestionText(false)
+                .durationLimit(durationLimit)
+                .status(SessionStatus.IN_PROGRESS)
+                .build();
     }
 
     private InterviewSession fakeSession(String sessionId) {
@@ -169,7 +191,7 @@ class InterviewStartServiceTest {
     void 세션을_생성하면_REST_는_첫질문을_기다리지_않고_즉시_반환하고_폴링은_백그라운드로_위임한다() {
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_9f2a1c", "task_001", 9);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(eq(user), eq(document), eq(null), any(), eq(aiResponse), eq(6), eq(null)))
+        when(sessionWriter.createSession(eq(user), eq(document), eq(null), any(), eq(aiResponse), eq(6), any(), eq(null)))
                 .thenReturn(fakeSession("sess_9f2a1c"));
 
         InterviewStartResponse response = service.start(USER_ID, request(null));
@@ -179,7 +201,7 @@ class InterviewStartServiceTest {
         // 일반 면접이므로 replayApplied=false.
         assertThat(response.replayApplied()).isFalse();
         // REST 동기 구간에서는 세션 생성까지만 하고, 폴링/첫질문은 백그라운드에 위임한다.
-        verify(sessionWriter).createSession(eq(user), eq(document), eq(null), any(), eq(aiResponse), eq(6), eq(null));
+        verify(sessionWriter).createSession(eq(user), eq(document), eq(null), any(), eq(aiResponse), eq(6), any(), eq(null));
         verify(firstQuestionPoller).pollAndDeliver("sess_9f2a1c", "task_001", 9);
         // 이 서비스는 첫 질문을 직접 저장하지 않는다.
         verify(sessionWriter, never()).saveFirstQuestion(anyString(), any());
@@ -190,7 +212,7 @@ class InterviewStartServiceTest {
         when(companyRepository.findByCompanyIdAndVerifiedTrue(10L)).thenReturn(Optional.of(verifiedCompany()));
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_2", "task_2", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any(), any()))
                 .thenReturn(fakeSession("sess_2"));
 
         service.start(USER_ID, request(10L));
@@ -211,7 +233,7 @@ class InterviewStartServiceTest {
         when(companyRepository.findByCompanyIdAndVerifiedTrue(10L)).thenReturn(Optional.of(verifiedCompany()));
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_2", "task_2", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any(), any()))
                 .thenReturn(fakeSession("sess_2"));
 
         service.start(USER_ID, request(10L));
@@ -228,7 +250,7 @@ class InterviewStartServiceTest {
     void 회사_미선택이면_company_id_는_null_이라_JSON_에서_빠진다() throws Exception {
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_3", "task_3", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), eq(null), any(), any(), eq(6), any()))
+        when(sessionWriter.createSession(any(), any(), eq(null), any(), any(), eq(6), any(), any()))
                 .thenReturn(fakeSession("sess_3"));
 
         service.start(USER_ID, request(null));
@@ -283,14 +305,14 @@ class InterviewStartServiceTest {
     void 음성만_모드_요청은_hideQuestionText_true_로_세션_생성에_전달되고_AI_요청에는_포함되지_않는다() throws Exception {
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_v", "task_v", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any(), any()))
                 .thenReturn(fakeSession("sess_v"));
 
         service.start(USER_ID, new InterviewStartRequest(
-                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, 6, true, null));
+                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, 6, true, null, null));
 
         ArgumentCaptor<InterviewStartRequest> reqCaptor = ArgumentCaptor.forClass(InterviewStartRequest.class);
-        verify(sessionWriter).createSession(any(), any(), any(), reqCaptor.capture(), any(), eq(6), any());
+        verify(sessionWriter).createSession(any(), any(), any(), reqCaptor.capture(), any(), eq(6), any(), any());
         assertThat(reqCaptor.getValue().hideQuestionText()).isTrue();
 
         // 음성만 모드는 UI 표시 방식만 바꾼다. AI 세션 시작 요청에는 진행 방식 필드가 없다.
@@ -304,11 +326,11 @@ class InterviewStartServiceTest {
     void questionCount_가_null_이면_기본값_6_으로_AI_에_보낸다() {
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_q", "task_q", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any(), any()))
                 .thenReturn(fakeSession("sess_q"));
 
         service.start(USER_ID, new InterviewStartRequest(
-                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, null, null, null));
+                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, null, null, null, null));
 
         ArgumentCaptor<AiSessionStartRequest> captor = ArgumentCaptor.forClass(AiSessionStartRequest.class);
         verify(aiClient).startSession(captor.capture());
@@ -318,18 +340,105 @@ class InterviewStartServiceTest {
     @Test
     void questionCount_가_3_6_9_외의_값이면_AI_호출_전에_거부한다() {
         assertThatThrownBy(() -> service.start(USER_ID, new InterviewStartRequest(
-                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, 4, null, null)))
+                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, 4, null, null, null)))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.INVALID_QUESTION_COUNT);
 
         // 0 도 마찬가지로 거부(mock 이 session_end 를 첫 결과로 주는 값).
         assertThatThrownBy(() -> service.start(USER_ID, new InterviewStartRequest(
-                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, 0, null, null)))
+                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.FRIENDLY, 0, null, null, null)))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.INVALID_QUESTION_COUNT);
 
         verify(aiClient, never()).startSession(any());
         verify(firstQuestionPoller, never()).pollAndDeliver(anyString(), anyString(), any());
+    }
+
+    // ── Issue #99: 답변 제한 시간(answerTimeLimitSec) 입력·검증·응답 ──────────────
+
+    @Test
+    void 답변_제한_시간_60_90_120_은_세션_생성으로_전달된다() {
+        int sec = 90;
+        AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_t90", "task_t", 6);
+        when(aiClient.startSession(any())).thenReturn(aiResponse);
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), eq(sec), any()))
+                .thenReturn(fakeSessionWithTimer("sess_t90", sec));
+
+        InterviewStartResponse response = service.start(USER_ID, requestWithTimer(sec));
+
+        // 서비스가 검증·정규화한 제한 시간이 그대로 writer 로, 응답은 저장값 기준.
+        verify(sessionWriter).createSession(any(), any(), any(), any(), any(), eq(6), eq(sec), any());
+        assertThat(response.answerTimeLimitSec()).isEqualTo(sec);
+    }
+
+    @Test
+    void 답변_제한_시간_60_과_120_도_허용값이라_정규화되어_저장된다() {
+        // 경계 프리셋 2개(60·120)도 화이트리스트를 통과해 그대로 writer 로 전달된다.
+        when(aiClient.startSession(any()))
+                .thenReturn(new AiSessionStartResponse("sess_t60", "task_t", 6));
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), eq(60), any()))
+                .thenReturn(fakeSessionWithTimer("sess_t60", 60));
+        assertThat(service.start(USER_ID, requestWithTimer(60)).answerTimeLimitSec()).isEqualTo(60);
+        verify(sessionWriter).createSession(any(), any(), any(), any(), any(), eq(6), eq(60), any());
+
+        when(aiClient.startSession(any()))
+                .thenReturn(new AiSessionStartResponse("sess_t120", "task_t", 6));
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), eq(120), any()))
+                .thenReturn(fakeSessionWithTimer("sess_t120", 120));
+        assertThat(service.start(USER_ID, requestWithTimer(120)).answerTimeLimitSec()).isEqualTo(120);
+        verify(sessionWriter).createSession(any(), any(), any(), any(), any(), eq(6), eq(120), any());
+    }
+
+    @Test
+    void 답변_제한_시간이_명시적_null_이면_제한없음으로_저장되고_기본값을_적용하지_않는다() {
+        AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_tn", "task_tn", 6);
+        when(aiClient.startSession(any())).thenReturn(aiResponse);
+        ArgumentCaptor<Integer> timerCaptor = ArgumentCaptor.forClass(Integer.class);
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any(), any()))
+                .thenReturn(fakeSessionWithTimer("sess_tn", null));
+
+        InterviewStartResponse response = service.start(USER_ID, requestWithTimer(null));
+
+        // null → 제한 없음. 백엔드 기본값(90) 을 적용하지 않는다(프론트 계약·hideQuestionText 관례).
+        verify(sessionWriter).createSession(
+                any(), any(), any(), any(), any(), eq(6), timerCaptor.capture(), any());
+        assertThat(timerCaptor.getValue()).isNull();
+        assertThat(response.answerTimeLimitSec()).isNull();
+    }
+
+    @Test
+    void 허용값_외의_답변_제한_시간은_AI_호출_전에_400으로_거부한다() {
+        assertThatThrownBy(() -> service.start(USER_ID, requestWithTimer(45)))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.INVALID_REQUEST);
+        assertThatThrownBy(() -> service.start(USER_ID, requestWithTimer(0)))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.INVALID_REQUEST);
+
+        verify(aiClient, never()).startSession(any());
+        verify(firstQuestionPoller, never()).pollAndDeliver(anyString(), anyString(), any());
+    }
+
+    @Test
+    void 시작_응답은_저장된_세션의_확정_옵션을_담는다_소문자_스타일_포함() {
+        AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_opt", "task_opt", 6);
+        when(aiClient.startSession(any())).thenReturn(aiResponse);
+        // 저장된 세션: PRESSURE · hideQuestionText=true · 120초.
+        InterviewSession saved = InterviewSession.builder()
+                .sessionId("sess_opt").user(user).document(document)
+                .mode("PRACTICE").jobRole("백엔드 개발").questionCount(6)
+                .persona(Persona.PRESSURE).hideQuestionText(true).durationLimit(120)
+                .status(SessionStatus.IN_PROGRESS).build();
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any(), any()))
+                .thenReturn(saved);
+
+        InterviewStartResponse response = service.start(USER_ID, requestWithTimer(120));
+
+        assertThat(response.hideQuestionText()).isTrue();
+        // 엔티티 enum 은 대문자지만 응답은 프론트 계약(소문자)으로.
+        assertThat(response.interviewerStyle()).isEqualTo("pressure");
+        assertThat(response.answerTimeLimitSec()).isEqualTo(120);
+        assertThat(response.sessionId()).isEqualTo("sess_opt");
     }
 
     /** Issue #36: 마크다운도 본문 사본을 S3 에 두므로 파일 문서와 똑같이 면접을 시작합니다. */
@@ -340,7 +449,7 @@ class InterviewStartServiceTest {
                 .thenReturn(Optional.of(markdown));
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_md", "task_md", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any(), any()))
                 .thenReturn(fakeSession("sess_md"));
 
         service.start(USER_ID, request(null));
@@ -368,7 +477,7 @@ class InterviewStartServiceTest {
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_x", "task_x", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
         BusinessException writeError = new BusinessException(ErrorCode.INTERNAL_ERROR, "DB 저장 실패");
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any())).thenThrow(writeError);
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any(), any())).thenThrow(writeError);
 
         assertThatThrownBy(() -> service.start(USER_ID, request(null)))
                 .isInstanceOf(BusinessException.class)
@@ -386,7 +495,7 @@ class InterviewStartServiceTest {
         // IN_PROGRESS 로 저장됐으므로 정리하지 않으면 영구 잔류한다.
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_p", "task_p", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any(), any()))
                 .thenReturn(fakeSession("sess_p"));
         doThrow(new org.springframework.core.task.TaskRejectedException("executor shutting down"))
                 .when(firstQuestionPoller).pollAndDeliver("sess_p", "task_p", 6);
@@ -404,7 +513,7 @@ class InterviewStartServiceTest {
 
     private InterviewStartRequest replayRequest(String sourceSessionId) {
         return new InterviewStartRequest(
-                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.PRESSURE, 6, null,
+                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.PRESSURE, 6, null, null,
                 sourceSessionId);
     }
 
@@ -434,7 +543,7 @@ class InterviewStartServiceTest {
         // 회귀: sourceSessionId 가 없으면 재면접 조회·조립을 전혀 하지 않는다.
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_n", "task_n", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any(), any()))
                 .thenReturn(fakeSession("sess_n"));
 
         service.start(USER_ID, request(null));
@@ -447,7 +556,7 @@ class InterviewStartServiceTest {
         verify(sessionQueryService, never()).getReplayRoot(anyString(), anyString());
         verify(replayLogAssembler, never()).assemble(anyString());
         // 일반 세션이라 retryOfSession 은 null 로 저장된다.
-        verify(sessionWriter).createSession(any(), any(), any(), any(), any(), eq(6), eq(null));
+        verify(sessionWriter).createSession(any(), any(), any(), any(), any(), eq(6), any(), eq(null));
     }
 
     @Test
@@ -457,7 +566,7 @@ class InterviewStartServiceTest {
         when(replayLogAssembler.assemble(SOURCE_SESSION_ID)).thenReturn(sampleReplayLog());
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_r2", "task_r2", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any(), any()))
                 .thenReturn(fakeSession("sess_r2"));
 
         service.start(USER_ID, replayRequest(SOURCE_SESSION_ID));
@@ -467,7 +576,7 @@ class InterviewStartServiceTest {
         assertThat(captor.getValue().retryOfSessionId()).isEqualTo(SOURCE_SESSION_ID);
         assertThat(captor.getValue().replayLog()).containsExactlyElementsOf(sampleReplayLog());
         // 재면접이 실제 적용됐으므로 root 세션을 연관으로 저장한다.
-        verify(sessionWriter).createSession(any(), any(), any(), any(), any(), eq(6), eq(root));
+        verify(sessionWriter).createSession(any(), any(), any(), any(), any(), eq(6), any(), eq(root));
         // 소유권·완료·root fetch-join 조회는 공용 getReplayRoot 가 처리한다. 조회 API 와
         // 같은 메서드를 공유해 조회·시작 판정이 어긋나지 않게 고정한다.
         verify(sessionQueryService).getReplayRoot(SOURCE_SESSION_ID, USER_ID);
@@ -480,12 +589,42 @@ class InterviewStartServiceTest {
         when(replayLogAssembler.assemble(SOURCE_SESSION_ID)).thenReturn(sampleReplayLog());
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_ra", "task_ra", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any(), any()))
                 .thenReturn(fakeSession("sess_ra"));
 
         InterviewStartResponse response = service.start(USER_ID, replayRequest(SOURCE_SESSION_ID));
 
         assertThat(response.replayApplied()).isTrue();
+    }
+
+    @Test
+    void 재면접은_질문숨김과_답변_제한_시간을_변경해_저장할_수_있다() {
+        // root 는 숨김=false·타이머 없음. 재면접 요청은 숨김=true·타이머=60 으로 바꿔 보낸다.
+        // ReplayOptionPolicy 는 숨김·타이머를 비교하지 않으므로(고정 옵션 아님) 통과해야 한다.
+        InterviewSession root = completedRoot(SOURCE_SESSION_ID);
+        when(sessionQueryService.getReplayRoot(SOURCE_SESSION_ID, USER_ID)).thenReturn(root);
+        when(replayLogAssembler.assemble(SOURCE_SESSION_ID)).thenReturn(sampleReplayLog());
+        when(aiClient.startSession(any()))
+                .thenReturn(new AiSessionStartResponse("sess_rt", "task_rt", 6));
+        // 저장된 재면접 회차 세션: 변경된 숨김=true·타이머=60.
+        InterviewSession savedRetry = InterviewSession.builder()
+                .sessionId("sess_rt").user(user).document(document)
+                .mode("PRACTICE").jobRole("백엔드 개발").questionCount(6)
+                .persona(Persona.PRESSURE).hideQuestionText(true).durationLimit(60)
+                .retryOfSession(root).status(SessionStatus.IN_PROGRESS).build();
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), eq(60), eq(root)))
+                .thenReturn(savedRetry);
+
+        InterviewStartRequest req = new InterviewStartRequest(
+                DOCUMENT_PUBLIC_ID.toString(), null, "백엔드 개발", Persona.PRESSURE, 6,
+                true, 60, SOURCE_SESSION_ID);
+        InterviewStartResponse response = service.start(USER_ID, req);
+
+        // 변경된 타이머가 writer 로 전달되고(고정옵션 검증 통과), 응답도 변경값 반영.
+        verify(sessionWriter).createSession(any(), any(), any(), any(), any(), eq(6), eq(60), eq(root));
+        assertThat(response.replayApplied()).isTrue();
+        assertThat(response.hideQuestionText()).isTrue();
+        assertThat(response.answerTimeLimitSec()).isEqualTo(60);
     }
 
     @Test
@@ -497,7 +636,7 @@ class InterviewStartServiceTest {
         when(replayLogAssembler.assemble("sess_root_origin")).thenReturn(sampleReplayLog());
         AiSessionStartResponse aiResponse = new AiSessionStartResponse("sess_third", "task_3", 6);
         when(aiClient.startSession(any())).thenReturn(aiResponse);
-        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any()))
+        when(sessionWriter.createSession(any(), any(), any(), any(), any(), eq(6), any(), any()))
                 .thenReturn(fakeSession("sess_third"));
 
         service.start(USER_ID, replayRequest("sess_second"));
@@ -507,7 +646,7 @@ class InterviewStartServiceTest {
         // 직전 회차(sess_second)가 아니라 최초 root(sess_root_origin)여야 한다.
         assertThat(captor.getValue().retryOfSessionId()).isEqualTo("sess_root_origin");
         verify(replayLogAssembler).assemble("sess_root_origin");
-        verify(sessionWriter).createSession(any(), any(), any(), any(), any(), eq(6), eq(root));
+        verify(sessionWriter).createSession(any(), any(), any(), any(), any(), eq(6), any(), eq(root));
     }
 
     @Test
@@ -525,7 +664,7 @@ class InterviewStartServiceTest {
 
         // 옵션 불일치면 AI 호출·세션 저장·조립을 모두 하지 않는다.
         verify(aiClient, never()).startSession(any());
-        verify(sessionWriter, never()).createSession(any(), any(), any(), any(), any(), anyInt(), any());
+        verify(sessionWriter, never()).createSession(any(), any(), any(), any(), any(), anyInt(), any(), any());
         verify(replayLogAssembler, never()).assemble(anyString());
         verify(firstQuestionPoller, never()).pollAndDeliver(anyString(), anyString(), any());
     }
@@ -572,7 +711,7 @@ class InterviewStartServiceTest {
                 .extracting("errorCode").isEqualTo(ErrorCode.INVALID_REQUEST);
 
         verify(aiClient, never()).startSession(any());
-        verify(sessionWriter, never()).createSession(any(), any(), any(), any(), any(), anyInt(), any());
+        verify(sessionWriter, never()).createSession(any(), any(), any(), any(), any(), anyInt(), any(), any());
     }
 
     @Test

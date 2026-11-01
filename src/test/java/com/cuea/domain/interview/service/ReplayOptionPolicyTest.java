@@ -69,7 +69,7 @@ class ReplayOptionPolicyTest {
                                           Persona persona, Integer questionCount,
                                           Boolean hideQuestionText) {
         return new InterviewStartRequest(
-                documentId, companyId, jobRole, persona, questionCount, hideQuestionText, "sess_root");
+                documentId, companyId, jobRole, persona, questionCount, hideQuestionText, null, "sess_root");
     }
 
     @Test

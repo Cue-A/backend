@@ -6,6 +6,7 @@ import com.cuea.common.result.Result;
 import com.cuea.domain.interview.dto.response.ReplaySessionOptionsResponse;
 import com.cuea.domain.interview.entity.Persona;
 import com.cuea.domain.interview.service.InterviewAnswerService;
+import com.cuea.domain.interview.service.InterviewSessionOptionsService;
 import com.cuea.domain.interview.service.InterviewStartService;
 import com.cuea.domain.interview.service.ReplaySessionOptionsService;
 import org.junit.jupiter.api.BeforeEach;
@@ -54,7 +55,8 @@ class InterviewControllerReplayOptionsTest {
         controller = new InterviewController(
                 mock(InterviewStartService.class),
                 mock(InterviewAnswerService.class),
-                replaySessionOptionsService);
+                replaySessionOptionsService,
+                mock(InterviewSessionOptionsService.class));
     }
 
     @Test

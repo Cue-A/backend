@@ -90,8 +90,23 @@ public class PresignedUrlIssuer {
      * @return 발급 성공 시 서명 URL, 서명 실패 시 {@link Optional#empty()}
      */
     public Optional<String> issueQuestionAudioDownload(String objectKey) {
+        return issueQuestionAudio(objectKey, properties.presign().questionAudioGet());
+    }
+
+    /**
+     * 면접 다시보기에서 재생하는 질문 TTS 음성 GET.
+     *
+     * <p>{@link #issueQuestionAudioDownload} 와 key 는 같지만 만료가 다릅니다. 그쪽 15분은
+     * 한 문항을 듣는 시간이고, 다시보기는 재생목록을 처음부터 끝까지 보므로 답변 녹음과 같은
+     * {@code recording-get}(1시간)을 씁니다. 서명 실패 시 {@link Optional#empty()} 인 것은 같습니다.
+     */
+    public Optional<String> issueQuestionAudioPlayback(String objectKey) {
+        return issueQuestionAudio(objectKey, properties.presign().recordingGet());
+    }
+
+    private Optional<String> issueQuestionAudio(String objectKey, Duration validity) {
         try {
-            return Optional.of(issueDownload(objectKey, properties.presign().questionAudioGet()));
+            return Optional.of(issueDownload(objectKey, validity));
         } catch (SdkException e) {
             log.warn("질문 음성 presigned URL 발급 실패 objectKey={}", objectKey, e);
             return Optional.empty();

@@ -2,6 +2,7 @@ package com.cuea.infrastructure.file;
 
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.mockito.ArgumentCaptor;
 import software.amazon.awssdk.core.exception.SdkException;
 import software.amazon.awssdk.http.SdkHttpMethod;
 import software.amazon.awssdk.http.SdkHttpRequest;
@@ -17,6 +18,7 @@ import java.util.Optional;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.mock;
+import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
@@ -82,5 +84,44 @@ class PresignedUrlIssuerTest {
         Optional<String> result = issuer.issueQuestionAudioDownload(OBJECT_KEY);
 
         assertThat(result).isEmpty();
+    }
+
+    @Test
+    void 다시보기용_질문음성은_질문_push_의_15분이_아니라_녹음과_같은_1시간으로_서명한다() {
+        // 재생목록을 끝까지 보는 동안 뒤쪽 문항의 질문 음성이 먼저 만료되지 않아야 한다.
+        URI signedUri = URI.create(
+                "http://localhost:9000/cue-a-media/" + OBJECT_KEY + "?X-Amz-Signature=abc");
+        when(presigner.presignGetObject(any(GetObjectPresignRequest.class)))
+                .thenReturn(presignedGet(signedUri));
+
+        Optional<String> result = issuer.issueQuestionAudioPlayback(OBJECT_KEY);
+
+        ArgumentCaptor<GetObjectPresignRequest> request = ArgumentCaptor.forClass(GetObjectPresignRequest.class);
+        verify(presigner).presignGetObject(request.capture());
+        assertThat(request.getValue().signatureDuration()).isEqualTo(Duration.ofHours(1));
+        assertThat(request.getValue().getObjectRequest().key()).isEqualTo(OBJECT_KEY);
+        assertThat(result).contains(signedUri.toString());
+    }
+
+    @Test
+    void 다시보기용_질문음성_presign_이_SdkException_이면_Optional_empty_를_돌려준다() {
+        when(presigner.presignGetObject(any(GetObjectPresignRequest.class)))
+                .thenThrow(SdkException.builder().message("presign failed").build());
+
+        Optional<String> result = issuer.issueQuestionAudioPlayback(OBJECT_KEY);
+
+        assertThat(result).isEmpty();
+    }
+
+    private static PresignedGetObjectRequest presignedGet(URI signedUri) {
+        return PresignedGetObjectRequest.builder()
+                .expiration(Instant.now().plusSeconds(3600))
+                .isBrowserExecutable(true)
+                .signedHeaders(java.util.Map.of("host", java.util.List.of("localhost")))
+                .httpRequest(SdkHttpRequest.builder()
+                        .method(SdkHttpMethod.GET)
+                        .uri(signedUri)
+                        .build())
+                .build();
     }
 }

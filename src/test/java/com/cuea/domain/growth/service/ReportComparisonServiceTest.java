@@ -3,7 +3,6 @@ package com.cuea.domain.growth.service;
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.growth.dto.response.ReportComparisonResponse;
-import com.cuea.domain.interview.entity.Question;
 import com.cuea.domain.interview.service.InterviewSessionQueryService;
 import com.cuea.domain.interview.service.SessionRound;
 import com.cuea.domain.report.entity.ReportStatus;
@@ -12,6 +11,7 @@ import com.cuea.domain.report.service.FinishedReportQueryService;
 import com.cuea.infrastructure.ai.AiClient;
 import com.cuea.infrastructure.ai.dto.AiReportCompareRequest;
 import com.cuea.infrastructure.ai.dto.AiReportComparison;
+import com.cuea.support.JsonFieldNames;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
@@ -21,7 +21,6 @@ import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 
 import java.time.OffsetDateTime;
-import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
@@ -92,8 +91,7 @@ class ReportComparisonServiceTest {
     @Test
     void AI_응답을_옮기고_질문_원문은_이_리포트_세션에서_찾아_붙인다() {
         givenRounds(THIRD, List.of(round("sess_1", 1), round("sess_3", 3)), FIRST, THIRD);
-        when(sessionQueryService.findQuestionsInOrderForInternal("sess_3")).thenReturn(List.of(
-                Question.builder().sessionId("sess_3").questionId("q_1").text("지원 동기를 말씀해 주세요").build()));
+        when(sessionQueryService.findQuestionTextsForInternal("sess_3")).thenReturn(Map.of("q_1", "지원 동기를 말씀해 주세요"));
         when(aiClient.compareReports(any())).thenReturn(comparison(List.of(1, 3)));
 
         ReportComparisonResponse response = service.compare(USER_ID, "rpt-3");
@@ -126,7 +124,7 @@ class ReportComparisonServiceTest {
         assertThat(json.path("byQuestion").get(0).has("questionText")).isTrue();
         assertThat(json.path("byQuestion").get(0).has("text")).isFalse();
         assertThat(json.path("rounds").get(0).path("createdAt").asText()).isEqualTo("2026-10-02T10:00:00Z");
-        assertThat(fieldNames(json)).noneMatch(name -> name.contains("_"));
+        assertThat(JsonFieldNames.of(json)).noneMatch(name -> name.contains("_"));
     }
 
     /** 회차가 하나여도 오류가 아닙니다. 추이 점 하나는 그릴 수 있어 AI 를 부릅니다. */
@@ -171,6 +169,29 @@ class ReportComparisonServiceTest {
         assertErrorCode(ErrorCode.UNEXPECTED_AI_RESPONSE);
     }
 
+    /** 요청은 Backend 가 조립하므로 AI 의 400 은 사용자 잘못이 아닙니다. AI 문구는 사용자에게 내보내지 않습니다. */
+    @Test
+    void AI_가_거절하면_502_이고_AI_문구를_내보내지_않는다() {
+        givenRounds(THIRD, List.of(round("sess_1", 1), round("sess_3", 3)), FIRST, THIRD);
+        when(aiClient.compareReports(any()))
+                .thenThrow(new BusinessException(ErrorCode.INVALID_REQUEST, "duplicate round: 3"));
+
+        assertThatThrownBy(() -> service.compare(USER_ID, "rpt-3"))
+                .isInstanceOf(BusinessException.class)
+                .satisfies(e -> {
+                    assertThat(((BusinessException) e).getErrorCode()).isEqualTo(ErrorCode.UNEXPECTED_AI_RESPONSE);
+                    assertThat(e.getMessage()).isEqualTo(ErrorCode.UNEXPECTED_AI_RESPONSE.getMessage());
+                });
+    }
+
+    @Test
+    void AI_에_연결하지_못하면_AI_UNAVAILABLE_그대로다() {
+        givenRounds(THIRD, List.of(round("sess_1", 1), round("sess_3", 3)), FIRST, THIRD);
+        when(aiClient.compareReports(any())).thenThrow(new BusinessException(ErrorCode.AI_UNAVAILABLE));
+
+        assertErrorCode(ErrorCode.AI_UNAVAILABLE);
+    }
+
     /** 202 · 409 · 404 는 리포트 쪽 규칙 그대로이고, 그때는 AI 를 부르지 않습니다. */
     @Test
     void 리포트가_끝나지_않았으면_AI_를_부르지_않는다() {
@@ -194,8 +215,8 @@ class ReportComparisonServiceTest {
         for (FinishedReport report : finished) {
             bySession.put(report.sessionId(), report);
         }
-        when(reportQueryService.findFinishedBySessionIds(USER_ID, rounds.stream().map(SessionRound::sessionId).toList()))
-                .thenReturn(bySession);
+        List<String> sessionIds = rounds.stream().map(SessionRound::sessionId).toList();
+        when(reportQueryService.findFinishedBySessionIds(USER_ID, sessionIds)).thenReturn(bySession);
     }
 
     private static SessionRound round(String sessionId, int round) {
@@ -225,19 +246,5 @@ class ReportComparisonServiceTest {
                                 "회사와 직무를 연결하는 설명이 구체적이 되었습니다."),
                         new AiReportComparison.QuestionChange("q_2", "직무역량", List.of(70, 64), -6, -6,
                                 "근거가 줄었습니다.")));
-    }
-
-    /** 값은 빼고 키 이름만 모읍니다. */
-    private static List<String> fieldNames(JsonNode node) {
-        List<String> names = new ArrayList<>();
-        if (node.isObject()) {
-            node.fields().forEachRemaining(entry -> {
-                names.add(entry.getKey());
-                names.addAll(fieldNames(entry.getValue()));
-            });
-        } else if (node.isArray()) {
-            node.forEach(child -> names.addAll(fieldNames(child)));
-        }
-        return names;
     }
 }

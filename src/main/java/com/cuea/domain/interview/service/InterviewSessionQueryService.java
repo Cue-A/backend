@@ -46,6 +46,23 @@ public class InterviewSessionQueryService {
     }
 
     /**
+     * 재면접 옵션 비교용 root 세션을 읽습니다. 비교에 쓰는 LAZY 연관
+     * ({@code document}·{@code company})을 fetch join 으로 미리 초기화해, 트랜잭션 밖
+     * ({@code open-in-view=false})에서 비교해도 {@code LazyInitializationException} 이
+     * 나지 않게 합니다.
+     *
+     * <p><b>요청 사용자 소유인 root 세션만 돌려줍니다.</b> source 세션 소유권은 호출 전에
+     * 확인하지만, root 가 다른 세션일 수 있으므로 root 도 같은 {@code userId} 소유인지
+     * 조회 조건으로 확인해 교차 사용자 참조를 막습니다. 없거나 남의 세션이면
+     * {@code SESSION_NOT_FOUND}.
+     */
+    @Transactional(readOnly = true)
+    public InterviewSession getRootForReplay(String rootSessionId, String userId) {
+        return sessionRepository.findRootForReplay(rootSessionId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND));
+    }
+
+    /**
      * 나간 순서대로. 되묻기 포함. 소유권 확인이 없어 <b>API 경계에서 쓰지 마세요.</b>
      */
     @Transactional(readOnly = true)

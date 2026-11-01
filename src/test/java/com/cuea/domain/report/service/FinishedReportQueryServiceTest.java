@@ -93,7 +93,8 @@ class FinishedReportQueryServiceTest {
     @Test
     void 세션_ID_로_끝난_리포트를_묶어_준다() {
         List<String> sessionIds = List.of("sess_1", "sess_2");
-        when(reportRepository.findAllBySessionIds(USER_ID, sessionIds, List.of(ReportStatus.COMPLETED, ReportStatus.PARTIAL)))
+        List<ReportStatus> finished = List.of(ReportStatus.COMPLETED, ReportStatus.PARTIAL);
+        when(reportRepository.findAllBySessionIds(USER_ID, sessionIds, finished))
                 .thenReturn(List.of(report("sess_2", ReportStatus.COMPLETED, REPORT_DATA)));
 
         assertThat(service.findFinishedBySessionIds(USER_ID, sessionIds))

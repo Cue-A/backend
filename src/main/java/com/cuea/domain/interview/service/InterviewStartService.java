@@ -173,6 +173,10 @@ public class InterviewStartService {
      *       전환하지 않고 오류를 냅니다</li>
      * </ol>
      *
+     * <p>1~3단계(소유권·완료 상태·root fetch join 조회)는 재연습 옵션 조회 API 와 공유하는
+     * {@link InterviewSessionQueryService#getReplayRoot} 가 처리합니다. 같은 단계를 두 곳에
+     * 복사하지 않아, 한쪽만 바뀌어 조회·시작 판정이 어긋나는 일을 막습니다.
+     *
      * <p>거부·오류 경로 모두 AI 호출과 새 세션 생성 이전에 끝나므로, 불일치 요청으로는
      * AI 세션이 만들어지지 않습니다.
      *
@@ -187,23 +191,16 @@ public class InterviewStartService {
             return ReplayPlan.none();
         }
 
-        // 1) 소유권 + 존재. 없거나 남의 세션이면 구별 없이 404.
-        InterviewSession source =
-                sessionQueryService.getOwnedSession(request.sourceSessionId(), userId);
-
-        // 2) 완료 상태만 재면접 대상입니다. 진행 중·중단 세션은 거부합니다.
-        if (!source.getStatus().isReportable()) {
-            throw new BusinessException(ErrorCode.SESSION_NOT_COMPLETED,
-                    "완료된 세션만 다시 면접할 수 있습니다");
-        }
-
-        // 3) root 세션 결정. 직전 회차가 아니라 항상 최초 세션입니다(docs/12-replay.md).
-        //    root 도 같은 userId 소유인지 조회 조건으로 확인해 교차 사용자 참조를 막습니다.
-        //    옵션 비교에 쓰는 LAZY 연관(document·company)을 fetch join 으로 함께 읽어,
-        //    트랜잭션 밖(open-in-view=false)에서 비교해도 LazyInitializationException 이
-        //    나지 않게 합니다. source 자신이 root 여도 연관 초기화를 위해 다시 읽습니다.
-        String rootSessionId = source.rootSessionId();
-        InterviewSession rootSession = sessionQueryService.getRootForReplay(rootSessionId, userId);
+        // 1~3) 소유권·완료 상태 확인 후 최초 root 세션을 fetch join 으로 읽습니다.
+        //    재연습 옵션 조회 API(ReplaySessionOptionsService)와 같은 메서드를 공유해,
+        //    소유권·완료 상태·root 결정 단계를 양쪽에서 복사하지 않습니다(한쪽만 바뀌어
+        //    조회는 되는데 시작은 실패하는 불일치 방지). 없거나 남의 세션은 SESSION_NOT_FOUND,
+        //    완료 전이면 SESSION_NOT_COMPLETED, root 가 깨졌거나 남의 세션이면 SESSION_NOT_FOUND.
+        //    옵션 비교에 쓰는 LAZY 연관(document·company)은 fetch join 으로 초기화돼 트랜잭션
+        //    밖(open-in-view=false)에서 비교해도 LazyInitializationException 이 나지 않습니다.
+        InterviewSession rootSession =
+                sessionQueryService.getReplayRoot(request.sourceSessionId(), userId);
+        String rootSessionId = rootSession.getSessionId();
 
         // 4) 고정 옵션 검증. 요청이 이미 조회·정규화한 값으로 비교합니다(요청 원문 문자열 아님).
         //    문항 수·페르소나·이력서·기업·직무가 최초 세션과 하나라도 다르면 일반 면접으로

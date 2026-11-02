@@ -290,6 +290,9 @@ GET /api/interviews/{sessionId}/replay-options
 public List<ReplayLogItem> buildReplayLog(String rootSessionId) {
     return questionLogRepository
             .findBySessionIdOrderByCreatedAt(rootSessionId).stream()
+            // 1차 created_at(위 쿼리) + 2차 question_number 로 재정렬(동률 안정화)
+            .sorted(comparing(QuestionLog::getCreatedAt)
+                    .thenComparingInt(QuestionLog::getQuestionNumber))
             .filter(log -> !log.isReask())          // reask 제외
             .map(this::toReplayItem)
             .toList();
@@ -308,8 +311,13 @@ private ReplayLogItem toReplayItem(QuestionLog log) {
 }
 ```
 
-정렬 기준은 `created_at` 입니다. `question_number` 는 되묻기 때문에 중복될 수
-있으므로 정렬 키로 쓰지 않습니다.
+정렬 기준은 1차 `created_at` 오름차순, 2차 `question_number` 입니다. `created_at`
+이 드물게 동률일 때 `questionId` 문자열(`"q_2"` vs `"q_10"`)로 정렬하면 숫자 순서가
+깨지므로, AI 가 매긴 출제 순번(`question_number`)을 2차 키로 씁니다. `question_number`
+는 되묻기(`REASK`)에서는 올라가지 않지만, REASK 는 조립에서 제외되고 보존되는
+`QUESTION`·`FOLLOWUP` 의 번호는 단조 증가하므로 보존 항목의 순서가 흔들리지 않습니다.
+(구현: `ReplayLogAssembler` 가 `QuestionRepository.findAllBySessionIdOrderByCreatedAtAsc`
+결과를 `Comparator.comparing(createdAt).thenComparingInt(questionNumber)` 로 다시 정렬.)
 
 ---
 

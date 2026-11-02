@@ -3,6 +3,7 @@ package com.cuea.domain.report.repository;
 import com.cuea.domain.report.entity.Report;
 import com.cuea.domain.report.entity.ReportRetryStatus;
 import com.cuea.domain.report.entity.ReportStatus;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
@@ -47,6 +48,32 @@ public interface ReportRepository extends Repository<Report, Long> {
             """)
     List<ReportSummaryRow> findSummaries(@Param("userId") String userId,
                                          @Param("sessionIds") Collection<String> sessionIds);
+
+    /**
+     * 홈 "최근 리포트 요약". 본인 세션의 리포트 중 상태가 맞는 것만 최신 완료순으로 꺼냅니다.
+     *
+     * <p><b>리포트를 먼저 거르고 자릅니다.</b> 세션을 먼저 N건 자른 뒤 리포트를 붙이면,
+     * 최신 세션들에 리포트가 없을 때 결과가 비어버립니다(Issue #107). 그래서 리포트에서
+     * 출발해 소유자·상태로 좁힌 뒤 정렬하고, {@code Pageable} 로 그 결과의 앞 N건만 가져옵니다.
+     *
+     * <p>회사는 미선택 연습이면 null 이라 {@code left join} 입니다. {@code report_data}(jsonb)
+     * 는 읽지 않도록 필요한 칸만 생성자로 투영합니다. 완료 시각이 같으면 {@code publicId} 로
+     * 순서를 고정해 페이지가 흔들리지 않게 합니다.
+     */
+    @Query("""
+            select new com.cuea.domain.report.repository.RecentReportRow(
+                   r.publicId, c.companyName, s.jobRole, s.questionCount,
+                   r.status, r.scoreTotal, r.completedAt)
+              from Report r
+              join r.session s
+              left join s.company c
+             where s.user.userId = :userId
+               and r.status in :statuses
+             order by r.completedAt desc, r.publicId desc
+            """)
+    List<RecentReportRow> findRecentViewable(@Param("userId") String userId,
+                                             @Param("statuses") Collection<ReportStatus> statuses,
+                                             Pageable pageable);
 
     /** 본인 세션들의 리포트 중 상태가 맞는 것. 회차 비교용이라 원본까지 읽고, 세션 ID 를 쓰므로 세션을 함께 가져옵니다. */
     @Query("""

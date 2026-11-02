@@ -43,6 +43,12 @@ public enum ErrorCode {
     UPLOAD_NOT_COMPLETED(HttpStatus.BAD_REQUEST, "업로드가 완료되지 않았습니다"),
     STORAGE_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "파일 저장소 오류가 발생했습니다"),
 
+    // ── 기업 ────────────────────────────────────────────────
+    // 없는 기업과 verified=false 기업을 구별하지 않고 둘 다 이 코드로 돌려줍니다.
+    // 공용 마스터라 소유권 문제는 없지만, verified=false 는 서비스에 아직 노출하지
+    // 않기로 한 데이터라(Issue #85) "없는 것"과 똑같이 다룹니다.
+    COMPANY_NOT_FOUND(HttpStatus.NOT_FOUND, "기업을 찾을 수 없습니다"),
+
     // ── 면접 세션 ────────────────────────────────────────────
     SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "세션을 찾을 수 없습니다"),
     SESSION_ENDED(HttpStatus.CONFLICT, "이미 종료된 세션입니다"),

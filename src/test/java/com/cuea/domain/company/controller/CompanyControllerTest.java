@@ -1,7 +1,9 @@
 package com.cuea.domain.company.controller;
 
 import com.cuea.common.result.Result;
+import com.cuea.domain.company.dto.response.CompanyDetailResponse;
 import com.cuea.domain.company.dto.response.CompanyResponse;
+import com.cuea.domain.company.entity.ValuesFormat;
 import com.cuea.domain.company.service.CompanyQueryService;
 import org.junit.jupiter.api.Test;
 
@@ -48,5 +50,23 @@ class CompanyControllerTest {
 
         assertThat(result.success()).isTrue();
         assertThat(result.data()).isEmpty();
+    }
+
+    @Test
+    void 상세는_서비스에_companyId_를_위임하고_Result_로_감싼다() {
+        CompanyQueryService service = mock(CompanyQueryService.class);
+        CompanyDetailResponse detail = new CompanyDetailResponse(
+                1L, "SK하이닉스", "반도체/메모리", ValuesFormat.MIXED,
+                List.of(new CompanyDetailResponse.CoreValue("One Team", "자기 일처럼 처리한다.")),
+                "함께 성장하는 인재");
+        when(service.detail(1L)).thenReturn(detail);
+
+        CompanyController controller = new CompanyController(service);
+        Result<CompanyDetailResponse> result = controller.detail("user-1", 1L);
+
+        verify(service).detail(1L);
+        assertThat(result.success()).isTrue();
+        assertThat(result.errorCode()).isNull();
+        assertThat(result.data()).isSameAs(detail);
     }
 }

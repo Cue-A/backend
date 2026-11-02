@@ -68,8 +68,9 @@ public class Company extends BaseCreatedEntity {
      * AI 팀이 제공한 {@code companies.json} 실 데이터를 기준으로 정했습니다.
      * 기업마다 항목 수가 달라 컬럼으로 펴지 않고 jsonb 로 둡니다.
      *
-     * <p>파싱은 직접 하지 말고 {@link com.cuea.domain.company.service.CompanyProfileFormatter}
-     * 를 쓰세요.
+     * <p>키 추출·{@code null} 처리는 {@link #coreValueList()} 한 곳에서 합니다.
+     * jsonb 를 직접 파싱하지 말고 그 메서드를 쓰세요(화면 응답·AI 조립이 공통으로
+     * 사용합니다).
      */
     @JdbcTypeCode(SqlTypes.JSON)
     @Column(name = "core_values", nullable = false, columnDefinition = "jsonb")
@@ -105,4 +106,42 @@ public class Company extends BaseCreatedEntity {
 
     @Column(name = "interview_style", length = 200)
     private String interviewStyle;
+
+    /** {@code coreValues} jsonb 의 항목 키. 파싱이 여러 곳에 흩어지지 않게 여기 한 곳에 둡니다. */
+    private static final String CORE_VALUE_NAME_KEY = "name";
+    private static final String CORE_VALUE_INDICATOR_KEY = "indicator";
+
+    /**
+     * 핵심 가치 한 항목을 구조화한 값. {@code coreValues} jsonb 의
+     * {@code {"name": ..., "indicator": ...}} 한 건에 대응합니다.
+     *
+     * <p>엔티티가 jsonb 를 파싱하는 유일한 지점입니다. 화면 응답
+     * ({@code CompanyDetailResponse})과 AI 프롬프트 조립
+     * ({@code CompanyProfileFormatter})이 이 타입을 공통으로 씁니다. jsonb 키가
+     * 바뀌면 여기만 고치면 됩니다.
+     */
+    public record CoreValue(String name, String indicator) {
+    }
+
+    /**
+     * 핵심 가치를 구조화해 돌려줍니다. 원본 jsonb 의 키 추출과 {@code null} 처리를
+     * 여기 한 곳에 모읍니다. {@code coreValues} 가 null 이면 빈 목록입니다.
+     *
+     * <p>값이 없는 키는 {@code null} 로 둡니다. 문자열 변환은 호출부에서 용도에 맞게
+     * 합니다(화면은 null 유지, AI 조립은 {@code %s} 로 그대로 찍음).
+     */
+    public List<CoreValue> coreValueList() {
+        if (coreValues == null) {
+            return List.of();
+        }
+        return coreValues.stream()
+                .map(raw -> new CoreValue(
+                        stringOrNull(raw.get(CORE_VALUE_NAME_KEY)),
+                        stringOrNull(raw.get(CORE_VALUE_INDICATOR_KEY))))
+                .toList();
+    }
+
+    private static String stringOrNull(Object value) {
+        return value == null ? null : value.toString();
+    }
 }

@@ -91,7 +91,7 @@ public class InterviewController {
                     + "URL 과 함께 내려줍니다. 면접 전체를 담은 영상 파일은 없어 프론트가 목록 순서대로 이어서 재생합니다. "
                     + "URL 은 매 요청마다 새로 서명하고 1시간 뒤 만료됩니다. 파일은 지우지 않으므로 다시 부르면 새 URL 을 받습니다. "
                     + "카메라를 안 쓴 문항은 answerVideoUrl 이 null 이고, 영상이 하나도 없으면 hasVideo=false 입니다. "
-                    + "음성 합성에 실패한 질문은 questionAudioUrl 이 null 입니다. "
+                    + "음성 합성이나 URL 서명에 실패한 질문은 questionAudioUrl 이 null 입니다. "
                     + "없거나 다른 사용자의 세션이면 404(SESSION_NOT_FOUND), 진행 중이면 409(SESSION_NOT_COMPLETED), "
                     + "중단된 세션이면 409(SESSION_ABORTED) 입니다.")
     @GetMapping("/{sessionId}/recordings")

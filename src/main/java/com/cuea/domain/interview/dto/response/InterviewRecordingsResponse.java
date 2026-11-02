@@ -43,7 +43,7 @@ public record InterviewRecordingsResponse(
             @Schema(description = "질문 문장. 질문 텍스트를 숨긴 면접이어도 내려줍니다")
             String questionText,
 
-            @Schema(description = "면접관 질문 음성. 음성 합성에 실패한 질문이면 null")
+            @Schema(description = "면접관 질문 음성. 음성 합성이나 URL 서명에 실패하면 null")
             String questionAudioUrl,
 
             @Schema(description = "답변 녹음")

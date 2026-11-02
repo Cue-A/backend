@@ -66,7 +66,7 @@ public class PresignedUrlIssuer {
         return issueDownload(objectKey, properties.presign().documentGet());
     }
 
-    /** 사용자가 리포트를 보며 재생하는 녹음. */
+    /** 답변 녹음·영상 GET. AI 전달(답변 제출·리포트 요청)과 면접 다시보기에서 씁니다. */
     public String issueRecordingDownload(String objectKey) {
         return issueDownload(objectKey, properties.presign().recordingGet());
     }

@@ -7,9 +7,11 @@ import com.cuea.domain.interview.dto.request.AnswerSubmitRequest;
 import com.cuea.domain.interview.dto.request.AnswerUploadUrlRequest;
 import com.cuea.domain.interview.dto.request.InterviewStartRequest;
 import com.cuea.domain.interview.dto.response.AnswerUploadUrlResponse;
+import com.cuea.domain.interview.dto.response.InterviewSessionOptionsResponse;
 import com.cuea.domain.interview.dto.response.InterviewStartResponse;
 import com.cuea.domain.interview.dto.response.ReplaySessionOptionsResponse;
 import com.cuea.domain.interview.service.InterviewAnswerService;
+import com.cuea.domain.interview.service.InterviewSessionOptionsService;
 import com.cuea.domain.interview.service.InterviewStartService;
 import com.cuea.domain.interview.service.ReplaySessionOptionsService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -42,6 +44,7 @@ public class InterviewController {
     private final InterviewStartService interviewStartService;
     private final InterviewAnswerService interviewAnswerService;
     private final ReplaySessionOptionsService replaySessionOptionsService;
+    private final InterviewSessionOptionsService interviewSessionOptionsService;
 
     @Operation(summary = "면접 세션 시작",
             description = "Document/Company 조회 → AI 세션 생성(session_id·task_id) 까지 동기로 처리하고 "
@@ -50,13 +53,33 @@ public class InterviewController {
                     + "sourceSessionId 를 주면 그 세션의 최초 세션을 기준으로 재면접(replay)을 시작합니다. "
                     + "재면접은 최초 세션과 같은 조건으로만 가능하며, 문항 수·페르소나·이력서·기업·직무가 하나라도 "
                     + "다르면 400 으로 거부합니다(일반 면접으로 자동 전환하지 않습니다). 질문 텍스트 숨김·타이머는 "
-                    + "변경할 수 있습니다. 정상 재면접이면 응답의 replayApplied=true, 일반 면접이면 false 입니다.")
+                    + "변경할 수 있습니다. 정상 재면접이면 응답의 replayApplied=true, 일반 면접이면 false 입니다. "
+                    + "응답에는 저장된 세션 옵션(hideQuestionText·interviewerStyle·answerTimeLimitSec)도 함께 "
+                    + "내려갑니다. answerTimeLimitSec 는 60·90·120·null(제한 없음) 중 하나이며, 허용값 외는 "
+                    + "400(INVALID_REQUEST)으로 거부합니다. interviewerStyle 은 소문자(friendly·pressure)입니다.")
     @PostMapping
     @ResponseStatus(HttpStatus.ACCEPTED)
     @RateLimit(key = "session-start", limit = 10, windowSeconds = 60)
     public Result<InterviewStartResponse> start(@CurrentUser String userId,
                                                  @Valid @RequestBody InterviewStartRequest request) {
         return Result.ok(interviewStartService.start(userId, request));
+    }
+
+    @Operation(summary = "면접 세션 옵션 조회",
+            description = "진행 중이거나 완료된 세션의 현재 진행 옵션(hideQuestionText·interviewerStyle·"
+                    + "answerTimeLimitSec)을 조회합니다. Authorization: Bearer <accessToken> 필요. "
+                    + "프론트 면접 화면이 시작 시 보낸 옵션을 자체 보관하지 않아도(새 탭·새로고침·다른 기기) "
+                    + "서버 저장값을 진실 소스로 읽기 위한 API 입니다. AI 서버를 호출하지 않고 저장된 세션만 읽습니다. "
+                    + "본인 세션만 조회할 수 있고, 존재하지 않거나 다른 사용자의 세션이면 404(SESSION_NOT_FOUND) 입니다. "
+                    + "조회한 sessionId 세션 자신의 값을 반환하며, 재면접 세션이면 최초 세션이 아니라 그 회차의 "
+                    + "실제 옵션(변경된 숨김·타이머 포함)을 돌려줍니다. interviewerStyle 은 소문자(friendly·pressure)이고, "
+                    + "answerTimeLimitSec 는 60·90·120 또는 제한 없음이면 null 입니다(타이머 저장 이전 과거 세션도 null). "
+                    + "최초 세션의 고정 옵션이 필요하면 목적이 다른 /{sessionId}/replay-options 를 쓰세요.")
+    @GetMapping("/{sessionId}")
+    @RateLimit(key = "session-options", limit = 60, windowSeconds = 60)
+    public Result<InterviewSessionOptionsResponse> getSessionOptions(@CurrentUser String userId,
+                                                                     @PathVariable String sessionId) {
+        return Result.ok(interviewSessionOptionsService.getSessionOptions(userId, sessionId));
     }
 
     @Operation(summary = "재연습용 세션 옵션 조회",

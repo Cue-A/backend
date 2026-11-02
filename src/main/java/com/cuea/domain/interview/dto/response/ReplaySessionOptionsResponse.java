@@ -34,9 +34,10 @@ import java.util.List;
  * <p>표시용 {@code documentTitle}·{@code companyName} 은 root 세션의 연관 엔티티에서
  * 읽습니다. 기업 미선택이면 {@code companyName} 도 {@code null} 입니다.
  *
- * <p>타이머·{@code hideQuestionText}·질문/답변·리포트는 담지 않습니다. 타이머는 프론트
- * 전용 설정이고, {@code hideQuestionText} 는 재연습에서 변경 가능한 옵션이라 고정 옵션이
- * 아닙니다.
+ * <p>타이머·{@code hideQuestionText}·질문/답변·리포트는 담지 않습니다. 타이머(답변 제한
+ * 시간)는 세션마다 {@code duration_limit} 에 저장되지만 재연습에서 변경 가능한 옵션이라
+ * 고정 옵션이 아니고, {@code hideQuestionText} 도 재연습에서 변경 가능해 고정 옵션이
+ * 아닙니다. 현재 세션의 타이머 값이 필요하면 {@code GET /api/interviews/{sessionId}} 를 쓰세요.
  *
  * <h3>재연습 가능 여부 (Issue #83 리뷰 반영)</h3>
  * <p>{@code replayable}·{@code replayBlockReasons} 는 "지금 이 조건으로 재연습 시작 API 를

@@ -38,6 +38,7 @@ public class InterviewSessionWriter {
                                            InterviewStartRequest request,
                                            AiSessionStartResponse aiResponse,
                                            int fallbackQuestionCount,
+                                           Integer answerTimeLimitSec,
                                            InterviewSession retryOfSession) {
         InterviewSession session = InterviewSession.builder()
                 .sessionId(aiResponse.sessionId())
@@ -55,6 +56,9 @@ public class InterviewSessionWriter {
                         : fallbackQuestionCount)
                 .persona(request.persona())
                 .hideQuestionText(Boolean.TRUE.equals(request.hideQuestionText()))
+                // 답변 제한 시간(초). 서비스가 60·90·120·null 로 검증·정규화해 넘깁니다.
+                // null 은 "제한 없음"이며 duration_limit 에 null 로 저장합니다.
+                .durationLimit(answerTimeLimitSec)
                 .status(SessionStatus.IN_PROGRESS)
                 .build();
         return sessionRepository.save(session);

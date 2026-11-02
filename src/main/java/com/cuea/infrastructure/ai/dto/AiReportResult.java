@@ -16,6 +16,7 @@ import java.util.Map;
  * 문자열 그대로 둡니다. CLAUDE.md 참고.
  *
  * @param reportStatus complete | partial
+ * @param summary      한 줄 총평. 없으면 null
  */
 @AiJson
 public record AiReportResult(
@@ -23,6 +24,7 @@ public record AiReportResult(
         OffsetDateTime generatedAt,
         String reportStatus,
         Overall overall,
+        String summary,
         Axes axes,
         List<Question> questions,
         Resilience resilience,
@@ -134,6 +136,8 @@ public record AiReportResult(
 
     /**
      * 문항별 결과. 되묻기는 따로 나오지 않고 원 질문에 합쳐져 {@code hadReask} 가 true 입니다.
+     *
+     * @param comment 문항 코멘트. 없으면 null
      */
     @AiJson
     public record Question(
@@ -150,7 +154,8 @@ public record AiReportResult(
             Double durationSec,
             Integer wordCount,
             boolean wasTimeout,
-            boolean hadReask
+            boolean hadReask,
+            String comment
     ) {
     }
 

@@ -39,6 +39,8 @@ POST /api/interviews/{sessionId}/reports     → 202 { reportId, sessionId, stat
 WS   /ws/reports/{reportId}                  → progress · report · error
 GET  /api/reports/{reportId}/status          → { reportId, sessionId, status, stage, progress, errorCode, message, retryable, retry, createdAt, completedAt }
 GET  /api/reports/{reportId}                 → 리포트 상세 (COMPLETED · PARTIAL 만)
+GET  /api/reports/{reportId}/timeline        → 근거 구간을 문항별로 묶은 타임라인 + 회복력
+GET  /api/reports/{reportId}/improvements    → 개선 답변 예시 + 원 질문
 POST /api/reports/{reportId}/retry           → 202 { reportId, status, retry }  (PARTIAL 실패 축 재시도)
 ```
 
@@ -201,6 +203,7 @@ COMPLETED · PARTIAL 이면 부릅니다.
   "reportId": "...", "sessionId": "sess_9f2a1c", "status": "PARTIAL",
   "overall": { "score": 68, "display": 4, "gated": false, "gateReason": null,
                "partial": true, "axesUsed": ["content", "speech"], "axesFailed": ["gaze"] },
+  "summary": "...",
   "axes": {
     "content": { "status": "ok", "errorCode": null, "reason": null, "score": 72, "display": 4,
                  "metrics": {}, "evidence": [ { "questionId": "q_3", "tStart": 12.4, "tEnd": 19.8,
@@ -214,7 +217,8 @@ COMPLETED · PARTIAL 이면 부릅니다.
     { "questionId": "q_1", "questionText": "지원 동기를 말씀해 주세요", "questionNumber": 1,
       "category": "지원동기", "difficulty": "L1", "isReplay": false, "isSpareTopic": false,
       "score": 70, "display": 4, "axes": { "content": 74, "speech": 63, "gaze": null },
-      "transcript": "...", "durationSec": 46.2, "wordCount": 138, "wasTimeout": false, "hadReask": true }
+      "transcript": "...", "durationSec": 46.2, "wordCount": 138, "wasTimeout": false, "hadReask": true,
+      "comment": "..." }
   ],
   "resilience": { "score": 58, "display": 3, "comment": "..." },
   "companyComment": "...",
@@ -235,6 +239,7 @@ COMPLETED · PARTIAL 이면 부릅니다.
   키가 있고 해당하지 않으면 null 입니다
 - 배열(`evidence` · `improvedAnswers` · `axesUsed` · `axesFailed`)은 키가 빠져도
   빈 배열로 내려줍니다. `questions` 는 필수라 저장 전 검증에서 걸립니다(아래)
+- 글로 된 단일 값(`summary` · `questions[].comment` · `companyComment`)은 키가 빠져도 null 로 내려줍니다
 - 원본에 모르는 키가 있어도 무시합니다
 - **모양은 저장 전에 확인합니다**(`AiReportResultReader.validate`). 점수만 맞고 나머지가 어긋난 결과를
   COMPLETED 로 저장하면 상세 조회는 계속 실패하는데 재요청은 FAILED 만 받으므로 빠져나올 길이
@@ -244,6 +249,56 @@ COMPLETED · PARTIAL 이면 부릅니다.
   `improved_answers`)은 비어 올 수 있어 보지 않습니다. 그래도 저장된 원본을 못
   읽으면 우리 DB 문제라 500 `INTERNAL_ERROR` 입니다
 - 폴링용이 아니라 분당 60회로 제한합니다(`@RateLimit`)
+
+---
+
+## 타임라인 · 개선 답변 (`GET /api/reports/{reportId}/timeline` · `/improvements`)
+
+둘 다 저장된 `report_data` 에서 꺼냅니다. **AI 를 다시 부르지 않습니다.** 상태 규칙(200 · 202 ·
+409 · 404)과 분당 60회 제한은 상세 조회와 같습니다.
+
+**되묻기 답변에서 나온 근거·발췌는 `questionId` 가 되묻기 ID(`q_1r`)** 인데, 문항(`questions[]`)은
+원 질문 기준입니다. 원 질문은 우리 `question.reask_of` 에만 있어 Backend 가 이어 줍니다(`ReportQuestions`).
+
+### 타임라인
+
+```json
+{ "reportId": "...", "status": "PARTIAL",
+  "axes": { "content": "ok", "speech": "ok", "gaze": "failed" },
+  "questions": [
+    { "questionId": "q_1", "questionNumber": 1, "questionText": "...", "durationSec": 46.2, "hadReask": true,
+      "evidence": [
+        { "axis": "content", "questionId": "q_1",  "isReask": false, "tStart": 12.4, "tEnd": 19.8, "kind": "weakness", "label": "근거 부족", "comment": "..." },
+        { "axis": "content", "questionId": "q_1r", "isReask": true,  "tStart": 3.1,  "tEnd": 8.0,  "kind": "strength", "label": "...", "comment": "..." } ] } ],
+  "resilience": { "score": 58, "display": 3, "comment": "..." },
+  "retry": null }
+```
+
+- 근거는 세 축(content · speech · gaze)을 **원 질문별로** 모읍니다. 한 문항 안에서는 원 답변 근거 →
+  되묻기 답변 근거 순, 각각 `tStart` 오름차순입니다
+- `tStart` · `tEnd` 는 **그 답변 오디오 기준 초** 그대로입니다. 한 줄 타임라인 위치는 프론트가 앞 문항들의
+  `durationSec` 를 더해 잡습니다
+- 문항은 AI `questions[]` 순서이고 **근거가 없는 문항도 들어갑니다.** 구간을 그려야 하기 때문입니다
+- `axes` 는 축 상태(AI 값 그대로)입니다. 근거 배열이 빈 이유(근거 없음 · `failed` · `skipped`)를 구분하려고 둡니다
+- `retry` 는 상세 조회와 같은 모양입니다. 재시도 중이면 그 축의 레인만 로딩으로 보입니다
+- 원 질문이 `questions[]` 에 없는 근거는 붙을 곳이 없어 빠집니다(정상이라면 없음). 빠지면 원인을 찾을 수 있게
+  `reportId` 와 근거의 `questionId` 를 warn 로그로 남깁니다
+- **`durationSec` 에 되묻기 답변 길이가 포함되는지는 AI 확인 필요.** 되묻기 근거의 한 줄 타임라인 위치가 여기에 달려 있습니다
+
+### 개선 답변
+
+```json
+{ "reportId": "...",
+  "improvedAnswers": [
+    { "questionId": "q_3r", "originalQuestionId": "q_3", "isReask": true, "questionNumber": 3, "questionText": "...",
+      "originalExcerpt": "...", "suggestion": "...", "tStart": 12.4, "tEnd": 19.8 } ] }
+```
+
+- AI `improved_answers[]` 순서(내용 점수가 낮은 문항부터, 최대 2개) 그대로입니다. 모두 잘 답했거나
+  생성에 실패하면 빈 배열이고 둘을 구분하지 않습니다
+- `questionId` 는 발췌한 답변(구간의 기준 오디오), `originalQuestionId` 는 문항 카드와 잇는 기준입니다
+- `questionNumber` · `questionText` 는 원 질문 것입니다. 질문을 못 찾으면 둘 다 null
+- PARTIAL 이어도 나옵니다. 내용 축이 실패하면 리포트가 FAILED 라 PARTIAL 은 늘 내용 축이 성공한 리포트입니다
 
 ---
 

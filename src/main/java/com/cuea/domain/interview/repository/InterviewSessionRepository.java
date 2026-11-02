@@ -8,6 +8,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
 
+import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -124,4 +125,66 @@ public interface InterviewSessionRepository extends Repository<InterviewSession,
     List<InterviewSession> findInterviewsOf(@Param("userId") String userId,
                                             @Param("rootIds") Collection<String> rootIds,
                                             @Param("statuses") Collection<SessionStatus> statuses);
+
+    /**
+     * 홈 스트릭·이번 달 연습 일수 계산용. 본인의 <b>완료 세션이 있는 KST 날짜</b>를 중복 없이
+     * 오름차순으로 돌려줍니다(Issue #113).
+     *
+     * <p>엔티티나 {@code report_data} 를 끌어오지 않고 날짜 한 칸만 투영합니다. 연속 일수는
+     * 날짜 집합만 있으면 계산되므로, 사용자당 보통 수십~수백 개인 이 목록만 메모리로 올려
+     * 서비스에서 연속 구간을 셉니다. 저장된 연속 일수(streak 테이블)는 쓰지 않습니다
+     * (writer 가 없고, 조회 시 계산이 더 정확 — {@code Streak} 엔티티 주석 참고).
+     *
+     * <p>{@code completed_at} 은 {@code COMPLETED} 세션에서만 채워지므로 상태 필터와 날짜
+     * 기준이 일치합니다. {@code timestamptz} 를 {@code AT TIME ZONE 'Asia/Seoul'} 로 KST 로
+     * 옮긴 뒤 {@code ::date} 로 잘라, UTC 로는 날짜가 달라도 KST 에서 같은 날이면 한 날로 묶입니다.
+     */
+    @Query(value = """
+            select distinct to_char((s.completed_at at time zone 'Asia/Seoul'), 'YYYY-MM-DD') as d
+              from session s
+             where s.user_id = :userId
+               and s.status = 'COMPLETED'
+               and s.completed_at is not null
+             order by d
+            """, nativeQuery = true)
+    List<String> findCompletedDatesInKst(@Param("userId") String userId);
+
+    /**
+     * 홈 잔디(활동 히트맵)용. 기간 안에서 <b>KST 날짜별 완료 세션 수</b>를 돌려줍니다(Issue #114).
+     * 쉰 날은 행이 없으므로, 빈 날 0 채움은 서비스가 기간 전체 날짜를 돌며 만듭니다.
+     *
+     * <p>경계는 반열림 구간 {@code [startInclusive, endExclusive)} 입니다. 호출부가 KST 기간의
+     * 시작 자정과 (마지막 날 + 1일)의 자정을 UTC {@link OffsetDateTime} 으로 넘겨, 쿼리는
+     * {@code completed_at} 을 그대로 비교(인덱스 친화)하고 그룹핑에서만 KST 날짜로 변환합니다.
+     */
+    @Query(value = """
+            select to_char((s.completed_at at time zone 'Asia/Seoul'), 'YYYY-MM-DD') as date,
+                   count(*) as count
+              from session s
+             where s.user_id = :userId
+               and s.status = 'COMPLETED'
+               and s.completed_at >= :startInclusive
+               and s.completed_at < :endExclusive
+             group by to_char((s.completed_at at time zone 'Asia/Seoul'), 'YYYY-MM-DD')
+             order by to_char((s.completed_at at time zone 'Asia/Seoul'), 'YYYY-MM-DD')
+            """, nativeQuery = true)
+    List<DailyActivityRow> countDailyActivityInKst(@Param("userId") String userId,
+                                                    @Param("startInclusive") OffsetDateTime startInclusive,
+                                                    @Param("endExclusive") OffsetDateTime endExclusive);
+
+    /**
+     * 기간 내 완료 세션 수(재연습 포함, {@code COMPLETED} 만). 잔디 날짜별 수의 합과 같지만,
+     * "총 연습 횟수" 는 날짜 묶음과 무관한 단일 수치라 따로 셉니다. 반열림 구간 {@code [start, end)}.
+     */
+    @Query(value = """
+            select count(*)
+              from session s
+             where s.user_id = :userId
+               and s.status = 'COMPLETED'
+               and s.completed_at >= :startInclusive
+               and s.completed_at < :endExclusive
+            """, nativeQuery = true)
+    long countCompletedInPeriod(@Param("userId") String userId,
+                                @Param("startInclusive") OffsetDateTime startInclusive,
+                                @Param("endExclusive") OffsetDateTime endExclusive);
 }

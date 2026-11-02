@@ -48,6 +48,40 @@ GET /api/practice-records?status=COMPLETED&folderId=...&keyword=삼성&page=0&si
 
 ---
 
+## 폴더 (`/api/folders`)
+
+화면 위쪽의 폴더 카드입니다. `Folder` 엔티티가 interview 도메인에 있어 API 도 interview 에 둡니다
+(`FolderController` · `FolderService`).
+
+| API | 설명 |
+|---|---|
+| `GET /api/folders` | 폴더 목록과 세션 수. `totalCount` 는 「전체」 카드 |
+| `POST /api/folders` | 만들기. 201 |
+| `PATCH /api/folders/{folderId}` | 이름 바꾸기. 지금 이름과 같으면 그대로 성공 |
+| `DELETE /api/folders/{folderId}` | 지우기. 안의 세션은 남고 폴더에서만 빠짐 |
+
+```json
+{
+  "totalCount": 12,
+  "folders": [
+    { "folderId": "7c9e...", "folderName": "삼성전자", "sessionCount": 5, "createdAt": "2026-07-01T10:00:00Z" }
+  ]
+}
+```
+
+- 이름은 앞뒤 공백을 자른 뒤 1~50자(`folder_name VARCHAR(50)`). 저장 · 중복 비교도 자른 값으로 합니다
+- 내 폴더끼리 같은 이름이면 409 `FOLDER_NAME_DUPLICATED`, 20개를 넘으면 409 `FOLDER_LIMIT_EXCEEDED`.
+  문서 상한처럼 애플리케이션에서만 검사해, 같은 요청이 동시에 두 번 오면 둘 다 통과할 수 있습니다
+- 없는 폴더 · 남의 폴더 · UUID 가 아닌 값은 404 `FOLDER_NOT_FOUND`
+- 목록은 만든 순서(`createdAt`, 같으면 PK)
+- **세션 수는 연습 기록 목록과 같은 기준**입니다(`SessionStatus.LISTED`). 회차마다 하나로 세고 중단된
+  세션은 세지 않아, `totalCount` 가 필터 없는 목록의 `totalElements` 와 같습니다
+- 폴더에 넣지 않은 세션은 「전체」에만 보입니다. 디자인의 「기타」도 사용자가 만든 일반 폴더입니다
+- 지우면 세션의 `folder_id` 는 DB 의 `ON DELETE SET NULL` 이 비웁니다. 연습 기록이 폴더 정리 한 번에
+  날아가면 안 됩니다([`02-database.md`](./02-database.md) 폴더 절)
+
+---
+
 ## 디자인과 다른 점 · 아직 없는 것
 
 | 항목 | 상태 |
@@ -55,4 +89,4 @@ GET /api/practice-records?status=COMPLETED&folderId=...&keyword=삼성&page=0&si
 | 「중립적 면접관」 | persona 는 `FRIENDLY` · `PRESSURE` 둘뿐. 디자인 확인 필요 |
 | 「이어하기」 | 기능 없음 |
 | 「영상 만료됨」 | 보관 기간 정책 없음. 답변 영상은 지우지 않고 보관됩니다 |
-| 폴더 칩 · 세션 개수 | 폴더 API 몫(별도 이슈) |
+| 세션을 폴더에 넣기 | 폴더 이동 API(#96) |

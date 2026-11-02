@@ -274,3 +274,36 @@ Java enum으로 만들지 않습니다. 이유는 [`02-database.md`](./02-databa
 브라우저를 닫았을 때 유실됩니다. 이 로그가 리포트와 재연습의 유일한 근거입니다.
 
 `session_end` 의 `total_questions` 는 되묻기를 제외한 실제 질문 수입니다.
+
+---
+
+## 다시보기 (`GET /api/interviews/{sessionId}/recordings`, Issue #103)
+
+연습 기록에서 세션의 「다시보기」를 누르면 부릅니다. 이 저장소에서 `replay` 는 재연습이라
+다시보기에는 `recordings` 를 씁니다.
+
+**면접 전체를 담은 영상 파일은 없습니다.** 면접 시작 때 녹화를 시작하지 않고, 답변마다 프론트가
+오디오(필수) · 영상(선택)을 따로 올리기 때문입니다. 그래서 파일을 합치지 않고 문항별 재생목록을
+내려주고, 프론트가 순서대로 이어서 재생합니다.
+
+```json
+{
+  "sessionId": "sess_9f2a1c",
+  "hasVideo": true,
+  "items": [
+    { "questionId": "q_1", "questionNumber": 1, "type": "QUESTION", "questionText": "지원 동기를 말씀해 주세요.",
+      "questionAudioUrl": "https://...", "answerAudioUrl": "https://...", "answerVideoUrl": "https://..." }
+  ]
+}
+```
+
+- **완료(`COMPLETED`) 세션만.** 진행 중은 409 `SESSION_NOT_COMPLETED`, 중단은 409 `SESSION_ABORTED`,
+  없거나 남의 세션은 404 `SESSION_NOT_FOUND`. 리포트 요청과 같은 분기입니다
+- 조립 규칙은 리포트 요청(`ReportRequestAssembler`)과 같습니다. 나간 순서대로(되묻기 포함),
+  답변 녹음이 없는 질문은 빼고, 영상 key 가 없으면 `answerVideoUrl` null
+- 영상이 하나도 없으면 오류가 아니라 200 에 `hasVideo: false` 입니다
+- `questionAudioUrl` 은 질문 push 와 같이 계약 key 로 서명하고, 음성이 없거나(TTS 실패) 서명이
+  실패하면 null 입니다
+- 질문 텍스트를 숨긴 면접이어도 `questionText` 를 내려줍니다
+- **URL 은 매 요청마다 새로 서명하고 저장하지 않습니다.** 셋 다 1시간이며, 파일은 지우지 않으므로
+  만료되면 다시 부르면 됩니다. 만료 기준은 [`20-storage.md`](./20-storage.md)

@@ -5,6 +5,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
 
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -44,6 +45,10 @@ public interface InterviewSessionRepository extends Repository<InterviewSession,
             + "where s.sessionId = :sessionId and s.user.userId = :userId")
     Optional<InterviewSession> findRootForReplay(@Param("sessionId") String sessionId,
                                                  @Param("userId") String userId);
+
+    /** 회원 탈퇴 때 세션 미디어 접두사를 모으려고 씁니다. */
+    @Query("select s.sessionId from InterviewSession s where s.user.userId = :userId")
+    List<String> findSessionIdsByUserId(@Param("userId") String userId);
 
     InterviewSession save(InterviewSession session);
 }

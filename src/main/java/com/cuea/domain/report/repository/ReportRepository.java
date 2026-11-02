@@ -48,6 +48,18 @@ public interface ReportRepository extends Repository<Report, Long> {
     List<ReportSummaryRow> findSummaries(@Param("userId") String userId,
                                          @Param("sessionIds") Collection<String> sessionIds);
 
+    /** 본인 세션들의 리포트 중 상태가 맞는 것. 회차 비교용이라 원본까지 읽고, 세션 ID 를 쓰므로 세션을 함께 가져옵니다. */
+    @Query("""
+            select r from Report r
+              join fetch r.session s
+             where s.user.userId = :userId
+               and s.sessionId in :sessionIds
+               and r.status in :statuses
+            """)
+    List<Report> findAllBySessionIds(@Param("userId") String userId,
+                                     @Param("sessionIds") Collection<String> sessionIds,
+                                     @Param("statuses") Collection<ReportStatus> statuses);
+
     /**
      * 실패한 리포트를 다시 {@code PROCESSING} 으로 되돌립니다.
      *

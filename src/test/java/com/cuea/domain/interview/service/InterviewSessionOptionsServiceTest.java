@@ -89,6 +89,36 @@ class InterviewSessionOptionsServiceTest {
     }
 
     @Test
+    void 완료된_세션도_조회된다() {
+        InterviewSession completed =
+                session("sess_done", Persona.PRESSURE, true, 120, SessionStatus.COMPLETED);
+        when(sessionQueryService.getOwnedSession("sess_done", USER_ID)).thenReturn(completed);
+
+        InterviewSessionOptionsResponse res = service.getSessionOptions(USER_ID, "sess_done");
+
+        assertThat(res.interviewerStyle()).isEqualTo("pressure");
+        assertThat(res.answerTimeLimitSec()).isEqualTo(120);
+    }
+
+    @Test
+    void 중단된_ABORTED_세션도_409_없이_200_으로_조회된다() {
+        // 이 API 는 소유권만 보고 세션 상태로 막지 않습니다(재연습 옵션 조회와 다름).
+        // getOwnedSession 은 상태 필터가 없어 ABORTED 세션도 그대로 돌려주고, 서비스는
+        // 저장된 옵션(숨김·스타일·타이머)을 그대로 변환합니다. SESSION_NOT_COMPLETED(409)
+        // 같은 상태 기반 거부가 없음을 고정합니다.
+        InterviewSession aborted =
+                session("sess_aborted", Persona.FRIENDLY, true, 60, SessionStatus.ABORTED);
+        when(sessionQueryService.getOwnedSession("sess_aborted", USER_ID)).thenReturn(aborted);
+
+        InterviewSessionOptionsResponse res = service.getSessionOptions(USER_ID, "sess_aborted");
+
+        assertThat(res.sessionId()).isEqualTo("sess_aborted");
+        assertThat(res.hideQuestionText()).isTrue();
+        assertThat(res.interviewerStyle()).isEqualTo("friendly");
+        assertThat(res.answerTimeLimitSec()).isEqualTo(60);
+    }
+
+    @Test
     void 없는_또는_남의_세션이면_getOwnedSession_의_404를_그대로_전파한다() {
         when(sessionQueryService.getOwnedSession("missing", USER_ID))
                 .thenThrow(new BusinessException(ErrorCode.SESSION_NOT_FOUND));

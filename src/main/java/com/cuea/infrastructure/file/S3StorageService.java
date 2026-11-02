@@ -7,14 +7,20 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import software.amazon.awssdk.core.sync.RequestBody;
 import software.amazon.awssdk.services.s3.S3Client;
+import software.amazon.awssdk.services.s3.model.Delete;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
+import software.amazon.awssdk.services.s3.model.DeleteObjectsRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
+import software.amazon.awssdk.services.s3.model.ListObjectsV2Response;
+import software.amazon.awssdk.services.s3.model.ObjectIdentifier;
 import software.amazon.awssdk.services.s3.model.NoSuchKeyException;
 import software.amazon.awssdk.services.s3.model.PutObjectRequest;
 import software.amazon.awssdk.services.s3.model.S3Exception;
 
 import java.io.InputStream;
+import java.util.List;
 import java.util.Optional;
 
 /**
@@ -92,6 +98,35 @@ public class S3StorageService {
                     .build());
         } catch (S3Exception e) {
             log.error("S3 deleteObject 실패 key={}", objectKey, e);
+            throw new BusinessException(ErrorCode.STORAGE_ERROR);
+        }
+    }
+
+    /**
+     * 접두사 아래 객체를 전부 지웁니다. 키를 하나씩 모르는 사용자 미디어(답변 녹음,
+     * AI 가 올린 질문 음성)를 회원 탈퇴 때 한꺼번에 지우려고 둡니다.
+     *
+     * <p>목록 조회는 한 페이지에 최대 1000개라, 페이지마다 그만큼을 한 번에 지웁니다.
+     */
+    public void deleteByPrefix(String prefix) {
+        try {
+            for (ListObjectsV2Response page : s3Client.listObjectsV2Paginator(ListObjectsV2Request.builder()
+                    .bucket(properties.bucket())
+                    .prefix(prefix)
+                    .build())) {
+                List<ObjectIdentifier> keys = page.contents().stream()
+                        .map(object -> ObjectIdentifier.builder().key(object.key()).build())
+                        .toList();
+                if (keys.isEmpty()) {
+                    continue;
+                }
+                s3Client.deleteObjects(DeleteObjectsRequest.builder()
+                        .bucket(properties.bucket())
+                        .delete(Delete.builder().objects(keys).quiet(true).build())
+                        .build());
+            }
+        } catch (S3Exception e) {
+            log.error("S3 접두사 삭제 실패 prefix={}", prefix, e);
             throw new BusinessException(ErrorCode.STORAGE_ERROR);
         }
     }

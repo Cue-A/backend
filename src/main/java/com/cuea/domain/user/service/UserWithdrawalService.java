@@ -1,14 +1,13 @@
 package com.cuea.domain.user.service;
 
-import com.cuea.common.exception.BusinessException;
-import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.auth.service.TokenService;
-import com.cuea.domain.user.entity.User;
-import com.cuea.domain.user.repository.UserRepository;
+import com.cuea.domain.interview.service.InterviewSessionQueryService;
+import com.cuea.infrastructure.file.UserFileCleaner;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
 
 /**
  * 회원 탈퇴. {@code users} 행을 지우면 {@code docs/02-database.md} 의 삭제 정책대로
@@ -18,22 +17,33 @@ import org.springframework.transaction.annotation.Transactional;
  * <p>문서 삭제({@link com.cuea.domain.document.service.DocumentDeleteService})와
  * 달리 여기는 소프트 삭제가 아닙니다. 탈퇴는 "완전 삭제"가 기대되는 동작이고,
  * 되돌릴 수 없습니다.
+ *
+ * <h2>순서</h2>
+ * <ol>
+ *   <li>세션 ID 를 먼저 모읍니다. 행이 지워지면 어떤 S3 키가 이 사용자 것인지 알 수 없습니다.</li>
+ *   <li>DB 삭제({@link UserWriter}). 여기서만 트랜잭션을 엽니다.</li>
+ *   <li>커밋 뒤 전 기기 토큰 폐기와 S3 파일 삭제. 커밋이 실패하면 둘 다 하지 않습니다.</li>
+ * </ol>
+ *
+ * <p>카카오 연결 끊기(unlink)는 아직 하지 않습니다. 어드민 키 설정이 필요해 후속 이슈로 뺐습니다.
  */
 @Slf4j
 @Service
 @RequiredArgsConstructor
 public class UserWithdrawalService {
 
-    private final UserRepository userRepository;
+    private final UserWriter userWriter;
     private final TokenService tokenService;
+    private final InterviewSessionQueryService sessionQueryService;
+    private final UserFileCleaner fileCleaner;
 
-    @Transactional
     public void withdraw(String userId) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND));
+        List<String> sessionIds = sessionQueryService.getSessionIdsOf(userId);
 
-        userRepository.delete(user);
+        userWriter.delete(userId);
+
         tokenService.revokeAll(userId);
+        fileCleaner.removeAll(userId, sessionIds);
 
         log.info("회원 탈퇴 userId={}", userId);
     }

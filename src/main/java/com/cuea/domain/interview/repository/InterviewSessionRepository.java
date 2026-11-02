@@ -53,9 +53,8 @@ public interface InterviewSessionRepository extends Repository<InterviewSession,
 
     InterviewSession save(InterviewSession session);
 
-    /** 연습 기록 목록과 그 개수 쿼리가 같이 쓰는 조건. 폴더는 조건에만 써서 left join 입니다. */
+    /** 연습 기록 목록과 그 개수 쿼리가 같이 쓰는 조건. 회사(c) · 폴더(f)는 없을 수 있어 left join 입니다. */
     String RECORDS_CONDITION = """
-              left join s.folder f
              where s.user.userId = :userId
                and s.status in :statuses
                and (:folderId is null or f.publicId = :folderId)
@@ -63,13 +62,15 @@ public interface InterviewSessionRepository extends Repository<InterviewSession,
             """;
 
     /**
-     * 연습 기록 목록. 회사는 이름을 보여주므로 함께 가져옵니다.
+     * 연습 기록 목록. 회사 이름과 폴더를 보여주므로 함께 가져옵니다.
      *
      * @param folderId null 이면 폴더를 보지 않습니다
      * @param pattern  회사명 · 직무에 거는 소문자 LIKE 패턴. 검색어가 없으면 {@code %}
      */
-    @Query(value = "select s from InterviewSession s left join fetch s.company c" + RECORDS_CONDITION,
-            countQuery = "select count(s) from InterviewSession s left join s.company c" + RECORDS_CONDITION)
+    @Query(value = "select s from InterviewSession s left join fetch s.company c left join fetch s.folder f"
+            + RECORDS_CONDITION,
+            countQuery = "select count(s) from InterviewSession s left join s.company c left join s.folder f"
+                    + RECORDS_CONDITION)
     Page<InterviewSession> findRecords(@Param("userId") String userId,
                                        @Param("statuses") Collection<SessionStatus> statuses,
                                        @Param("folderId") UUID folderId,
@@ -102,4 +103,25 @@ public interface InterviewSessionRepository extends Repository<InterviewSession,
     long countByUser_UserIdAndStatusIn(String userId, Collection<SessionStatus> statuses);
 
     long countByFolder_FolderIdAndStatusIn(Long folderId, Collection<SessionStatus> statuses);
+
+    List<InterviewSession> findAllBySessionIdInAndUser_UserIdAndStatusIn(Collection<String> sessionIds,
+                                                                      String userId,
+                                                                      Collection<SessionStatus> statuses);
+
+    /**
+     * 루트 세션들의 면접 전체(1회차 + 재연습). 시작 순서대로입니다.
+     *
+     * <p>1회차는 {@code retryOfSession} 이 없어 left join 입니다. inner join 이면 1회차가 빠집니다.
+     */
+    @Query("""
+            select s from InterviewSession s
+              left join s.retryOfSession r
+             where s.user.userId = :userId
+               and s.status in :statuses
+               and (s.sessionId in :rootIds or r.sessionId in :rootIds)
+             order by s.createdAt, s.sessionId
+            """)
+    List<InterviewSession> findInterviewsOf(@Param("userId") String userId,
+                                            @Param("rootIds") Collection<String> rootIds,
+                                            @Param("statuses") Collection<SessionStatus> statuses);
 }

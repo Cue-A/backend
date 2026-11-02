@@ -11,6 +11,7 @@ import com.cuea.domain.interview.entity.Persona;
 import com.cuea.domain.interview.entity.SessionStatus;
 import com.cuea.domain.user.entity.User;
 import com.cuea.support.PostgresRepositoryTest;
+import org.hibernate.Hibernate;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -90,6 +91,18 @@ class InterviewSessionRepositoryTest extends PostgresRepositoryTest {
                 .containsExactly(noFolder.getSessionId(), inFolder.getSessionId());
     }
 
+    /** 행마다 폴더 이름을 보여주므로 목록에서 함께 가져와야 합니다. 안 그러면 행마다 쿼리가 나갑니다. */
+    @Test
+    void 목록은_폴더를_함께_가져온다() {
+        Folder folder = em.persist(Folder.builder().publicId(UUID.randomUUID()).user(user).folderName("삼성").build());
+        session(user, SessionStatus.COMPLETED, 1).moveTo(folder);
+
+        InterviewSession found = findRecords(VISIBLE, null, "%").getContent().get(0);
+
+        assertThat(Hibernate.isInitialized(found.getFolder())).isTrue();
+        assertThat(found.getFolder().getFolderName()).isEqualTo("삼성");
+    }
+
     @Test
     void 검색어는_회사명이나_직무에서_찾고_회사가_없어도_직무로_찾는다() {
         InterviewSession withCompany = session(user, SessionStatus.COMPLETED, 1, samsung, "마케팅");
@@ -130,9 +143,43 @@ class InterviewSessionRepositoryTest extends PostgresRepositoryTest {
                 .isEmpty();
     }
 
-    private Page<InterviewSession> findRecords(List<SessionStatus> statuses, UUID folderId, String pattern) {
+    /** 폴더 옮기기는 면접 단위입니다. 1회차는 retryOfSession 이 없어도 나와야 합니다. */
+    @Test
+    void 면접_전체_조회는_1회차와_재연습을_주고_중단과_다른_면접은_뺀다() {
+        InterviewSession root = session(user, SessionStatus.COMPLETED, 1);
+        InterviewSession second = retry(root, SessionStatus.COMPLETED, 2);
+        retry(root, SessionStatus.ABORTED, 3);
+        InterviewSession third = retry(root, SessionStatus.IN_PROGRESS, 4);
+        session(user, SessionStatus.COMPLETED, 5);
+        flushAndClear();
+
+        assertThat(sessionRepository.findInterviewsOf(user.getUserId(), List.of(root.getSessionId()), VISIBLE))
+                .extracting(InterviewSession::getSessionId)
+                .containsExactly(root.getSessionId(), second.getSessionId(), third.getSessionId());
+        assertThat(sessionRepository.findInterviewsOf("someone-else", List.of(root.getSessionId()), VISIBLE))
+                .isEmpty();
+    }
+
+    @Test
+    void 세션_ID_조회는_본인의_보이는_세션만_준다() {
+        InterviewSession mine = session(user, SessionStatus.COMPLETED, 1);
+        InterviewSession aborted = session(user, SessionStatus.ABORTED, 2);
+        InterviewSession others = session(em.persist(User.create(null, "남")), SessionStatus.COMPLETED, 3);
+        flushAndClear();
+
+        assertThat(sessionRepository.findAllBySessionIdInAndUser_UserIdAndStatusIn(
+                List.of(mine.getSessionId(), aborted.getSessionId(), others.getSessionId()), user.getUserId(), VISIBLE))
+                .extracting(InterviewSession::getSessionId)
+                .containsExactly(mine.getSessionId());
+    }
+
+    private void flushAndClear() {
         em.flush();
         em.clear();
+    }
+
+    private Page<InterviewSession> findRecords(List<SessionStatus> statuses, UUID folderId, String pattern) {
+        flushAndClear();
         return sessionRepository.findRecords(user.getUserId(), statuses, folderId, pattern, NEWEST_FIRST);
     }
 

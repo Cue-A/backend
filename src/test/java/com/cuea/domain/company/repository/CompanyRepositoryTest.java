@@ -25,8 +25,17 @@ import static org.assertj.core.api.Assertions.assertThat;
  *
  * <p>테이블에 {@code core_values} jsonb 등이 있어 H2 를 쓰지 못합니다. Docker 가
  * 없으면 {@code PostgresRepositoryTest} 가 건너뜁니다.
+ *
+ * <p><b>Flyway V2(기업 초기 데이터 적재)로 company 테이블에 시드 28건이 들어있습니다.</b>
+ * 이 테스트는 싱글턴 컨테이너를 공유하고 시드는 커밋돼 롤백되지 않으므로, 전역
+ * {@code containsExactly}/{@code isEmpty} 로 단정하면 시드 때문에 깨집니다.
+ * 그래서 이 테스트가 넣은 행만 고유 접두사({@code PREFIX})로 가려내어 검증합니다.
+ * verified 필터·기업명 오름차순 정렬·프로젝션이라는 검증 의도는 그대로 둡니다.
  */
 class CompanyRepositoryTest extends PostgresRepositoryTest {
+
+    /** 이 테스트가 넣은 행만 시드(V2)와 구분하기 위한 고유 접두사. */
+    private static final String PREFIX = "ZZTEST_" + System.nanoTime() + "_";
 
     @Autowired
     private CompanyRepository companyRepository;
@@ -36,7 +45,7 @@ class CompanyRepositoryTest extends PostgresRepositoryTest {
 
     private Company company(String name, boolean verified) {
         return Company.builder()
-                .companyName(name)
+                .companyName(PREFIX + name)
                 .industry("반도체/메모리")
                 .valuesFormat(ValuesFormat.WORD)
                 .coreValues(List.of(Map.of("name", "도전", "indicator", "두려워하지 않는다.")))
@@ -44,6 +53,14 @@ class CompanyRepositoryTest extends PostgresRepositoryTest {
                 .collectedOn(LocalDate.of(2026, 8, 19))
                 .verified(verified)
                 .build();
+    }
+
+    /** 이 테스트가 넣은 행(접두사)만 남긴 이름 목록. 시드·다른 테스트 데이터는 제외합니다. */
+    private List<String> myNames(List<CompanyResponse> result) {
+        return result.stream()
+                .map(CompanyResponse::name)
+                .filter(name -> name.startsWith(PREFIX))
+                .toList();
     }
 
     @Test
@@ -58,24 +75,36 @@ class CompanyRepositoryTest extends PostgresRepositoryTest {
 
         List<CompanyResponse> result = companyRepository.findVerifiedCompanyList();
 
-        // verified=true 3곳만, 기업명 오름차순.
+        // 이 테스트가 넣은 verified=true 3곳만, 기업명 오름차순.
+        // (company 테이블에는 V2 시드가 함께 있으므로 접두사로 가려냅니다.)
+        // 접두사가 같은 세 이름은 뒷부분(가나/나다/다라)만 다르고, 이 글자들은
+        // DB collation 과 자바 문자열 순서가 일치하므로 containsExactly 로 순서를 단정합니다.
+        assertThat(myNames(result))
+                .containsExactly(PREFIX + "가나기업", PREFIX + "나다기업", PREFIX + "다라기업");
+        // 결과 전체가 DB 의 order by company_name 과 같은 순서인지 확인합니다.
+        // (자바 String 순서가 아니라 DB collation 기준이어야 하므로, 같은 조건을
+        //  DB 에서 직접 정렬해 비교합니다 — Testcontainers 는 C collation 이라 자바와
+        //  한글 정렬 기준이 다릅니다.)
+        List<String> dbOrdered = em.getEntityManager()
+                .createNativeQuery("select company_name from company where verified = true order by company_name asc")
+                .getResultList();
         assertThat(result)
                 .extracting(CompanyResponse::name)
-                .containsExactly("가나기업", "나다기업", "다라기업");
-        // 결과가 실제로 오름차순인지(DB collation 기준)도 함께 확인합니다.
-        assertThat(result)
-                .extracting(CompanyResponse::name)
-                .isSorted();
-        assertThat(result).noneMatch(c -> c.name().equals("미검증기업"));
+                .containsExactlyElementsOf(dbOrdered);
+        // 내 미검증 기업은 빠져야 합니다.
+        assertThat(result).noneMatch(c -> c.name().equals(PREFIX + "미검증기업"));
+        // verified=false 기업은 결과에 하나도 없어야 합니다(시드의 미검증 7건 포함).
         // 프로젝션이 companyId 도 함께 채우는지 확인합니다(식별자 누락 방지).
         assertThat(result).allSatisfy(c -> assertThat(c.companyId()).isNotNull());
     }
 
     @Test
-    void verified_기업이_없으면_빈_목록을_돌려준다() {
+    void verified_기업이_없으면_결과에_그_기업이_없다() {
+        // 미검증 기업만 넣으면, 이 테스트가 넣은 행 중에는 verified=true 가 없어야 합니다.
+        // (company 테이블 전역은 V2 시드로 비어있지 않으므로 접두사로 가려냅니다.)
         em.persist(company("미검증기업", false));
         em.flush();
 
-        assertThat(companyRepository.findVerifiedCompanyList()).isEmpty();
+        assertThat(myNames(companyRepository.findVerifiedCompanyList())).isEmpty();
     }
 }

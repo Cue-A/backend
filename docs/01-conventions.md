@@ -105,6 +105,8 @@ session.complete();
 
 - 연관관계는 기본 `LAZY`.
 - `@Builder` 사용, 기본 생성자는 `@NoArgsConstructor(access = PROTECTED)`.
+- **엔티티를 바꾸면 같은 PR 에 마이그레이션 파일을 넣습니다.** 컬럼 하나 추가도 마찬가지입니다.
+  번호 규칙과 enum `check` 제약은 [`02-database.md`](./02-database.md) 의 마이그레이션 절 참고.
 
 ---
 
@@ -338,7 +340,7 @@ chore:    빌드·설정
 **스코프는 어디를 건드렸는지입니다.** 도메인 이름이나 계층 이름을 씁니다.
 
 ```
-도메인   auth  user  document  interview  report  growth  company
+도메인   auth  user  document  interview  report  record  growth  company
 계층     common  ai  websocket  storage  redis  security  config
 기타     build  docker  github  domain  guide
 ```

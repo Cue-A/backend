@@ -1,11 +1,17 @@
 package com.cuea.domain.interview.repository;
 
 import com.cuea.domain.interview.entity.InterviewSession;
+import com.cuea.domain.interview.entity.SessionStatus;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Collection;
+import java.util.List;
 import java.util.Optional;
+import java.util.UUID;
 
 /**
  * 소유자가 있는 엔티티라 {@code findById} 가 없습니다.
@@ -25,5 +31,97 @@ public interface InterviewSessionRepository extends Repository<InterviewSession,
     @Query("select s from InterviewSession s where s.sessionId = :sessionId")
     Optional<InterviewSession> findBySessionIdForInternal(@Param("sessionId") String sessionId);
 
+    /**
+     * 재면접 옵션 비교에 필요한 연관({@code document}·{@code company})을 함께 읽어오는 조회입니다.
+     *
+     * <p><b>요청 사용자 소유(userId)인 root 세션만 조회합니다.</b> source 세션 소유권은 호출부
+     * ({@code getOwnedSession})에서 이미 확인하지만, root 세션도 같은 사용자 소유여야 하므로
+     * 조회 조건에 {@code userId} 를 포함해 교차 사용자 참조를 막습니다. 추가 쿼리 없이 WHERE
+     * 조건 하나로 방어합니다.
+     *
+     * <p>{@code open-in-view=false} 이고 {@link com.cuea.domain.interview.service.InterviewStartService}
+     * 는 트랜잭션 밖에서 root 세션의 옵션을 비교하므로, LAZY 연관을 지연 로딩하면
+     * {@code LazyInitializationException} 이 납니다. 비교에 쓰는 연관을 fetch join 으로 미리
+     * 초기화해 둡니다.
+     */
+    @Query("select s from InterviewSession s "
+            + "left join fetch s.document "
+            + "left join fetch s.company "
+            + "where s.sessionId = :sessionId and s.user.userId = :userId")
+    Optional<InterviewSession> findRootForReplay(@Param("sessionId") String sessionId,
+                                                 @Param("userId") String userId);
+
     InterviewSession save(InterviewSession session);
+
+    /** 연습 기록 목록과 그 개수 쿼리가 같이 쓰는 조건. 회사(c) · 폴더(f)는 없을 수 있어 left join 입니다. */
+    String RECORDS_CONDITION = """
+             where s.user.userId = :userId
+               and s.status in :statuses
+               and (:folderId is null or f.publicId = :folderId)
+               and (lower(c.companyName) like :pattern escape '!' or lower(s.jobRole) like :pattern escape '!')
+            """;
+
+    /**
+     * 연습 기록 목록. 회사 이름과 폴더를 보여주므로 함께 가져옵니다.
+     *
+     * @param folderId null 이면 폴더를 보지 않습니다
+     * @param pattern  회사명 · 직무에 거는 소문자 LIKE 패턴. 검색어가 없으면 {@code %}
+     */
+    @Query(value = "select s from InterviewSession s left join fetch s.company c left join fetch s.folder f"
+            + RECORDS_CONDITION,
+            countQuery = "select count(s) from InterviewSession s left join s.company c left join s.folder f"
+                    + RECORDS_CONDITION)
+    Page<InterviewSession> findRecords(@Param("userId") String userId,
+                                       @Param("statuses") Collection<SessionStatus> statuses,
+                                       @Param("folderId") UUID folderId,
+                                       @Param("pattern") String pattern,
+                                       Pageable pageable);
+
+    /** 루트 세션들의 재연습 세션. 회차 계산용이라 중단된 것은 뺍니다. */
+    @Query("""
+            select s from InterviewSession s
+             where s.user.userId = :userId
+               and s.retryOfSession.sessionId in :rootIds
+               and s.status <> :aborted
+            """)
+    List<InterviewSession> findRetriesOf(@Param("userId") String userId,
+                                         @Param("rootIds") Collection<String> rootIds,
+                                         @Param("aborted") SessionStatus aborted);
+
+    /** 폴더별 세션 수. 세션이 없는 폴더는 나오지 않습니다. */
+    @Query("""
+            select new com.cuea.domain.interview.repository.FolderSessionCount(s.folder.folderId, count(s))
+              from InterviewSession s
+             where s.user.userId = :userId
+               and s.folder is not null
+               and s.status in :statuses
+             group by s.folder.folderId
+            """)
+    List<FolderSessionCount> countSessionsPerFolder(@Param("userId") String userId,
+                                                    @Param("statuses") Collection<SessionStatus> statuses);
+
+    long countByUser_UserIdAndStatusIn(String userId, Collection<SessionStatus> statuses);
+
+    long countByFolder_FolderIdAndStatusIn(Long folderId, Collection<SessionStatus> statuses);
+
+    List<InterviewSession> findAllBySessionIdInAndUser_UserIdAndStatusIn(Collection<String> sessionIds,
+                                                                      String userId,
+                                                                      Collection<SessionStatus> statuses);
+
+    /**
+     * 루트 세션들의 면접 전체(1회차 + 재연습). 시작 순서대로입니다.
+     *
+     * <p>1회차는 {@code retryOfSession} 이 없어 left join 입니다. inner join 이면 1회차가 빠집니다.
+     */
+    @Query("""
+            select s from InterviewSession s
+              left join s.retryOfSession r
+             where s.user.userId = :userId
+               and s.status in :statuses
+               and (s.sessionId in :rootIds or r.sessionId in :rootIds)
+             order by s.createdAt, s.sessionId
+            """)
+    List<InterviewSession> findInterviewsOf(@Param("userId") String userId,
+                                            @Param("rootIds") Collection<String> rootIds,
+                                            @Param("statuses") Collection<SessionStatus> statuses);
 }

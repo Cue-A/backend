@@ -1,6 +1,8 @@
 package com.cuea.infrastructure.ai;
 
 import com.cuea.infrastructure.ai.dto.AiAnswerSubmitRequest;
+import com.cuea.infrastructure.ai.dto.AiReportCompareRequest;
+import com.cuea.infrastructure.ai.dto.AiReportComparison;
 import com.cuea.infrastructure.ai.dto.AiReportRequest;
 import com.cuea.infrastructure.ai.dto.AiReportRetryRequest;
 import com.cuea.infrastructure.ai.dto.AiReportTaskStatusResponse;
@@ -53,4 +55,11 @@ public interface AiClient {
 
     /** 리포트 작업 상태 조회. 경로는 {@link #getTask} 와 같고 결과 모양만 다릅니다. */
     AiReportTaskStatusResponse getReportTask(String taskId);
+
+    /**
+     * 회차 비교. 폴링 없이 바로 결과를 받습니다. AI 는 저장하지 않고 같은 입력이면 같은 결과를 줍니다.
+     *
+     * @throws com.cuea.common.exception.BusinessException 응답을 읽을 수 없으면 {@code UNEXPECTED_AI_RESPONSE}
+     */
+    AiReportComparison compareReports(AiReportCompareRequest request);
 }

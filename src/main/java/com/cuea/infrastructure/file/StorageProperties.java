@@ -23,7 +23,8 @@ public record StorageProperties(
     /**
      * @param resumeGet        이력서 GET(AI 전달용). Celery 큐 지연 대비로 15분. 줄이지 마세요
      * @param uploadPut        업로드 PUT
-     * @param recordingGet     녹음 다운로드 GET. 사용자가 리포트를 보며 재생합니다
+     * @param recordingGet     답변 녹음·영상 GET. AI 전달(답변 제출·리포트 요청)과 면접 다시보기에서
+     *                         씁니다. 다시보기의 질문 음성도 이 값으로 서명합니다
      * @param documentGet      사용자가 자기 문서를 다시 볼 때 쓰는 GET
      * @param questionAudioGet 질문 TTS 음성 GET. AI 가 private 버킷에 올린 질문 음성을
      *                         WebSocket 질문 push 시 프론트에 서명해 내려줍니다. 사용자가

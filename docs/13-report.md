@@ -1,7 +1,7 @@
 # 13. 리포트 · 성장 추적
 
 리포트 계약(「리포트생성 API계약」)이 도착해 **생성 흐름**(Issue #47)과 **상태 조회**(Issue #48)를
-반영했습니다. 리포트 조회·부분 재시도·회차 비교는 아직입니다. 아래 "아직 없는 것" 참고.
+반영했습니다. 상세 조회 · 실패 축 재시도 · 회차 비교(Issue #102)는 아래 각 절에 있습니다.
 
 ---
 
@@ -39,6 +39,8 @@ POST /api/interviews/{sessionId}/reports     → 202 { reportId, sessionId, stat
 WS   /ws/reports/{reportId}                  → progress · report · error
 GET  /api/reports/{reportId}/status          → { reportId, sessionId, status, stage, progress, errorCode, message, retryable, retry, createdAt, completedAt }
 GET  /api/reports/{reportId}                 → 리포트 상세 (COMPLETED · PARTIAL 만)
+GET  /api/reports/{reportId}/timeline        → 근거 구간을 문항별로 묶은 타임라인 + 회복력
+GET  /api/reports/{reportId}/improvements    → 개선 답변 예시 + 원 질문
 POST /api/reports/{reportId}/retry           → 202 { reportId, status, retry }  (PARTIAL 실패 축 재시도)
 ```
 
@@ -201,6 +203,7 @@ COMPLETED · PARTIAL 이면 부릅니다.
   "reportId": "...", "sessionId": "sess_9f2a1c", "status": "PARTIAL",
   "overall": { "score": 68, "display": 4, "gated": false, "gateReason": null,
                "partial": true, "axesUsed": ["content", "speech"], "axesFailed": ["gaze"] },
+  "summary": "...",
   "axes": {
     "content": { "status": "ok", "errorCode": null, "reason": null, "score": 72, "display": 4,
                  "metrics": {}, "evidence": [ { "questionId": "q_3", "tStart": 12.4, "tEnd": 19.8,
@@ -214,7 +217,8 @@ COMPLETED · PARTIAL 이면 부릅니다.
     { "questionId": "q_1", "questionText": "지원 동기를 말씀해 주세요", "questionNumber": 1,
       "category": "지원동기", "difficulty": "L1", "isReplay": false, "isSpareTopic": false,
       "score": 70, "display": 4, "axes": { "content": 74, "speech": 63, "gaze": null },
-      "transcript": "...", "durationSec": 46.2, "wordCount": 138, "wasTimeout": false, "hadReask": true }
+      "transcript": "...", "durationSec": 46.2, "wordCount": 138, "wasTimeout": false, "hadReask": true,
+      "comment": "..." }
   ],
   "resilience": { "score": 58, "display": 3, "comment": "..." },
   "companyComment": "...",
@@ -235,6 +239,7 @@ COMPLETED · PARTIAL 이면 부릅니다.
   키가 있고 해당하지 않으면 null 입니다
 - 배열(`evidence` · `improvedAnswers` · `axesUsed` · `axesFailed`)은 키가 빠져도
   빈 배열로 내려줍니다. `questions` 는 필수라 저장 전 검증에서 걸립니다(아래)
+- 글로 된 단일 값(`summary` · `questions[].comment` · `companyComment`)은 키가 빠져도 null 로 내려줍니다
 - 원본에 모르는 키가 있어도 무시합니다
 - **모양은 저장 전에 확인합니다**(`AiReportResultReader.validate`). 점수만 맞고 나머지가 어긋난 결과를
   COMPLETED 로 저장하면 상세 조회는 계속 실패하는데 재요청은 FAILED 만 받으므로 빠져나올 길이
@@ -244,6 +249,56 @@ COMPLETED · PARTIAL 이면 부릅니다.
   `improved_answers`)은 비어 올 수 있어 보지 않습니다. 그래도 저장된 원본을 못
   읽으면 우리 DB 문제라 500 `INTERNAL_ERROR` 입니다
 - 폴링용이 아니라 분당 60회로 제한합니다(`@RateLimit`)
+
+---
+
+## 타임라인 · 개선 답변 (`GET /api/reports/{reportId}/timeline` · `/improvements`)
+
+둘 다 저장된 `report_data` 에서 꺼냅니다. **AI 를 다시 부르지 않습니다.** 상태 규칙(200 · 202 ·
+409 · 404)과 분당 60회 제한은 상세 조회와 같습니다.
+
+**되묻기 답변에서 나온 근거·발췌는 `questionId` 가 되묻기 ID(`q_1r`)** 인데, 문항(`questions[]`)은
+원 질문 기준입니다. 원 질문은 우리 `question.reask_of` 에만 있어 Backend 가 이어 줍니다(`ReportQuestions`).
+
+### 타임라인
+
+```json
+{ "reportId": "...", "status": "PARTIAL",
+  "axes": { "content": "ok", "speech": "ok", "gaze": "failed" },
+  "questions": [
+    { "questionId": "q_1", "questionNumber": 1, "questionText": "...", "durationSec": 46.2, "hadReask": true,
+      "evidence": [
+        { "axis": "content", "questionId": "q_1",  "isReask": false, "tStart": 12.4, "tEnd": 19.8, "kind": "weakness", "label": "근거 부족", "comment": "..." },
+        { "axis": "content", "questionId": "q_1r", "isReask": true,  "tStart": 3.1,  "tEnd": 8.0,  "kind": "strength", "label": "...", "comment": "..." } ] } ],
+  "resilience": { "score": 58, "display": 3, "comment": "..." },
+  "retry": null }
+```
+
+- 근거는 세 축(content · speech · gaze)을 **원 질문별로** 모읍니다. 한 문항 안에서는 원 답변 근거 →
+  되묻기 답변 근거 순, 각각 `tStart` 오름차순입니다
+- `tStart` · `tEnd` 는 **그 답변 오디오 기준 초** 그대로입니다. 한 줄 타임라인 위치는 프론트가 앞 문항들의
+  `durationSec` 를 더해 잡습니다
+- 문항은 AI `questions[]` 순서이고 **근거가 없는 문항도 들어갑니다.** 구간을 그려야 하기 때문입니다
+- `axes` 는 축 상태(AI 값 그대로)입니다. 근거 배열이 빈 이유(근거 없음 · `failed` · `skipped`)를 구분하려고 둡니다
+- `retry` 는 상세 조회와 같은 모양입니다. 재시도 중이면 그 축의 레인만 로딩으로 보입니다
+- 원 질문이 `questions[]` 에 없는 근거는 붙을 곳이 없어 빠집니다(정상이라면 없음). 빠지면 원인을 찾을 수 있게
+  `reportId` 와 근거의 `questionId` 를 warn 로그로 남깁니다
+- **`durationSec` 에 되묻기 답변 길이가 포함되는지는 AI 확인 필요.** 되묻기 근거의 한 줄 타임라인 위치가 여기에 달려 있습니다
+
+### 개선 답변
+
+```json
+{ "reportId": "...",
+  "improvedAnswers": [
+    { "questionId": "q_3r", "originalQuestionId": "q_3", "isReask": true, "questionNumber": 3, "questionText": "...",
+      "originalExcerpt": "...", "suggestion": "...", "tStart": 12.4, "tEnd": 19.8 } ] }
+```
+
+- AI `improved_answers[]` 순서(내용 점수가 낮은 문항부터, 최대 2개) 그대로입니다. 모두 잘 답했거나
+  생성에 실패하면 빈 배열이고 둘을 구분하지 않습니다
+- `questionId` 는 발췌한 답변(구간의 기준 오디오), `originalQuestionId` 는 문항 카드와 잇는 기준입니다
+- `questionNumber` · `questionText` 는 원 질문 것입니다. 질문을 못 찾으면 둘 다 null
+- PARTIAL 이어도 나옵니다. 내용 축이 실패하면 리포트가 FAILED 라 PARTIAL 은 늘 내용 축이 성공한 리포트입니다
 
 ---
 
@@ -328,15 +383,62 @@ PARTIAL 리포트에서 **실패한 축(말하기·시선)만** 다시 분석합
 
 ---
 
-## 아직 없는 것
+## 회차 비교 · 성장 추이 (`GET /api/reports/{reportId}/comparison`)
 
-| 기능 | 비고 |
+같은 1회차에서 시작한 회차(1회차 + 재면접)를 **이 리포트의 회차까지** AI(`POST /ai/reports/compare`)에 보내
+비교합니다. 3회차 리포트에서 부르면 1~3회차입니다. AI 는 리포트를 보관하지 않아 고른 회차의 `report_data` 를
+회차 오름차순으로 모아 보냅니다. 세션 · 리포트를 함께 읽어 코드는 `growth` 에 둡니다(`ReportComparisonService`).
+
+### 비교할 회차
+
+| 대상 | 포함 |
 |---|---|
-| 회차 비교 (`/ai/reports/compare`) | 전체 회차의 `report_data` 를 함께 보냄 |
+| 이 리포트의 세션보다 **늦게 시작한** 회차 | X |
+| 중단(`ABORTED`)된 재면접 | X. 회차로 세지도 않음 |
+| 리포트가 `COMPLETED` · `PARTIAL` | O. 실패 축 재시도 중인 PARTIAL 도 지금 결과 그대로 |
+| 리포트가 없거나 `PROCESSING` · `FAILED` | X. 회차 번호는 그대로 둠 |
 
-### 회차 비교 규칙 (계약 8장)
+- `round` 는 연습 기록 목록의 회차와 같은 번호이고(`InterviewSessionQueryService.roundsUpTo`) **다시 매기지
+  않습니다.** 2회차 리포트가 없으면 `[1, 3]` 으로 보냅니다. 1회차는 꼭 1 이어야 AI 가 재면접 문항과 짝을 맞춥니다
+- 이 리포트 하나뿐이어도 AI 를 부릅니다. `vsPrevious` 가 null, `byQuestion` 이 빈 배열입니다(오류 아님)
+- 문항 비교는 `is_replay` 인 주질문만이고 AI 가 거릅니다([`12-replay.md`](./12-replay.md)). **질문 ID 는 회차마다
+  같습니다.** 재면접이 1회차 `replay_log` 순서를 그대로 재생하기 때문입니다. 그래서 `questionText` 는 이 리포트
+  세션의 `question` 에서 찾습니다
 
-- 비교 대상은 `is_replay == true` 인 질문뿐입니다. `is_spare_topic` 으로 거르지 않습니다.
-  [`12-replay.md`](./12-replay.md)
-- 점수 비교는 **직전 회차 기준**, 회차 수 제한 없음
-- `PARTIAL` 회차는 총점 비교에서 빠지고(스케일이 다름) 성공한 축만 비교합니다
+### 응답
+
+```json
+{ "reportId": "...", "latestRound": 3, "comparedRounds": [1, 2, 3], "partialRounds": [2],
+  "rounds": [ { "round": 1, "reportId": "...", "status": "COMPLETED", "createdAt": "2026-10-01T10:00:00Z" } ],
+  "vsPrevious": { "fromRound": 2, "toRound": 3, "overallDelta": null, "axisDelta": { "content": 6, "speech": 3, "gaze": null },
+                  "improved": ["q_1"], "declined": ["q_3"], "unchanged": [], "comment": "..." },
+  "trend": { "overall": [68, null, 74], "axes": { "content": [70, 72, 78], "speech": [61, 60, 63], "gaze": [55, null, 58] },
+             "comment": "...", "stalledAxes": [], "bestRound": 3 },
+  "byQuestion": [ { "questionId": "q_1", "questionText": "...", "category": "지원동기", "scores": [62, 70, 75],
+                    "deltaFromPrevious": 5, "deltaFromFirst": 13, "comment": "..." } ] }
+```
+
+- AI 응답의 키만 camelCase 로 옮기고 `rounds` 와 `questionText` 를 붙입니다. AI 의 `by_question[].text` 는
+  "1번 지원동기" 같은 자리표시라 **내보내지 않습니다.** 「N회차 vs M회차」는 `toRound` vs `fromRound` 입니다
+- 배열의 n번째 값은 `comparedRounds` 의 n번째 회차입니다. **null 과 0 은 다릅니다.** 부분 리포트 회차의
+  `trend.overall`, 실패 · 미사용 축, 한쪽이 없는 변화량이 null 입니다. `byQuestion[].scores` 에는 null 이 없고,
+  한 회차라도 없는 문항은 통째로 빠집니다
+- `deltaFromFirst` 는 비교한 첫 회차 기준입니다(1회차 리포트가 없으면 첫 재면접). 배열 키가 빠져 오면 빈 배열입니다
+
+### 상태와 오류
+
+| 상황 | 응답 |
+|---|---|
+| COMPLETED · PARTIAL | 200 |
+| PROCESSING · FAILED | 202 `REPORT_NOT_READY` · 409 `REPORT_FAILED` (상세 조회와 같은 규칙) |
+| 없는 것 · 남의 것 · UUID 가 아닌 값 | 404 `REPORT_NOT_FOUND` |
+| AI 응답을 읽을 수 없음 · `trend` 가 없음 · `compared_rounds` 가 보낸 회차와 다름 · AI 가 거절 | 502 `UNEXPECTED_AI_RESPONSE` |
+| AI 연결 실패 · 응답 지연 | 503 `AI_UNAVAILABLE` · 504 `AI_TIMEOUT` |
+
+- **AI 가 준 오류 코드와 문구는 내려주지 않고 로그에만 남깁니다.** 요청은 Backend 가 조립하므로 AI 의 400 도
+  사용자 잘못이 아니라 502 이고, 문구는 `ErrorCode` 기본 문구입니다
+- `compared_rounds` 가 보낸 회차와 다르면 그래프 점에 다른 회차의 리포트를 걸게 되므로 내보내지 않습니다
+- **결과를 저장하지 않고 부를 때마다 계산합니다.** AI 는 LLM 없이 점수 변화로 코멘트를 만들어 같은 입력이면 같은
+  결과이고 10회차 기준 약 4ms 입니다. 타임아웃은 공통 `read-timeout`(10초)이고 소요 시간을 로그로 남깁니다
+- AI 호출은 트랜잭션 밖입니다. 리포트와 회차는 엔티티가 아니라 값(`FinishedReport` · `SessionRound`)으로 받습니다
+- 분당 10회로 제한합니다(`@RateLimit`)

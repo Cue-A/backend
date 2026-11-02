@@ -49,6 +49,8 @@ AI 결과를 `report.report_data` 에 원본 그대로 저장하므로 기다릴
 | 폴링 주체 | Spring | `00-architecture.md` |
 | 타임아웃 | 세션 시작 90초 / 답변 60초 | `10-ai-client.md` |
 | 재연습 데이터 전달 | `replay_log` 배열. 진실 소스는 백엔드 DB | `12-replay.md` |
+| 재연습 옵션 고정 정책 (Issue #26, PR #78) | **팀 확정.** 이력서·기업·직무·문항 수·면접관 스타일은 최초 세션 값으로 **고정**. 재면접 요청에서 하나라도 다르면 `INVALID_REQUEST`(400)로 **거부**(일반 면접 자동 전환 안 함). 질문 텍스트 숨김·타이머는 변경 허용. 3회차 이상도 최초 root 기준. 재연습용 옵션 조회 API 는 Issue #83 으로 구현(`GET /api/interviews/{sessionId}/replay-options`) | `12-replay.md` |
+| 답변 제한 시간 저장·조회 (Issue #99, PR #100) | **팀 확정.** 허용값 `60`·`90`·`120`·`null`(제한 없음)·그 외 `INVALID_REQUEST`(400)·기존 `session.duration_limit` 재사용(스키마 변경 없음)·`interviewerStyle` 응답 소문자(`friendly`·`pressure`). **필드 누락과 명시적 `null` 을 구별합니다**(PR #100 리뷰 R3 반영): ① 필드 누락 → 프론트 기본 선택값과 같은 **기본값 90초** 적용, ② 명시적 `null` → 사용자가 고른 **"제한 없음"**(기본값 미적용, `duration_limit=null` 저장). 두 경우 구분은 요청 역직렬화 경계의 3상태 래퍼 `AnswerTimeLimit`(absent/null/present) 로 처리(새 의존성 없이 Jackson 의 absent/null 콜백만 사용). 과거 `duration_limit=null` 세션은 계속 "제한 없음"으로 해석(마이그레이션 없음). 판정·기본값 적용은 `InterviewStartService` 가 수행 | `11-interview.md` |
 | 가상 경쟁자 (다대다 면접) | **MVP 범위에서 제외.** 구현하지 않습니다 | — |
 | 꼬리질문 `difficulty` | 포함 필수 | `12-replay.md` |
 | `retry_of_session_id` | 항상 최초 세션 | `12-replay.md` |
@@ -83,5 +85,4 @@ AI 결과를 `report.report_data` 에 원본 그대로 저장하므로 기다릴
 | 항목 | 상태 | 참고 |
 |---|---|---|
 | 첫 질문 push 유실 | 미해결. 백그라운드 폴링이 WebSocket 핸드셰이크보다 먼저 끝나면 첫 질문 push 가 수신자 없이 드롭될 수 있음. pending 버퍼/catch-up 엔드포인트 미구현 | Issue #3/#35, `11-interview.md` |
-| 재연습(replay) | MVP 이후 별도 작업. 미구현 | Issue #26, `12-replay.md` |
 | 리포트 실패 축 재시도 횟수 상한 | 미정. 계약 14장에 상한이 없음. 시선 재시도는 GPU 를 오래 써서 무한 재시도는 AI 서버 비용 위험. **AI 파트와 논의 필요.** 정해지기 전까지 분당 10회 호출 제한만 둠 | `13-report.md` |

@@ -5,7 +5,6 @@ import com.cuea.domain.company.entity.ValuesFormat;
 import io.swagger.v3.oas.annotations.media.Schema;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * 기업 상세 화면이 쓰는 한 건. 목록 응답({@link CompanyResponse})과 달리
@@ -48,10 +47,11 @@ public record CompanyDetailResponse(
      * 핵심 가치 한 항목. 화면에서 바로 쓰도록 구조화합니다.
      *
      * <p>엔티티의 {@code coreValues} 는 {@code [{"name": ..., "indicator": "..."}]}
-     * 형태의 jsonb 입니다({@code List<Map<String,Object>>}). 화면용으로는 키를
-     * 꺼내 정해진 필드로 옮깁니다. AI 프롬프트 조립용 {@code CompanyProfileFormatter}
-     * 는 문자열("가치 이름 — 행동지표")을 만드는 다른 용도라 여기서 재사용하지
-     * 않습니다(Issue #87).
+     * 형태의 jsonb 입니다. 키 추출·파싱은 {@link Company#coreValueList()} 한 곳에서
+     * 하고, 여기서는 그 결과({@link Company.CoreValue})를 화면용 필드로 옮기기만
+     * 합니다. AI 프롬프트 조립용 {@code CompanyProfileFormatter} 도 같은
+     * {@link Company#coreValueList()} 를 쓰되, 문자열("가치 이름 — 행동지표")로
+     * 만드는 다른 용도라 이 DTO 를 재사용하지 않습니다(Issue #87).
      */
     @Schema(description = "핵심 가치 항목")
     public record CoreValue(
@@ -64,33 +64,19 @@ public record CompanyDetailResponse(
     ) {
     }
 
-    private static final String NAME_KEY = "name";
-    private static final String INDICATOR_KEY = "indicator";
-
     public static CompanyDetailResponse from(Company company) {
         return new CompanyDetailResponse(
                 company.getCompanyId(),
                 company.getCompanyName(),
                 company.getIndustry(),
                 company.getValuesFormat(),
-                toCoreValues(company.getCoreValues()),
+                toCoreValues(company),
                 company.getTalentProfile());
     }
 
-    private static List<CoreValue> toCoreValues(List<Map<String, Object>> raw) {
-        if (raw == null) {
-            return List.of();
-        }
-        return raw.stream()
-                .map(CompanyDetailResponse::toCoreValue)
+    private static List<CoreValue> toCoreValues(Company company) {
+        return company.coreValueList().stream()
+                .map(cv -> new CoreValue(cv.name(), cv.indicator()))
                 .toList();
-    }
-
-    private static CoreValue toCoreValue(Map<String, Object> value) {
-        return new CoreValue(stringOrNull(value.get(NAME_KEY)), stringOrNull(value.get(INDICATOR_KEY)));
-    }
-
-    private static String stringOrNull(Object value) {
-        return value == null ? null : value.toString();
     }
 }

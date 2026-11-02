@@ -51,6 +51,10 @@ class UserCompanyInterestRepositoryTest extends PostgresRepositoryTest {
     }
 
     private Company company(String name) {
+        return companyWithVerified(name, true);
+    }
+
+    private Company companyWithVerified(String name, boolean verified) {
         return Company.builder()
                 .companyName(name)
                 .industry("반도체/메모리")
@@ -58,8 +62,21 @@ class UserCompanyInterestRepositoryTest extends PostgresRepositoryTest {
                 .coreValues(List.of(Map.of("name", "도전", "indicator", "두려워하지 않는다.")))
                 .sourceUrl(List.of("https://example.com"))
                 .collectedOn(LocalDate.of(2026, 8, 19))
-                .verified(true)
+                .verified(verified)
                 .build();
+    }
+
+    /**
+     * 엔티티에 verified 세터가 없어(상태 변경을 메서드로만 노출) 테스트에서는 DB 를
+     * 직접 갱신하고 1차 캐시를 비운다. "수집 배치가 검증 상태를 바꾼다"는 상황을 흉내.
+     */
+    private void setVerified(Company company, boolean verified) {
+        em.getEntityManager()
+                .createQuery("update Company c set c.verified = :v where c.companyId = :id")
+                .setParameter("v", verified)
+                .setParameter("id", company.getCompanyId())
+                .executeUpdate();
+        em.clear();
     }
 
     private int insert(User user, Company company) {
@@ -162,5 +179,45 @@ class UserCompanyInterestRepositoryTest extends PostgresRepositoryTest {
         int deleted = interestRepository.deleteByUser_UserIdAndCompany_CompanyId(me.getUserId(), companyA.getCompanyId());
 
         assertThat(deleted).isZero();
+    }
+
+    @Test
+    void 목록은_verified_true_기업만_반환한다() {
+        Company unverified = em.persist(companyWithVerified("미검증기업", false));
+        em.flush();
+
+        insert(me, companyA);    // verified=true
+        insert(me, unverified);  // verified=false
+
+        // verified=false 기업은 목록에서 숨고, verified=true 만 남는다.
+        assertThat(interestRepository.findByUser_UserIdOrderByCreatedAtDesc(me.getUserId()))
+                .extracting(uci -> uci.getCompany().getCompanyName())
+                .containsExactly("가나기업");
+    }
+
+    @Test
+    void 미검증_기업은_목록에서_숨어도_관심_행은_남는다() {
+        insert(me, companyA);
+        setVerified(companyA, false);
+
+        // 목록에는 안 보인다.
+        assertThat(interestRepository.findByUser_UserIdOrderByCreatedAtDesc(me.getUserId())).isEmpty();
+        // 하지만 UserCompanyInterest 행 자체는 삭제되지 않았다.
+        assertThat(interestRepository.existsByUser_UserIdAndCompany_CompanyId(me.getUserId(), companyA.getCompanyId()))
+                .isTrue();
+    }
+
+    @Test
+    void 다시_verified_true_가_되면_관심_목록에_다시_나타난다() {
+        insert(me, companyA);
+
+        setVerified(companyA, false);
+        assertThat(interestRepository.findByUser_UserIdOrderByCreatedAtDesc(me.getUserId())).isEmpty();
+
+        // 수집 배치가 다시 검증하면(verified=true) 담아둔 관심이 그대로 돌아온다.
+        setVerified(companyA, true);
+        assertThat(interestRepository.findByUser_UserIdOrderByCreatedAtDesc(me.getUserId()))
+                .extracting(uci -> uci.getCompany().getCompanyName())
+                .containsExactly("가나기업");
     }
 }

@@ -54,7 +54,13 @@ public class CompanyInterestService {
         interestRepository.insertIfAbsent(userId, companyId);
     }
 
-    /** 내 관심 기업 목록. 등록 최신순. 없으면 빈 목록입니다. */
+    /**
+     * 내 관심 기업 목록. 등록 최신순. 없으면 빈 목록입니다.
+     *
+     * <p>{@code verified=true} 기업만 돌려줍니다. 미검증 기업은 목록에서 숨기되
+     * 관심 행은 지우지 않으므로, 다시 {@code verified=true} 가 되면 그대로 돌아옵니다
+     * (필터는 {@link UserCompanyInterestRepository} 쿼리에 있음).
+     */
     @Transactional(readOnly = true)
     public List<CompanyInterestResponse> list(String userId) {
         return interestRepository.findByUser_UserIdOrderByCreatedAtDesc(userId).stream()

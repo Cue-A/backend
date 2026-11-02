@@ -110,6 +110,27 @@ class CompanyInterestServiceIntegrationTest extends PostgresRepositoryTest {
         assertThat(countInterests()).isZero();
     }
 
+    @Test
+    @Transactional(propagation = Propagation.NOT_SUPPORTED)
+    void 목록은_미검증이_되면_숨기지만_관심_행은_남기고_재검증되면_다시_보인다() {
+        // verified=true 로 등록해 둔다.
+        service.register(userId, verifiedCompanyId);
+        assertThat(service.list(userId))
+                .extracting(r -> r.companyId())
+                .containsExactly(verifiedCompanyId);
+
+        // 수집 배치가 검증을 내린다(verified=false). 목록에서는 숨지만 행은 남아야 한다.
+        jdbc.update("update company set verified = false where company_id = ?", verifiedCompanyId);
+        assertThat(service.list(userId)).isEmpty();
+        assertThat(countInterests()).isEqualTo(1); // UserCompanyInterest 행은 삭제되지 않았다
+
+        // 다시 검증되면(verified=true) 담아둔 관심이 그대로 돌아온다.
+        jdbc.update("update company set verified = true where company_id = ?", verifiedCompanyId);
+        assertThat(service.list(userId))
+                .extracting(r -> r.companyId())
+                .containsExactly(verifiedCompanyId);
+    }
+
     private long countInterests() {
         Long n = jdbc.queryForObject(
                 "select count(*) from user_company_interest where user_id = ?", Long.class, userId);

@@ -52,13 +52,19 @@ public interface UserCompanyInterestRepository extends Repository<UserCompanyInt
      * <p>{@code company} 를 {@code join fetch} 로 함께 가져와 목록 DTO 변환에서
      * N+1 이 나지 않게 합니다({@code company.companyName} 을 바로 읽습니다).
      *
-     * <p>이미 등록한 기업이 나중에 {@code verified=false} 가 돼도 목록에서는 그대로
-     * 보여줍니다. 사용자가 담아둔 관심을 조용히 지우지 않습니다. 등록 시점에만
-     * {@code verified=true} 를 요구합니다.
+     * <p><b>{@code verified=true} 기업만 돌려줍니다.</b> 미검증 기업은 서비스 전반에서
+     * 노출하지 않는 정책(Issue #85, {@code docs/10-ai-client.md} verified 필터)과
+     * 맞추고, 목록에서 눌렀을 때 상세가 {@code COMPANY_NOT_FOUND}(404) 로 어긋나는
+     * 것을 막습니다.
+     *
+     * <p>필터는 조회에만 겁니다. <b>{@code UserCompanyInterest} 행 자체는 지우지
+     * 않습니다.</b> 사용자가 담아둔 관심을 조용히 삭제하지 않으며, 기업이 다시
+     * {@code verified=true} 로 돌아오면 그대로 목록에 다시 나타납니다. 등록 시점에도
+     * {@code verified=true} 를 요구합니다(숨김은 표시에서만).
      */
     @Query("select uci from UserCompanyInterest uci"
-            + " join fetch uci.company"
-            + " where uci.user.userId = :userId"
+            + " join fetch uci.company c"
+            + " where uci.user.userId = :userId and c.verified = true"
             + " order by uci.createdAt desc, uci.id desc")
     List<UserCompanyInterest> findByUser_UserIdOrderByCreatedAtDesc(@Param("userId") String userId);
 

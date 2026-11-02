@@ -8,13 +8,16 @@ import com.cuea.domain.interview.dto.request.AnswerUploadUrlRequest;
 import com.cuea.domain.interview.dto.request.InterviewStartRequest;
 import com.cuea.domain.interview.dto.response.AnswerUploadUrlResponse;
 import com.cuea.domain.interview.dto.response.InterviewStartResponse;
+import com.cuea.domain.interview.dto.response.ReplaySessionOptionsResponse;
 import com.cuea.domain.interview.service.InterviewAnswerService;
 import com.cuea.domain.interview.service.InterviewStartService;
+import com.cuea.domain.interview.service.ReplaySessionOptionsService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -38,17 +41,45 @@ public class InterviewController {
 
     private final InterviewStartService interviewStartService;
     private final InterviewAnswerService interviewAnswerService;
+    private final ReplaySessionOptionsService replaySessionOptionsService;
 
     @Operation(summary = "면접 세션 시작",
             description = "Document/Company 조회 → AI 세션 생성(session_id·task_id) 까지 동기로 처리하고 "
                     + "즉시 202 로 응답합니다. 첫 질문은 백그라운드 폴링 후 WebSocket 으로 전달됩니다. "
-                    + "문서는 status=READY 여야 하고(파일·마크다운 모두 가능), 기업을 선택했다면 verified=true 여야 합니다.")
+                    + "문서는 status=READY 여야 하고(파일·마크다운 모두 가능), 기업을 선택했다면 verified=true 여야 합니다. "
+                    + "sourceSessionId 를 주면 그 세션의 최초 세션을 기준으로 재면접(replay)을 시작합니다. "
+                    + "재면접은 최초 세션과 같은 조건으로만 가능하며, 문항 수·페르소나·이력서·기업·직무가 하나라도 "
+                    + "다르면 400 으로 거부합니다(일반 면접으로 자동 전환하지 않습니다). 질문 텍스트 숨김·타이머는 "
+                    + "변경할 수 있습니다. 정상 재면접이면 응답의 replayApplied=true, 일반 면접이면 false 입니다.")
     @PostMapping
     @ResponseStatus(HttpStatus.ACCEPTED)
     @RateLimit(key = "session-start", limit = 10, windowSeconds = 60)
     public Result<InterviewStartResponse> start(@CurrentUser String userId,
                                                  @Valid @RequestBody InterviewStartRequest request) {
         return Result.ok(interviewStartService.start(userId, request));
+    }
+
+    @Operation(summary = "재연습용 세션 옵션 조회",
+            description = "재연습을 시작하기 전에 최초(root) 세션의 고정 옵션을 조회합니다. "
+                    + "Authorization: Bearer <accessToken> 필요. "
+                    + "경로의 sessionId 에는 재연습하려는 1·2·3회차 등 어느 회차의 세션 ID 를 넣어도 되며, "
+                    + "응답은 항상 그 묶음의 최초 세션 옵션입니다(2·3회차 ID 로 조회해도 1회차 값 반환). "
+                    + "AI 서버를 호출하지 않고 저장된 세션 정보만 읽습니다. "
+                    + "응답의 고정 옵션 5개(documentId·companyId·jobRole·questionCount·persona)를 그대로 "
+                    + "POST /api/interviews 에 실으면 재연습 옵션 비교를 통과합니다. "
+                    + "존재하지 않거나 다른 사용자의 세션이면 404(SESSION_NOT_FOUND), 완료되지 않은 세션이면 "
+                    + "409(SESSION_NOT_COMPLETED) 입니다. 기업을 고르지 않은 연습 모드 세션은 companyId·companyName 이 "
+                    + "null 인 정상 응답입니다. 삭제된 문서·미검증 기업이 연결돼 있어도 조회는 저장된 옵션을 그대로 "
+                    + "반환하며, 실제 재연습 시작 가능 여부는 시작 API 가 판정합니다. "
+                    + "응답의 replayable·replayBlockReasons 로 지금 이 조건에서 재연습을 시작할 수 있는지 미리 알 수 "
+                    + "있습니다(참고 정보). 삭제된 이력서(DOCUMENT_DELETED)나 미검증 기업(COMPANY_UNVERIFIED)이 "
+                    + "연결돼 있으면 replayable=false 와 사유가 내려가고, 두 조건이 겹치면 사유가 둘 다 담깁니다. "
+                    + "재연습 옵션은 변경할 수 없으므로 프론트는 경고 문구 표시·시작 버튼 비활성화에 활용합니다.")
+    @GetMapping("/{sessionId}/replay-options")
+    @RateLimit(key = "replay-options", limit = 60, windowSeconds = 60)
+    public Result<ReplaySessionOptionsResponse> getReplayOptions(@CurrentUser String userId,
+                                                                 @PathVariable String sessionId) {
+        return Result.ok(replaySessionOptionsService.getReplayOptions(userId, sessionId));
     }
 
     @Operation(summary = "답변 업로드 URL 발급",

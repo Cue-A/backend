@@ -3,6 +3,7 @@ package com.cuea.domain.interview.service;
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.document.entity.Document;
+import com.cuea.domain.interview.dto.request.AnswerTimeLimit;
 import com.cuea.domain.interview.dto.request.InterviewStartRequest;
 import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.interview.entity.Persona;
@@ -332,7 +333,7 @@ class InterviewSessionWriterTest {
     private InterviewStartRequest startRequest(Boolean hideQuestionText) {
         return new InterviewStartRequest(
                 "11111111-1111-1111-1111-111111111111", null, "백엔드", Persona.FRIENDLY, 6,
-                hideQuestionText, null, null);
+                hideQuestionText, AnswerTimeLimit.ABSENT, null);
     }
 
     private AiSessionStartResponse aiStartResponse() {

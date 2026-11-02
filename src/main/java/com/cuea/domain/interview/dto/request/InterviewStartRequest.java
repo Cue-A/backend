@@ -22,11 +22,17 @@ import jakarta.validation.constraints.Size;
  * @param answerTimeLimitSec 질문 1개당 답변 제한 시간(초). 허용값은 {@code 60}·{@code 90}·
  *                         {@code 120}·{@code null} 이며, 그 외 값은 {@code INVALID_REQUEST}(400)로
  *                         거부합니다(판정은 {@code InterviewStartService}). {@code null} 은 제한 없음을
- *                         뜻하며 DB {@code duration_limit} 에 null 로 저장합니다. 필드를 보내지 않은
- *                         경우(필드 누락)와 명시적 {@code null} 은 Jackson 역직렬화상 구별되지 않아
- *                         <b>둘 다 "제한 없음(null)"</b>으로 처리합니다. 백엔드는 기본값(90초)을
- *                         적용하지 않으며, 기본값은 프론트 UI 선택값으로 요청에 실려 옵니다.
- *                         {@code hideQuestionText} 와 같은 관례(누락/null 미구분)를 따릅니다.
+ *                         뜻하며 DB {@code duration_limit} 에 null 로 저장합니다.
+ *                         <p><b>필드 누락과 명시적 {@code null} 을 구분합니다</b>(Issue #99 R3).
+ *                         <ul>
+ *                           <li>필드 누락 → 프론트 기본 선택값과 같은 <b>90초</b>를 적용해 저장</li>
+ *                           <li>명시적 {@code null} → 사용자가 고른 <b>"제한 없음"</b>(null 저장)</li>
+ *                         </ul>
+ *                         record + {@code Integer} 만으로는 두 경우가 구분되지 않으므로 전용 3상태
+ *                         래퍼 {@link AnswerTimeLimit} 로 받습니다(새 의존성 없이 Jackson 의
+ *                         absent/null 콜백만 사용). 응답·엔티티·DB 는 그대로 {@code Integer}(제한
+ *                         없음이면 null)를 쓰며 기존 계약을 바꾸지 않습니다. 기본값 적용·허용값
+ *                         검증은 모두 {@code InterviewStartService} 가 합니다.
  * @param sourceSessionId  재면접(replay) 대상 세션의 식별자. null 이면 일반 면접입니다.
  *                         값이 있으면 그 세션의 최초 root 세션을 기준으로 재면접을
  *                         구성합니다. 식별자 타입은 기존 세션 ID 와 같은 문자열입니다.
@@ -52,7 +58,11 @@ public record InterviewStartRequest(
 
         Boolean hideQuestionText,
 
-        Integer answerTimeLimitSec,
+        @io.swagger.v3.oas.annotations.media.Schema(
+                type = "integer", nullable = true, example = "90",
+                description = "질문 1개당 답변 제한 시간(초). 60·90·120 또는 제한 없음(null). "
+                        + "필드 누락 시 기본값 90, 명시적 null 은 제한 없음")
+        AnswerTimeLimit answerTimeLimitSec,
 
         String sourceSessionId
 ) {

@@ -86,16 +86,19 @@ Backend 이며 `verified=false` 기업은 조회 자체에서 제외합니다.
 > 표시 방식만 바꾸므로 AI 세션 시작 요청에는 포함하지 않습니다.
 
 > **답변 제한 시간도 프론트 → Backend REST 요청 전용입니다(Issue #99).** `POST /api/interviews`
-> 요청 본문에 선택값 `answerTimeLimitSec`(Integer)를 받습니다. 허용값은 `60`·`90`·`120`·`null`
+> 요청 본문에 선택값 `answerTimeLimitSec` 를 받습니다. 허용값은 `60`·`90`·`120`·`null`
 > 이며(프론트 프리셋과 일치), `null` 은 "제한 없음"을 뜻합니다. 그 외 값은 AI 호출·세션 저장
 > 전에 `INVALID_REQUEST`(400)로 거부합니다(`question_count` 화이트리스트와 같은 방식). 저장
 > 컬럼은 기존 `session.duration_limit`(nullable)을 그대로 씁니다(스키마 변경 없음).
 >
-> 필드를 보내지 않은 경우(누락)와 명시적 `null` 은 Jackson 역직렬화상 구별되지 않아 **둘 다
-> "제한 없음(null)"**으로 저장합니다. `hideQuestionText` 와 같은 관례입니다. **백엔드는 기본값
-> (90초)을 적용하지 않습니다.** 기본값은 프론트 UI 선택값(`DEFAULT_ANSWER_SECONDS=90`)으로
-> 요청에 실려 오므로, 정상 신규 클라이언트는 항상 60·90·120·null 중 하나를 명시적으로
-> 보냅니다. 타이머는 UI 표시 설정이라 AI 세션 시작 요청에는 포함하지 않으며, 서버가 타이머를
+> **필드 누락과 명시적 `null` 을 구분합니다(Issue #99 R3).** 프론트 화면 기본 선택값이 90초라,
+> 필드를 보내지 않으면(누락) 백엔드가 기본값 **90초**를 적용해 저장하고, 사용자가 직접 고른
+> **"제한 없음"**(명시적 `null`)은 그대로 `null` 로 저장합니다. record + `Integer` 만으로는 두
+> 경우가 Jackson 역직렬화상 구별되지 않으므로, 요청 역직렬화 경계에서 3상태 래퍼
+> `AnswerTimeLimit`(ABSENT/UNLIMITED/값)로 받아 구분합니다(새 의존성 없이 Jackson 의
+> absent/null 콜백만 사용). 응답·엔티티·DB 는 그대로 `Integer`(제한 없음이면 `null`)를 쓰며
+> 기존 계약을 바꾸지 않습니다. 기존 `duration_limit=null` 세션도 그대로 제한 없음으로
+> 해석합니다. 타이머는 UI 표시 설정이라 AI 세션 시작 요청에는 포함하지 않으며, 서버가 타이머를
 > 직접 실행하거나 자동 제출하지도 않습니다(저장·반환만 담당).
 
 > **시작 응답에 확정 옵션이 함께 내려갑니다(Issue #99).** `POST /api/interviews` 응답

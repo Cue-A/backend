@@ -1,5 +1,6 @@
 package com.cuea.domain.interview.dto;
 
+import com.cuea.domain.interview.dto.request.AnswerTimeLimit;
 import com.cuea.domain.interview.dto.request.InterviewStartRequest;
 import com.cuea.domain.interview.dto.response.InterviewSessionOptionsResponse;
 import com.cuea.domain.interview.entity.InterviewSession;
@@ -26,7 +27,7 @@ class InterviewOptionsJsonContractTest {
     private final ObjectMapper mapper = Jackson2ObjectMapperBuilder.json().build();
 
     @Test
-    void 요청_JSON_의_answerTimeLimitSec_가_Integer_로_역직렬화된다() throws Exception {
+    void 요청_JSON_의_answerTimeLimitSec_가_값으로_역직렬화된다() throws Exception {
         String json = """
                 {"documentId":"11111111-1111-1111-1111-111111111111","companyId":null,
                  "jobRole":"백엔드 개발","persona":"PRESSURE","questionCount":6,
@@ -35,13 +36,18 @@ class InterviewOptionsJsonContractTest {
 
         InterviewStartRequest req = mapper.readValue(json, InterviewStartRequest.class);
 
-        assertThat(req.answerTimeLimitSec()).isEqualTo(90);
+        // 값이 있으면 PRESENT 상태로 그 값을 담는다.
+        assertThat(req.answerTimeLimitSec().hasValue()).isTrue();
+        assertThat(req.answerTimeLimitSec().value()).isEqualTo(90);
+        assertThat(req.answerTimeLimitSec().isAbsent()).isFalse();
+        assertThat(req.answerTimeLimitSec().isExplicitUnlimited()).isFalse();
         assertThat(req.hideQuestionText()).isTrue();
         assertThat(req.persona()).isEqualTo(Persona.PRESSURE);
     }
 
     @Test
-    void 요청_JSON_에_answerTimeLimitSec_명시_null_도_필드_누락도_모두_null_로_역직렬화된다() throws Exception {
+    void 요청_JSON_의_필드_누락과_명시적_null_은_서로_다른_상태로_역직렬화된다() throws Exception {
+        // Issue #99 R3: 누락과 명시적 null 을 구분해야 기본값(90) 적용과 "제한 없음"을 가른다.
         String explicitNull = """
                 {"documentId":"d","jobRole":"백엔드","persona":"FRIENDLY","answerTimeLimitSec":null}
                 """;
@@ -49,9 +55,17 @@ class InterviewOptionsJsonContractTest {
                 {"documentId":"d","jobRole":"백엔드","persona":"FRIENDLY"}
                 """;
 
-        // record + Jackson 에서는 두 경우가 구별되지 않는다(둘 다 null). 정책의 전제.
-        assertThat(mapper.readValue(explicitNull, InterviewStartRequest.class).answerTimeLimitSec()).isNull();
-        assertThat(mapper.readValue(omitted, InterviewStartRequest.class).answerTimeLimitSec()).isNull();
+        // 명시적 null → UNLIMITED(사용자가 고른 "제한 없음").
+        AnswerTimeLimit fromNull = mapper.readValue(explicitNull, InterviewStartRequest.class).answerTimeLimitSec();
+        assertThat(fromNull.isExplicitUnlimited()).isTrue();
+        assertThat(fromNull.isAbsent()).isFalse();
+        assertThat(fromNull.hasValue()).isFalse();
+
+        // 필드 누락 → ABSENT(서비스가 기본값 90 적용).
+        AnswerTimeLimit fromOmitted = mapper.readValue(omitted, InterviewStartRequest.class).answerTimeLimitSec();
+        assertThat(fromOmitted.isAbsent()).isTrue();
+        assertThat(fromOmitted.isExplicitUnlimited()).isFalse();
+        assertThat(fromOmitted.hasValue()).isFalse();
     }
 
     @Test

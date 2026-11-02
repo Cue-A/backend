@@ -4,6 +4,7 @@ import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.company.entity.Company;
 import com.cuea.domain.document.entity.Document;
+import com.cuea.domain.interview.dto.request.AnswerTimeLimit;
 import com.cuea.domain.interview.dto.request.InterviewStartRequest;
 import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.interview.entity.Persona;
@@ -69,7 +70,8 @@ class ReplayOptionPolicyTest {
                                           Persona persona, Integer questionCount,
                                           Boolean hideQuestionText) {
         return new InterviewStartRequest(
-                documentId, companyId, jobRole, persona, questionCount, hideQuestionText, "sess_root");
+                documentId, companyId, jobRole, persona, questionCount, hideQuestionText,
+                AnswerTimeLimit.ABSENT, "sess_root");
     }
 
     @Test

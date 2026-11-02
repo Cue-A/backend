@@ -56,7 +56,7 @@ STT, LLM, TTS, 시선 분석은 전부 별도 Python AI 서버에서 처리하�
 | 면접 세션, 질문·답변 | `docs/11-interview.md` |
 | 재연습 | `docs/12-replay.md` |
 | 리포트, 성장 추적 | `docs/13-report.md` |
-| 연습 기록 목록 | `docs/14-record.md` |
+| 연습 기록 목록, 폴더 | `docs/14-record.md` |
 | 파일 업로드, S3 | `docs/20-storage.md` |
 | 배포, 실제 S3·AI 전환 | `docs/30-deploy.md` |
 | 결정되지 않은 것 확인 | `docs/90-open-questions.md` |

@@ -216,6 +216,34 @@ class ReportRepositoryTest extends PostgresRepositoryTest {
         assertThat(reportRepository.findSummaries("someone-else", List.of(sessionId))).isEmpty();
     }
 
+    /** 회차 비교용. 원본(jsonb)까지 읽고, 세션을 함께 가져와 트랜잭션 밖에서도 세션 ID 를 꺼낼 수 있습니다. */
+    @Test
+    void 세션들의_리포트를_상태로_걸러_원본까지_준다() {
+        Report partial = partialReport(1, null, null);
+        InterviewSession failedSession = em.persist(InterviewSession.builder()
+                .sessionId("sess_" + UUID.randomUUID()).user(session.getUser()).document(session.getDocument())
+                .mode("PRACTICE").jobRole("백엔드").questionCount(6)
+                .persona(Persona.FRIENDLY).hideQuestionText(false)
+                .status(SessionStatus.COMPLETED).build());
+        Report failed = Report.processing(failedSession, "task_1");
+        failed.fail("AI_TIMEOUT");
+        em.persistFlushFind(failed);
+        em.clear();
+        String ownerId = session.getUser().getUserId();
+        List<String> sessionIds = List.of(session.getSessionId(), failedSession.getSessionId());
+
+        List<Report> finished = reportRepository.findAllBySessionIds(
+                ownerId, sessionIds, List.of(ReportStatus.COMPLETED, ReportStatus.PARTIAL));
+
+        assertThat(finished).singleElement().satisfies(report -> {
+            assertThat(report.getPublicId()).isEqualTo(partial.getPublicId());
+            assertThat(Hibernate.isInitialized(report.getSession())).isTrue();
+            assertThat(report.getReportData()).containsEntry("report_status", "partial");
+        });
+        assertThat(reportRepository.findAllBySessionIds("someone-else", sessionIds,
+                List.of(ReportStatus.COMPLETED, ReportStatus.PARTIAL))).isEmpty();
+    }
+
     private Report partialReport(int attempt, ReportRetryStatus retryStatus, String errorCode) {
         Report report = Report.processing(session, "task_" + attempt);
         report.retryWith(attempt, "task_" + attempt);

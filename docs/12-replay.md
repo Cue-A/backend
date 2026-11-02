@@ -147,7 +147,7 @@ String rootId = sourceSession.getRetryOfSessionId() != null
 | `companyId` 기업 | **400 거부** | 고정 |
 | `jobRole` 직무 | **400 거부** | 고정 |
 | `hideQuestionText` 질문 텍스트 숨김 | **허용** | 표시 방식만 바꿈 |
-| 타이머 | **허용** | 프론트 표시 설정. Backend 요청/DB 에 필드 없음 |
+| 타이머 | **허용** | 세션마다 저장(`duration_limit`)하지만 질문 구성에 무관해 고정하지 않음 |
 
 ### AI 계약과 Backend 서비스 정책의 구분
 
@@ -229,8 +229,9 @@ GET /api/interviews/{sessionId}/replay-options
 
 고정 옵션 5개(`documentId`·`companyId`·`jobRole`·`questionCount`·`persona`)를 그대로
 `POST /api/interviews` 에 실으면 `ReplayOptionPolicy` 비교를 통과합니다. 타이머와
-`hideQuestionText` 는 **담지 않습니다**(타이머는 프론트 전용, `hideQuestionText` 는 변경
-허용 옵션이라 고정 옵션이 아님).
+`hideQuestionText` 는 **담지 않습니다**(타이머는 세션마다 `duration_limit` 에 저장되지만
+재연습에서 변경 가능해 고정 옵션이 아니고, `hideQuestionText` 도 변경 허용 옵션이라 고정
+옵션이 아님).
 
 `replayable`·`replayBlockReasons` 는 Issue #83 리뷰에서 추가된 필드입니다. 기존 8개 필드의
 이름·타입·의미는 그대로이며 뒤에 덧붙였을 뿐이라 **하위 호환됩니다.**

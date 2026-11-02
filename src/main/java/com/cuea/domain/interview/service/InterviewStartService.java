@@ -7,6 +7,7 @@ import com.cuea.domain.company.repository.CompanyRepository;
 import com.cuea.domain.company.service.CompanyProfileFormatter;
 import com.cuea.domain.document.entity.Document;
 import com.cuea.domain.document.repository.DocumentRepository;
+import com.cuea.domain.interview.dto.request.AnswerTimeLimit;
 import com.cuea.domain.interview.dto.request.InterviewStartRequest;
 import com.cuea.domain.interview.dto.response.InterviewStartResponse;
 import com.cuea.domain.interview.entity.InterviewSession;
@@ -57,6 +58,20 @@ public class InterviewStartService {
     /** AI 계약이 허용하는 문항 수. 그 외 값은 세션을 만들지 않고 거부합니다. */
     private static final Set<Integer> ALLOWED_QUESTION_COUNTS = Set.of(3, 6, 9);
 
+    /**
+     * 질문 1개당 답변 제한 시간(초)으로 허용하는 값. 프론트 프리셋(60·90·120초)과 일치합니다.
+     * {@code null}("제한 없음")은 여기와 별개로 허용하며, 그 외 값은 세션을 만들지 않고
+     * {@code INVALID_REQUEST}(400)로 거부합니다(questionCount 화이트리스트와 같은 방식).
+     */
+    private static final Set<Integer> ALLOWED_ANSWER_TIME_LIMITS = Set.of(60, 90, 120);
+
+    /**
+     * 답변 제한 시간 필드를 <b>보내지 않았을 때</b>(필드 누락) 적용하는 기본값(초). 프론트
+     * 화면 기본 선택값(90초)과 같습니다. 사용자가 명시적 {@code null}("제한 없음")을 보낸
+     * 경우는 이 기본값을 적용하지 않습니다(Issue #99 R3).
+     */
+    private static final int DEFAULT_ANSWER_TIME_LIMIT = 90;
+
     private final UserRepository userRepository;
     private final DocumentRepository documentRepository;
     private final CompanyRepository companyRepository;
@@ -79,6 +94,9 @@ public class InterviewStartService {
      */
     public InterviewStartResponse start(String userId, InterviewStartRequest request) {
         int questionCount = resolveQuestionCount(request.questionCount());
+        // 답변 제한 시간도 AI 호출·세션 저장 전에 검증합니다. 필드 누락은 기본값 90,
+        // 명시적 null 은 "제한 없음"(null), 값이 있으면 60·90·120 만 허용(그 외 400).
+        Integer answerTimeLimitSec = resolveAnswerTimeLimitSec(request.answerTimeLimitSec());
         User user = findUser(userId);
         Document document = findUsableFileDocument(request.documentId(), userId);
         Company company = findVerifiedCompany(request.companyId());
@@ -114,10 +132,11 @@ public class InterviewStartService {
         // AI 세션은 이미 만들어졌습니다. 여기서 로컬 세션 저장이 실패하면 AI 쪽에
         // task 만 살아남아 정리할 주체가 없어집니다. 저장 실패 시 AI 세션을 보상
         // abort 하고, 정리 실패가 원래 예외를 덮지 않도록 suppressed 로 붙입니다.
+        InterviewSession savedSession;
         try {
-            sessionWriter.createSession(
+            savedSession = sessionWriter.createSession(
                     user, document, company, request, aiResponse, questionCount,
-                    replayPlan.rootSession());
+                    answerTimeLimitSec, replayPlan.rootSession());
         } catch (RuntimeException e) {
             log.warn("로컬 세션 저장 실패로 AI 세션을 중단합니다 sessionId={}", aiResponse.sessionId());
             // 세션 저장이 실패했으니 우리 DB 에는 세션 행이 없습니다. AI 세션만 정리합니다.
@@ -138,8 +157,9 @@ public class InterviewStartService {
             throw e;
         }
 
-        return new InterviewStartResponse(
-                aiResponse.sessionId(), aiResponse.questionTotal(), replayPlan.isApplied());
+        // 응답 옵션은 요청값이 아니라 저장된 세션의 확정값으로 구성합니다(Issue #99).
+        return InterviewStartResponse.from(
+                savedSession, aiResponse.questionTotal(), replayPlan.isApplied());
     }
 
     /**
@@ -227,6 +247,40 @@ public class InterviewStartService {
             throw new BusinessException(ErrorCode.INVALID_QUESTION_COUNT);
         }
         return requested;
+    }
+
+    /**
+     * 답변 제한 시간을 검증·정규화합니다. <b>필드 누락과 명시적 {@code null} 을 구분</b>합니다
+     * (Issue #99 R3). 입력은 요청 역직렬화 경계의 3상태 래퍼 {@link AnswerTimeLimit} 입니다.
+     *
+     * <ul>
+     *   <li>필드 누락({@link AnswerTimeLimit#ABSENT}) → 프론트 기본 선택값과 같은
+     *       {@link #DEFAULT_ANSWER_TIME_LIMIT}(90초)를 적용합니다.</li>
+     *   <li>명시적 {@code null}({@link AnswerTimeLimit#UNLIMITED}) → 사용자가 고른 "제한 없음".
+     *       기본값을 적용하지 않고 {@code null} 을 그대로 통과시켜 {@code duration_limit} 에
+     *       null 로 저장합니다.</li>
+     *   <li>값 보유 → {@code 60}·{@code 90}·{@code 120} 만 허용하고, 그 외는 AI 호출·세션 저장
+     *       전에 {@code INVALID_REQUEST}(400)로 거부합니다.</li>
+     * </ul>
+     *
+     * <p>반환 타입은 {@code Integer}(제한 없음이면 null)로, 엔티티·응답·DB 계약은 바뀌지
+     * 않습니다. 기존 세션의 {@code duration_limit=null} 도 그대로 제한 없음으로 해석됩니다.
+     */
+    private Integer resolveAnswerTimeLimitSec(AnswerTimeLimit requested) {
+        // 방어: 래퍼가 어떤 이유로든 null 이면(정상 Jackson 경로에서는 발생하지 않음)
+        // 필드 누락과 동일하게 다뤄 기본값을 적용합니다.
+        if (requested == null || requested.isAbsent()) {
+            return DEFAULT_ANSWER_TIME_LIMIT;
+        }
+        if (requested.isExplicitUnlimited()) {
+            return null;
+        }
+        int seconds = requested.value();
+        if (!ALLOWED_ANSWER_TIME_LIMITS.contains(seconds)) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST,
+                    "답변 제한 시간은 60, 90, 120 초 또는 제한 없음(null) 중 하나여야 합니다");
+        }
+        return seconds;
     }
 
     private User findUser(String userId) {

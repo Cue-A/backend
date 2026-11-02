@@ -43,6 +43,12 @@ public enum ErrorCode {
     UPLOAD_NOT_COMPLETED(HttpStatus.BAD_REQUEST, "업로드가 완료되지 않았습니다"),
     STORAGE_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "파일 저장소 오류가 발생했습니다"),
 
+    // ── 기업 ────────────────────────────────────────────────
+    // 없는 기업과 verified=false 기업을 구별하지 않고 둘 다 이 코드로 돌려줍니다.
+    // 공용 마스터라 소유권 문제는 없지만, verified=false 는 서비스에 아직 노출하지
+    // 않기로 한 데이터라(Issue #85) "없는 것"과 똑같이 다룹니다.
+    COMPANY_NOT_FOUND(HttpStatus.NOT_FOUND, "기업을 찾을 수 없습니다"),
+
     // ── 면접 세션 ────────────────────────────────────────────
     SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "세션을 찾을 수 없습니다"),
     SESSION_ENDED(HttpStatus.CONFLICT, "이미 종료된 세션입니다"),
@@ -50,6 +56,11 @@ public enum ErrorCode {
     QUESTION_NOT_FOUND(HttpStatus.NOT_FOUND, "질문을 찾을 수 없습니다"),
     INVALID_QUESTION_COUNT(HttpStatus.BAD_REQUEST, "문항 수는 3, 6, 9 중 하나여야 합니다"),
     INVALID_CATEGORY(HttpStatus.BAD_REQUEST, "허용되지 않은 카테고리입니다"),
+
+    // ── 폴더 ─────────────────────────────────────────────────
+    FOLDER_NOT_FOUND(HttpStatus.NOT_FOUND, "폴더를 찾을 수 없습니다"),
+    FOLDER_NAME_DUPLICATED(HttpStatus.CONFLICT, "같은 이름의 폴더가 이미 있습니다"),
+    FOLDER_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "폴더는 최대 20개까지 만들 수 있습니다"),
 
     // ── AI 서버 (docs/10-ai-client.md 의 errorCode 와 1:1) ────
     AI_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AI 서버에 연결할 수 없습니다"),

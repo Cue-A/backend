@@ -121,32 +121,80 @@ class BookmarkServiceTest {
     void 되묻기에는_같은_세션의_원래_질문_문구를_붙인다() {
         InterviewSession first = InterviewSession.builder().sessionId("sess_1").jobRole("백엔드").build();
         InterviewSession second = InterviewSession.builder().sessionId("sess_2").jobRole("백엔드").build();
-        BookmarkedQuestion reask = bookmarked(Question.builder().sessionId("sess_1").questionId("q_4r")
-                .session(first).type(QuestionType.REASK).text("수치로 다시 설명해 주시겠어요?").reaskOf("q_4").build());
-        BookmarkedQuestion plain = bookmarked(Question.builder().sessionId("sess_2").questionId("q_4")
-                .session(second).type(QuestionType.QUESTION).text("다른 세션의 질문").category("프로젝트경험").build());
-        when(bookmarkRepository.findPageOwned(eq(USER_ID), any())).thenReturn(new PageImpl<>(List.of(reask, plain)));
-        when(questionRepository.findAllBySessionIdInAndQuestionIdIn(anyCollection(), anyCollection())).thenReturn(List.of(
-                Question.builder().sessionId("sess_1").questionId("q_4").text("프로젝트 경험을 말씀해 주세요.").build(),
-                Question.builder().sessionId("sess_2").questionId("q_4").text("다른 세션의 질문").build()));
+        givenBookmarks(
+                bookmarked(Question.builder().sessionId("sess_1").questionId("q_4r").session(first)
+                        .type(QuestionType.REASK).topicIndex(1).text("수치로 다시 설명해 주시겠어요?").reaskOf("q_4").build()),
+                bookmarked(Question.builder().sessionId("sess_2").questionId("q_4").session(second)
+                        .type(QuestionType.QUESTION).topicIndex(1).text("다른 세션의 질문").build()));
+        givenAskedInOrder(
+                asked("sess_1", "q_4", QuestionType.QUESTION, 1, "프로젝트 경험을 말씀해 주세요."),
+                Question.builder().sessionId("sess_1").questionId("q_4r")
+                        .type(QuestionType.REASK).topicIndex(1).text("수치로 다시 설명해 주시겠어요?").reaskOf("q_4").build(),
+                asked("sess_2", "q_4", QuestionType.QUESTION, 1, "다른 세션의 질문"));
 
-        BookmarkListResponse response = service.list(USER_ID, 0, 20);
-
-        assertThat(response.bookmarks())
+        assertThat(service.list(USER_ID, 0, 20).bookmarks())
                 .extracting(BookmarkResponse::questionId, BookmarkResponse::originalQuestionText)
                 .containsExactly(tuple("q_4r", "프로젝트 경험을 말씀해 주세요."), tuple("q_4", null));
     }
 
+    /** 꼬리질문의 꼬리질문도 직전 꼬리질문이 아니라 토픽의 주질문을 붙입니다. */
     @Test
-    void 되묻기가_없으면_원래_질문을_조회하지_않는다() {
-        InterviewSession session = InterviewSession.builder().sessionId(SESSION_ID).jobRole("백엔드").build();
-        BookmarkedQuestion plain = bookmarked(Question.builder().sessionId(SESSION_ID).questionId(QUESTION_ID)
-                .session(session).type(QuestionType.QUESTION).text("질문").build());
-        when(bookmarkRepository.findPageOwned(eq(USER_ID), any())).thenReturn(new PageImpl<>(List.of(plain)));
+    void 꼬리질문에는_같은_토픽의_주질문_문구를_붙인다() {
+        givenAskedInOrder(
+                asked(SESSION_ID, "q_1", QuestionType.QUESTION, 1, "지원 동기를 말씀해 주세요."),
+                asked(SESSION_ID, "q_2", QuestionType.FOLLOWUP, 1, "왜 백엔드인가요?"),
+                asked(SESSION_ID, "q_3", QuestionType.FOLLOWUP, 1, "그 경험은 언제였나요?"),
+                asked(SESSION_ID, "q_4", QuestionType.QUESTION, 2, "프로젝트 경험을 말씀해 주세요."),
+                asked(SESSION_ID, "q_5", QuestionType.FOLLOWUP, 2, "왜 그 방식으로 해결했나요?"));
+        givenBookmarks(bookmarkOf("q_3", QuestionType.FOLLOWUP, 1), bookmarkOf("q_5", QuestionType.FOLLOWUP, 2));
+
+        assertThat(service.list(USER_ID, 0, 20).bookmarks())
+                .extracting(BookmarkResponse::questionId, BookmarkResponse::originalQuestionText)
+                .containsExactly(tuple("q_3", "지원 동기를 말씀해 주세요."), tuple("q_5", "프로젝트 경험을 말씀해 주세요."));
+    }
+
+    /** 대체 주질문이 같은 토픽 번호로 올 수 있어, 그 꼬리질문 직전에 나간 주질문을 붙입니다. */
+    @Test
+    void 같은_토픽에_주질문이_둘이면_꼬리질문_직전의_주질문을_붙인다() {
+        givenAskedInOrder(
+                asked(SESSION_ID, "q_1", QuestionType.QUESTION, 1, "처음 주질문"),
+                asked(SESSION_ID, "q_2", QuestionType.QUESTION, 1, "대체 주질문"),
+                asked(SESSION_ID, "q_3", QuestionType.FOLLOWUP, 1, "꼬리질문"));
+        givenBookmarks(bookmarkOf("q_3", QuestionType.FOLLOWUP, 1));
+
+        assertThat(service.list(USER_ID, 0, 20).bookmarks())
+                .extracting(BookmarkResponse::originalQuestionText)
+                .containsExactly("대체 주질문");
+    }
+
+    @Test
+    void 주질문만_담았으면_원래_질문을_조회하지_않는다() {
+        givenBookmarks(bookmarkOf(QUESTION_ID, QuestionType.QUESTION, 1));
 
         service.list(USER_ID, 0, 20);
 
-        verify(questionRepository, never()).findAllBySessionIdInAndQuestionIdIn(anyCollection(), anyCollection());
+        verify(questionRepository, never()).findAllBySessionIdInOrderByCreatedAtAsc(anyCollection());
+    }
+
+    /** 세션의 질문이 나간 순서대로 이것들이라고 둡니다. */
+    private void givenAskedInOrder(Question... asked) {
+        when(questionRepository.findAllBySessionIdInOrderByCreatedAtAsc(anyCollection())).thenReturn(List.of(asked));
+    }
+
+    private void givenBookmarks(BookmarkedQuestion... bookmarks) {
+        when(bookmarkRepository.findPageOwned(eq(USER_ID), any())).thenReturn(new PageImpl<>(List.of(bookmarks)));
+    }
+
+    private static Question asked(String sessionId, String questionId, QuestionType type, int topicIndex, String text) {
+        return Question.builder().sessionId(sessionId).questionId(questionId)
+                .type(type).topicIndex(topicIndex).text(text).build();
+    }
+
+    /** SESSION_ID 세션의 질문을 담은 북마크. */
+    private static BookmarkedQuestion bookmarkOf(String questionId, QuestionType type, int topicIndex) {
+        InterviewSession session = InterviewSession.builder().sessionId(SESSION_ID).jobRole("백엔드").build();
+        return bookmarked(Question.builder().sessionId(SESSION_ID).questionId(questionId).session(session)
+                .type(type).topicIndex(topicIndex).text("질문").build());
     }
 
     @Test

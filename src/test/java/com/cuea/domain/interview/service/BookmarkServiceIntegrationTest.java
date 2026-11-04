@@ -59,8 +59,9 @@ class BookmarkServiceIntegrationTest extends PostgresRepositoryTest {
                 .mode("PRACTICE").jobRole("백엔드").questionCount(6)
                 .persona(Persona.FRIENDLY).hideQuestionText(false)
                 .status(SessionStatus.IN_PROGRESS).createdAt(T0).build());
-        question("q_4", QuestionType.QUESTION, "프로젝트 경험을 말씀해 주세요.", null);
-        question("q_4r", QuestionType.REASK, "수치로 다시 설명해 주시겠어요?", "q_4");
+        question("q_4", QuestionType.QUESTION, "프로젝트 경험을 말씀해 주세요.", null, 1);
+        question("q_4r", QuestionType.REASK, "수치로 다시 설명해 주시겠어요?", "q_4", 2);
+        question("q_5", QuestionType.FOLLOWUP, "왜 그 방식으로 해결했나요?", null, 3);
         flushAndClear();
     }
 
@@ -90,14 +91,17 @@ class BookmarkServiceIntegrationTest extends PostgresRepositoryTest {
     }
 
     @Test
-    void 목록에서_되묻기에는_원래_질문_문구가_붙는다() {
+    void 목록에서_되묻기와_꼬리질문에는_원래_질문_문구가_붙는다() {
         service.setBookmarked(user.getUserId(), session.getSessionId(), "q_4r", true);
+        service.setBookmarked(user.getUserId(), session.getSessionId(), "q_5", true);
         flushAndClear();
 
         assertThat(service.list(user.getUserId(), 0, 20).bookmarks())
                 .extracting(BookmarkResponse::questionId, BookmarkResponse::originalQuestionText,
                         BookmarkResponse::jobRole)
-                .containsExactly(tuple("q_4r", "프로젝트 경험을 말씀해 주세요.", "백엔드"));
+                .containsExactlyInAnyOrder(
+                        tuple("q_4r", "프로젝트 경험을 말씀해 주세요.", "백엔드"),
+                        tuple("q_5", "프로젝트 경험을 말씀해 주세요.", "백엔드"));
     }
 
     private boolean isBookmarkedInDb(String questionId) {
@@ -113,10 +117,11 @@ class BookmarkServiceIntegrationTest extends PostgresRepositoryTest {
         em.clear();
     }
 
-    private void question(String questionId, QuestionType type, String text, String reaskOf) {
+    /** 모두 토픽 1 이고, 나간 순서는 minutes 로 정합니다. */
+    private void question(String questionId, QuestionType type, String text, String reaskOf, int minutes) {
         em.persist(Question.builder()
                 .sessionId(session.getSessionId()).questionId(questionId).type(type)
                 .text(text).reaskOf(reaskOf)
-                .questionNumber(1).topicIndex(1).createdAt(T0).build());
+                .questionNumber(1).topicIndex(1).createdAt(T0.plusMinutes(minutes)).build());
     }
 }

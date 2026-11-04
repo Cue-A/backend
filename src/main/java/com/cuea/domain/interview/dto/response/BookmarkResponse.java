@@ -28,7 +28,7 @@ public record BookmarkResponse(
         @Schema(description = "L1 ~ L3. REASK 는 null")
         String difficulty,
 
-        @Schema(description = "REASK 일 때 원래 질문의 문구. 그 외에는 null")
+        @Schema(description = "원래 질문의 문구. REASK 는 되물은 질문, FOLLOWUP 은 토픽의 주질문이고 QUESTION 은 null")
         String originalQuestionText,
 
         @Schema(description = "쓰지 않았으면 null")

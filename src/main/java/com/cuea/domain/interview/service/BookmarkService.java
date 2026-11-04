@@ -10,6 +10,7 @@ import com.cuea.domain.interview.dto.response.BookmarkToggleResponse;
 import com.cuea.domain.interview.entity.BookmarkedQuestion;
 import com.cuea.domain.interview.entity.Question;
 import com.cuea.domain.interview.entity.QuestionId;
+import com.cuea.domain.interview.entity.QuestionType;
 import com.cuea.domain.interview.repository.BookmarkedQuestionRepository;
 import com.cuea.domain.interview.repository.InterviewSessionRepository;
 import com.cuea.domain.interview.repository.QuestionRepository;
@@ -19,6 +20,7 @@ import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -66,7 +68,7 @@ public class BookmarkService {
                 bookmarkRepository.findPageOwned(userId, PageRequests.of(page, size, Sort.unsorted()));
         Map<QuestionId, String> originals = originalTexts(bookmarks.getContent());
         return BookmarkListResponse.from(bookmarks.map(bookmark ->
-                BookmarkResponse.of(bookmark, originalTextOf(bookmark.getQuestion(), originals))));
+                BookmarkResponse.of(bookmark, originals.get(idOf(bookmark.getQuestion())))));
     }
 
     /** 처음 쓰기와 고치기가 같습니다. 담을 때 메모가 빈 행이 이미 생깁니다. 면접이 끝난 뒤에도 됩니다. */
@@ -94,29 +96,49 @@ public class BookmarkService {
     }
 
     /**
-     * 페이지 안 되묻기들의 원래 질문 문구. 한 번에 조회하고 {@code (sessionId, questionId)} 쌍으로 맞춥니다.
-     * 되묻기가 없으면 조회하지 않습니다.
+     * 페이지 안 되묻기 · 꼬리질문의 원래 질문 문구. 키는 담긴 질문 자신의 ID 이고, 주질문이면 값이 없습니다.
+     *
+     * <p>되묻기는 {@code reask_of} 가 가리키는 질문입니다. 꼬리질문에는 원래 질문을 가리키는 값이 없어, 같은
+     * 세션 · 같은 토픽에서 그 꼬리질문 직전에 나간 주질문을 붙입니다. 대체 주질문이 같은 토픽 번호로 올 수 있어
+     * 토픽 번호만으로는 하나로 정해지지 않기 때문입니다. 꼬리질문의 꼬리질문도 토픽의 주질문이 붙습니다.
+     *
+     * <p>{@code question_id} 가 세션 스코프라 키는 항상 {@code (sessionId, questionId)} 쌍입니다. 담긴 질문의
+     * 세션들을 한 번에 조회하며, 되묻기 · 꼬리질문이 없으면 조회하지 않습니다.
      */
     private Map<QuestionId, String> originalTexts(List<BookmarkedQuestion> bookmarks) {
-        List<Question> reasks = bookmarks.stream()
+        Set<String> sessionIds = bookmarks.stream()
                 .map(BookmarkedQuestion::getQuestion)
-                .filter(question -> question.getReaskOf() != null)
-                .toList();
-        if (reasks.isEmpty()) {
+                .filter(question -> question.getType() != QuestionType.QUESTION)
+                .map(Question::getSessionId)
+                .collect(Collectors.toSet());
+        if (sessionIds.isEmpty()) {
             return Map.of();
         }
-        Set<String> sessionIds = reasks.stream().map(Question::getSessionId).collect(Collectors.toSet());
-        Set<String> questionIds = reasks.stream().map(Question::getReaskOf).collect(Collectors.toSet());
-        return questionRepository.findAllBySessionIdInAndQuestionIdIn(sessionIds, questionIds).stream()
-                .collect(Collectors.toMap(
-                        question -> new QuestionId(question.getSessionId(), question.getQuestionId()),
-                        Question::getText));
+        Map<QuestionId, String> texts = new HashMap<>();
+        Map<Topic, String> latestMain = new HashMap<>();
+        Map<QuestionId, String> originals = new HashMap<>();
+        for (Question asked : questionRepository.findAllBySessionIdInOrderByCreatedAtAsc(sessionIds)) {
+            switch (asked.getType()) {
+                case QUESTION -> latestMain.put(Topic.of(asked), asked.getText());
+                case FOLLOWUP -> originals.put(idOf(asked), latestMain.get(Topic.of(asked)));
+                case REASK -> originals.put(idOf(asked),
+                        texts.get(new QuestionId(asked.getSessionId(), asked.getReaskOf())));
+            }
+            texts.put(idOf(asked), asked.getText());
+        }
+        return originals;
     }
 
-    private static String originalTextOf(Question question, Map<QuestionId, String> originals) {
-        return question.getReaskOf() == null
-                ? null
-                : originals.get(new QuestionId(question.getSessionId(), question.getReaskOf()));
+    private static QuestionId idOf(Question question) {
+        return new QuestionId(question.getSessionId(), question.getQuestionId());
+    }
+
+    /** 토픽 번호는 세션 안에서만 의미가 있습니다. */
+    private record Topic(String sessionId, int topicIndex) {
+
+        static Topic of(Question question) {
+            return new Topic(question.getSessionId(), question.getTopicIndex());
+        }
     }
 
     /** 답변 제출과 같은 상태 규칙({@link ActiveSession})입니다. */

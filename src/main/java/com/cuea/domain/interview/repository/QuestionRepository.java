@@ -29,11 +29,8 @@ public interface QuestionRepository extends Repository<Question, QuestionId> {
      */
     Optional<Question> findBySessionIdAndQuestionId(String sessionId, String questionId);
 
-    /**
-     * 질문은행에서 되묻기의 원래 질문을 한 번에 찾을 때 씁니다. 두 IN 을 따로 거는 것이라 다른 세션의 같은
-     * {@code questionId} 도 섞여 나옵니다. 호출부에서 {@code (sessionId, questionId)} 쌍으로 다시 맞추세요.
-     */
-    List<Question> findAllBySessionIdInAndQuestionIdIn(Collection<String> sessionIds, Collection<String> questionIds);
+    /** 여러 세션의 질문을 나간 순서대로. 질문은행에서 되묻기 · 꼬리질문의 원래 질문을 찾을 때 씁니다. */
+    List<Question> findAllBySessionIdInOrderByCreatedAtAsc(Collection<String> sessionIds);
 
     Question save(Question question);
 }

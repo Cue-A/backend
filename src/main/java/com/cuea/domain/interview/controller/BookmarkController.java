@@ -53,7 +53,8 @@ public class BookmarkController {
             summary = "질문은행 목록",
             description = """
                     내가 담은 질문을 담은 시각 최신순으로 줍니다. 필터는 없고 size 는 100 을 넘길 수 없습니다.
-                    되묻기는 originalQuestionText 에 원래 질문 문구가 오고, 그 외에는 null 입니다.""")
+                    originalQuestionText 는 원래 질문 문구입니다. 되묻기는 되물은 질문, 꼬리질문은 그 토픽의 주질문이고
+                    주질문이면 null 입니다.""")
     @GetMapping("/bookmarks")
     @RateLimit(key = "bookmark-list", limit = 60, windowSeconds = 60)
     public Result<BookmarkListResponse> list(

@@ -100,6 +100,16 @@ class BookmarkedQuestionRepositoryTest extends PostgresRepositoryTest {
         assertThat(page.getContent().get(0).getQuestion().getSession().getCompany()).isNull();
     }
 
+    @Test
+    void 남의_북마크는_찾지_않는다() {
+        bookmark(other, find("q_4"), 1);
+        em.flush();
+        em.clear();
+
+        assertThat(bookmarkRepository.findOwned(user.getUserId(), session.getSessionId(), "q_4")).isEmpty();
+        assertThat(bookmarkRepository.findOwned(other.getUserId(), session.getSessionId(), "q_4")).isPresent();
+    }
+
     private Question find(String questionId) {
         return em.find(Question.class, new QuestionId(session.getSessionId(), questionId));
     }

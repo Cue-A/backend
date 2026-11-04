@@ -1,8 +1,10 @@
 package com.cuea.domain.interview.controller;
 
 import com.cuea.common.result.Result;
+import com.cuea.domain.interview.dto.request.BookmarkMemoRequest;
 import com.cuea.domain.interview.dto.request.BookmarkToggleRequest;
 import com.cuea.domain.interview.dto.response.BookmarkListResponse;
+import com.cuea.domain.interview.dto.response.BookmarkMemoResponse;
 import com.cuea.domain.interview.dto.response.BookmarkToggleResponse;
 import com.cuea.domain.interview.service.BookmarkService;
 import org.junit.jupiter.api.BeforeEach;
@@ -41,6 +43,18 @@ class BookmarkControllerTest {
                 controller.setBookmarked(USER_ID, "sess_1", "q_4r", new BookmarkToggleRequest(false));
 
         verify(bookmarkService).setBookmarked(USER_ID, "sess_1", "q_4r", false);
+        assertThat(result.success()).isTrue();
+        assertThat(result.data()).isSameAs(dto);
+    }
+
+    @Test
+    void 메모는_본문을_서비스에_넘긴다() {
+        BookmarkMemoResponse dto = new BookmarkMemoResponse("STAR 구조로 다시 정리하기");
+        when(bookmarkService.editMemo(USER_ID, "sess_1", "q_4", "STAR 구조로 다시 정리하기")).thenReturn(dto);
+
+        Result<BookmarkMemoResponse> result =
+                controller.editMemo(USER_ID, "sess_1", "q_4", new BookmarkMemoRequest("STAR 구조로 다시 정리하기"));
+
         assertThat(result.success()).isTrue();
         assertThat(result.data()).isSameAs(dto);
     }

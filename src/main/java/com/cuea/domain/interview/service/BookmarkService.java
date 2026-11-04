@@ -4,6 +4,7 @@ import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.common.paging.PageRequests;
 import com.cuea.domain.interview.dto.response.BookmarkListResponse;
+import com.cuea.domain.interview.dto.response.BookmarkMemoResponse;
 import com.cuea.domain.interview.dto.response.BookmarkResponse;
 import com.cuea.domain.interview.dto.response.BookmarkToggleResponse;
 import com.cuea.domain.interview.entity.BookmarkedQuestion;
@@ -68,6 +69,16 @@ public class BookmarkService {
         Map<QuestionId, String> originals = originalTexts(bookmarks.getContent());
         return BookmarkListResponse.from(bookmarks.map(bookmark ->
                 BookmarkResponse.of(bookmark, originalTextOf(bookmark.getQuestion(), originals))));
+    }
+
+    /** 처음 쓰기와 고치기가 같습니다. 담을 때 메모가 빈 행이 이미 생깁니다. 면접이 끝난 뒤에도 됩니다. */
+    @Transactional
+    public BookmarkMemoResponse editMemo(String userId, String sessionId, String questionId, String memo) {
+        String normalized = BookmarkMemo.normalize(memo);
+        BookmarkedQuestion bookmark = bookmarkRepository.findOwned(userId, sessionId, questionId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.BOOKMARK_NOT_FOUND));
+        bookmark.editMemo(normalized);
+        return new BookmarkMemoResponse(normalized);
     }
 
     /**

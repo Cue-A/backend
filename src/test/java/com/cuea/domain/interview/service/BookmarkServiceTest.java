@@ -3,6 +3,7 @@ package com.cuea.domain.interview.service;
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.dto.response.BookmarkListResponse;
+import com.cuea.domain.interview.dto.response.BookmarkMemoResponse;
 import com.cuea.domain.interview.dto.response.BookmarkResponse;
 import com.cuea.domain.interview.dto.response.BookmarkToggleResponse;
 import com.cuea.domain.interview.entity.BookmarkedQuestion;
@@ -146,6 +147,60 @@ class BookmarkServiceTest {
         service.list(USER_ID, 0, 20);
 
         verify(questionRepository, never()).findAllBySessionIdInAndQuestionIdIn(anyCollection(), anyCollection());
+    }
+
+    @Test
+    void 메모를_저장하고_저장된_값을_돌려준다() {
+        BookmarkedQuestion bookmark = givenBookmark(null);
+
+        BookmarkMemoResponse response = service.editMemo(USER_ID, SESSION_ID, QUESTION_ID, "STAR 구조로 다시 정리하기");
+
+        assertThat(bookmark.getMemo()).isEqualTo("STAR 구조로 다시 정리하기");
+        assertThat(response.memo()).isEqualTo("STAR 구조로 다시 정리하기");
+    }
+
+    /** 메모만 지우는 API 가 따로 없어서, 빈 값이 곧 지우기입니다. */
+    @Test
+    void 빈_값이면_메모를_지운다() {
+        for (String blank : new String[]{null, "", "   "}) {
+            BookmarkedQuestion bookmark = givenBookmark("예전 메모");
+
+            BookmarkMemoResponse response = service.editMemo(USER_ID, SESSION_ID, QUESTION_ID, blank);
+
+            assertThat(bookmark.getMemo()).as("memo=[%s]", blank).isNull();
+            assertThat(response.memo()).isNull();
+        }
+    }
+
+    /** memo 는 VARCHAR(500) 이라 넘기면 DB 가 잘라내는 게 아니라 500 이 납니다. */
+    @Test
+    void 메모는_500자까지_받는다() {
+        BookmarkedQuestion bookmark = givenBookmark(null);
+
+        service.editMemo(USER_ID, SESSION_ID, QUESTION_ID, "가".repeat(500));
+        assertThat(bookmark.getMemo()).hasSize(500);
+
+        assertThatThrownBy(() -> service.editMemo(USER_ID, SESSION_ID, QUESTION_ID, "가".repeat(501)))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.INVALID_REQUEST);
+        assertThat(bookmark.getMemo()).hasSize(500);
+    }
+
+    @Test
+    void 질문은행에_없으면_메모도_BOOKMARK_NOT_FOUND() {
+        when(bookmarkRepository.findOwned(USER_ID, SESSION_ID, QUESTION_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.editMemo(USER_ID, SESSION_ID, QUESTION_ID, "메모"))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.BOOKMARK_NOT_FOUND);
+    }
+
+    private BookmarkedQuestion givenBookmark(String memo) {
+        BookmarkedQuestion bookmark = BookmarkedQuestion.builder().memo(memo).build();
+        when(bookmarkRepository.findOwned(USER_ID, SESSION_ID, QUESTION_ID)).thenReturn(Optional.of(bookmark));
+        return bookmark;
     }
 
     private static BookmarkedQuestion bookmarked(Question question) {

@@ -8,6 +8,8 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
 
+import java.util.Optional;
+
 /**
  * 질문은행. 소유자가 있는 엔티티라 {@code findById} 가 없고, 모든 조회 · 삭제에 {@code userId} 를 묶습니다.
  * docs/01-conventions.md 의 "소유자 있는 엔티티는 Repository 를 상속합니다" 참고.
@@ -36,6 +38,16 @@ public interface BookmarkedQuestionRepository extends Repository<BookmarkedQuest
     int insertIfAbsent(@Param("userId") String userId,
                        @Param("sessionId") String sessionId,
                        @Param("questionId") String questionId);
+
+    @Query("""
+            select b from BookmarkedQuestion b
+             where b.user.userId = :userId
+               and b.question.sessionId = :sessionId
+               and b.question.questionId = :questionId
+            """)
+    Optional<BookmarkedQuestion> findOwned(@Param("userId") String userId,
+                                           @Param("sessionId") String sessionId,
+                                           @Param("questionId") String questionId);
 
     /**
      * 질문은행 목록. 담은 시각 최신순이고 같은 시각이면 나중에 담은 것이 먼저입니다.

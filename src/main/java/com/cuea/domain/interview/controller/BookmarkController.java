@@ -3,8 +3,10 @@ package com.cuea.domain.interview.controller;
 import com.cuea.common.annotation.RateLimit;
 import com.cuea.common.result.Result;
 import com.cuea.common.security.CurrentUser;
+import com.cuea.domain.interview.dto.request.BookmarkMemoRequest;
 import com.cuea.domain.interview.dto.request.BookmarkToggleRequest;
 import com.cuea.domain.interview.dto.response.BookmarkListResponse;
+import com.cuea.domain.interview.dto.response.BookmarkMemoResponse;
 import com.cuea.domain.interview.dto.response.BookmarkToggleResponse;
 import com.cuea.domain.interview.service.BookmarkService;
 import io.swagger.v3.oas.annotations.Operation;
@@ -12,6 +14,7 @@ import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -58,5 +61,21 @@ public class BookmarkController {
             @RequestParam(required = false) Integer size) {
 
         return Result.ok(bookmarkService.list(userId, page, size));
+    }
+
+    @Operation(
+            summary = "질문은행 메모 쓰기 · 고치기",
+            description = """
+                    처음 쓰기와 고치기가 같은 API 입니다. memo 는 500자까지이고, 없거나 비었거나 공백뿐이면 메모를 지웁니다.
+                    면접이 끝난 뒤에도 됩니다. 질문은행에 없거나 남의 것이면 404 BOOKMARK_NOT_FOUND 입니다.""")
+    @PatchMapping("/bookmarks/{sessionId}/{questionId}")
+    @RateLimit(key = "bookmark-memo", limit = 30, windowSeconds = 60)
+    public Result<BookmarkMemoResponse> editMemo(
+            @CurrentUser String userId,
+            @PathVariable String sessionId,
+            @PathVariable String questionId,
+            @RequestBody BookmarkMemoRequest request) {
+
+        return Result.ok(bookmarkService.editMemo(userId, sessionId, questionId, request.memo()));
     }
 }

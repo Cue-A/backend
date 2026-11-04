@@ -3,24 +3,22 @@ package com.cuea.domain.home.service;
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.home.dto.response.RecentReportListResponse;
-import com.cuea.domain.home.dto.response.RecentReportResponse;
 import com.cuea.domain.report.entity.ReportStatus;
 import com.cuea.domain.report.repository.RecentReportRow;
-import com.cuea.domain.report.repository.ReportRepository;
+import com.cuea.domain.report.service.ReportSummaryQueryService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
-import org.springframework.data.domain.Pageable;
 
 import java.time.OffsetDateTime;
-import java.util.Collection;
 import java.util.List;
 import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
-import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyInt;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -30,23 +28,23 @@ import static org.mockito.Mockito.when;
 class RecentReportQueryServiceTest {
 
     private static final String USER_ID = "user-1";
-    private static final OffsetDateTime COMPLETED_AT = OffsetDateTime.parse("2026-10-28T09:00:00Z");
+    private static final OffsetDateTime PRACTICED_ON = OffsetDateTime.parse("2026-10-28T09:00:00Z");
 
-    private ReportRepository reportRepository;
+    private ReportSummaryQueryService reportSummaryQueryService;
     private RecentReportQueryService service;
 
     @BeforeEach
     void setUp() {
-        reportRepository = mock(ReportRepository.class);
-        service = new RecentReportQueryService(reportRepository);
+        reportSummaryQueryService = mock(ReportSummaryQueryService.class);
+        service = new RecentReportQueryService(reportSummaryQueryService);
     }
 
     @Test
-    void 열람가능_상태로_최근_리포트를_조회해_DTO_로_매핑한다() {
+    void 리포트_도메인_서비스가_준_행을_DTO_로_매핑한다() {
         UUID publicId = UUID.randomUUID();
         RecentReportRow row = new RecentReportRow(
-                publicId, "네이버", "백엔드", 9, ReportStatus.COMPLETED, 92, COMPLETED_AT);
-        when(reportRepository.findRecentViewable(anyString(), any(), any())).thenReturn(List.of(row));
+                publicId, "네이버", "백엔드", 9, ReportStatus.COMPLETED, 92, PRACTICED_ON);
+        when(reportSummaryQueryService.findRecentViewable(anyString(), anyInt())).thenReturn(List.of(row));
 
         RecentReportListResponse response = service.recentReports(USER_ID, 3);
 
@@ -57,41 +55,30 @@ class RecentReportQueryServiceTest {
             assertThat(report.questionCount()).isEqualTo(9);
             assertThat(report.status()).isEqualTo(ReportStatus.COMPLETED);
             assertThat(report.scoreTotal()).isEqualTo(92);
-            assertThat(report.completedAt()).isEqualTo(COMPLETED_AT);
+            assertThat(report.practicedOn()).isEqualTo(PRACTICED_ON);
         });
     }
 
     @Test
-    void 조회는_COMPLETED_와_PARTIAL_만_요청한다() {
-        when(reportRepository.findRecentViewable(anyString(), any(), any())).thenReturn(List.of());
-
-        service.recentReports(USER_ID, 3);
-
-        @SuppressWarnings("unchecked")
-        ArgumentCaptor<Collection<ReportStatus>> statuses = ArgumentCaptor.forClass(Collection.class);
-        verify(reportRepository).findRecentViewable(anyString(), statuses.capture(), any());
-        assertThat(statuses.getValue()).containsExactly(ReportStatus.COMPLETED, ReportStatus.PARTIAL);
-    }
-
-    @Test
-    void limit_을_비우면_기본_3건을_조회한다() {
-        when(reportRepository.findRecentViewable(anyString(), any(), any())).thenReturn(List.of());
+    void limit_을_비우면_기본_3건을_요청한다() {
+        when(reportSummaryQueryService.findRecentViewable(anyString(), anyInt())).thenReturn(List.of());
 
         service.recentReports(USER_ID, null);
 
-        assertThat(capturePageable().getPageSize()).isEqualTo(3);
-        assertThat(capturePageable().getPageNumber()).isZero();
+        assertThat(captureLimit()).isEqualTo(3);
     }
 
     @Test
-    void limit_1_과_10_은_그대로_쓴다() {
-        when(reportRepository.findRecentViewable(anyString(), any(), any())).thenReturn(List.of());
+    void limit_1_과_10_은_그대로_넘긴다() {
+        when(reportSummaryQueryService.findRecentViewable(anyString(), anyInt())).thenReturn(List.of());
 
         service.recentReports(USER_ID, 1);
-        assertThat(capturePageable().getPageSize()).isEqualTo(1);
-
         service.recentReports(USER_ID, 10);
-        assertThat(capturePageable().getPageSize()).isEqualTo(10);
+
+        ArgumentCaptor<Integer> limit = ArgumentCaptor.forClass(Integer.class);
+        verify(reportSummaryQueryService, org.mockito.Mockito.times(2))
+                .findRecentViewable(anyString(), limit.capture());
+        assertThat(limit.getAllValues()).containsExactly(1, 10);
     }
 
     @Test
@@ -100,7 +87,7 @@ class RecentReportQueryServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_REQUEST);
-        verifyNoInteractions(reportRepository);
+        verifyNoInteractions(reportSummaryQueryService);
     }
 
     @Test
@@ -109,7 +96,7 @@ class RecentReportQueryServiceTest {
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(ErrorCode.INVALID_REQUEST);
-        verify(reportRepository, never()).findRecentViewable(anyString(), any(), any());
+        verify(reportSummaryQueryService, never()).findRecentViewable(anyString(), anyInt());
     }
 
     @Test
@@ -122,7 +109,7 @@ class RecentReportQueryServiceTest {
 
     @Test
     void 리포트가_없으면_빈_목록이다() {
-        when(reportRepository.findRecentViewable(anyString(), any(), any())).thenReturn(List.of());
+        when(reportSummaryQueryService.findRecentViewable(anyString(), anyInt())).thenReturn(List.of());
 
         RecentReportListResponse response = service.recentReports(USER_ID, 3);
 
@@ -132,8 +119,8 @@ class RecentReportQueryServiceTest {
     @Test
     void PARTIAL_점수가_null_이면_그대로_null_로_매핑한다() {
         RecentReportRow row = new RecentReportRow(
-                UUID.randomUUID(), null, "데이터", 6, ReportStatus.PARTIAL, null, COMPLETED_AT);
-        when(reportRepository.findRecentViewable(anyString(), any(), any())).thenReturn(List.of(row));
+                UUID.randomUUID(), null, "데이터", 6, ReportStatus.PARTIAL, null, PRACTICED_ON);
+        when(reportSummaryQueryService.findRecentViewable(anyString(), anyInt())).thenReturn(List.of(row));
 
         RecentReportListResponse response = service.recentReports(USER_ID, 3);
 
@@ -146,18 +133,17 @@ class RecentReportQueryServiceTest {
 
     @Test
     void 조회는_요청한_사용자_ID_로_좁힌다() {
-        when(reportRepository.findRecentViewable(anyString(), any(), any())).thenReturn(List.of());
+        when(reportSummaryQueryService.findRecentViewable(anyString(), anyInt())).thenReturn(List.of());
 
         service.recentReports("owner-42", 3);
 
-        verify(reportRepository).findRecentViewable(
-                org.mockito.ArgumentMatchers.eq("owner-42"), any(), any());
+        verify(reportSummaryQueryService).findRecentViewable(eq("owner-42"), anyInt());
     }
 
-    private Pageable capturePageable() {
-        ArgumentCaptor<Pageable> pageable = ArgumentCaptor.forClass(Pageable.class);
-        verify(reportRepository, org.mockito.Mockito.atLeastOnce())
-                .findRecentViewable(anyString(), any(), pageable.capture());
-        return pageable.getValue();
+    private int captureLimit() {
+        ArgumentCaptor<Integer> limit = ArgumentCaptor.forClass(Integer.class);
+        verify(reportSummaryQueryService, org.mockito.Mockito.atLeastOnce())
+                .findRecentViewable(anyString(), limit.capture());
+        return limit.getValue();
     }
 }

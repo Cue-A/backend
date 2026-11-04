@@ -17,7 +17,7 @@ import java.util.UUID;
  * @param questionCount 고른 문항 수
  * @param status        리포트 상태(COMPLETED · PARTIAL 만 조회 대상)
  * @param scoreTotal    종합 점수. 없으면 null
- * @param completedAt   리포트 완료 시각(정렬 기준)
+ * @param practicedOn   연습(세션)을 완료한 시각. 재분석에도 바뀌지 않으며 정렬 기준입니다
  */
 public record RecentReportRow(
         UUID publicId,
@@ -26,6 +26,6 @@ public record RecentReportRow(
         int questionCount,
         ReportStatus status,
         Integer scoreTotal,
-        OffsetDateTime completedAt
+        OffsetDateTime practicedOn
 ) {
 }

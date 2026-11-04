@@ -9,6 +9,7 @@ import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
 import org.springframework.data.repository.query.Param;
 
+import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -147,4 +148,81 @@ public interface ReportRepository extends Repository<Report, Long> {
                    @Param("aiTaskId") String aiTaskId,
                    @Param("partial") ReportStatus partial,
                    @Param("processing") ReportRetryStatus processing);
+
+    /**
+     * 홈 "기간 평균 · 최고" 점수(Issue #114). 소유자의 리포트 중 열람 가능하고({@code COMPLETED}·
+     * {@code PARTIAL}) 점수가 있는({@code score_total IS NOT NULL}) 것만 평균·최고를 냅니다.
+     *
+     * <p>{@code report} 에 {@code user_id} 가 없어 {@code session} 을 거쳐 소유자를 좁힙니다.
+     * 기간은 <b>세션(연습) 완료 시각</b>({@code session.completed_at}) 기준입니다. 재분석(FAILED
+     * 재요청·PARTIAL 축 재시도)이 끝날 때마다 {@code report.completed_at} 은 다시 찍혀, 9월 연습을
+     * 11월에 재분석하면 점수가 11월로 밀립니다. 잔디(활동)와 점수의 날짜 기준을 세션 완료로 맞춰, 같은
+     * 연습이 두 그래프에서 같은 시점에 놓이게 합니다(PR #116 리뷰). 반열림 구간 {@code [start, end)}
+     * 를 KST 기간의 UTC 경계로 받습니다. 대상이 없으면 {@code avg}·{@code max} 가 NULL 이라
+     * {@link ScoreSummaryRow} 의 두 값이 모두 null 입니다(0 아님).
+     *
+     * <p>{@code report_data}(jsonb)는 읽지 않습니다 — 집계 함수만 돌립니다.
+     */
+    @Query(value = """
+            select avg(r.score_total) as average, max(r.score_total) as best
+              from report r
+              join session s on s.session_id = r.session_id
+             where s.user_id = :userId
+               and r.status in ('COMPLETED', 'PARTIAL')
+               and r.score_total is not null
+               and s.completed_at >= :startInclusive
+               and s.completed_at < :endExclusive
+            """, nativeQuery = true)
+    ScoreSummaryRow summarizeScores(@Param("userId") String userId,
+                                    @Param("startInclusive") OffsetDateTime startInclusive,
+                                    @Param("endExclusive") OffsetDateTime endExclusive);
+
+    /**
+     * 점수 추이(회차별, 4w·10w). 기간 안에서 점수가 있는 리포트를 <b>세션 완료 최신순</b>으로 돌려줍니다.
+     * 서비스가 앞에서 N개(보통 8)를 가져와 오래된 순으로 뒤집습니다.
+     *
+     * <p>정렬·기간·날짜 라벨 모두 <b>세션 완료 시각</b>({@code session.completed_at})을 씁니다
+     * (재분석에도 흔들리지 않게 — PR #116 리뷰). 같은 날 여러 리포트도 각각 한 점이고, 완료 시각이
+     * 같을 수 있어 {@code public_id} 로 2차 정렬해 페이지가 흔들리지 않게 합니다. 소유권은
+     * {@code session} 조인으로 제한합니다.
+     */
+    @Query(value = """
+            select s.completed_at as completedAt, r.score_total as score
+              from report r
+              join session s on s.session_id = r.session_id
+             where s.user_id = :userId
+               and r.status in ('COMPLETED', 'PARTIAL')
+               and r.score_total is not null
+               and s.completed_at >= :startInclusive
+               and s.completed_at < :endExclusive
+             order by s.completed_at desc, r.public_id desc
+            """, nativeQuery = true)
+    List<ScorePointRow> findScorePointsLatestFirst(@Param("userId") String userId,
+                                                    @Param("startInclusive") OffsetDateTime startInclusive,
+                                                    @Param("endExclusive") OffsetDateTime endExclusive,
+                                                    Pageable pageable);
+
+    /**
+     * 점수 추이(월 평균, 6m·1y). KST 기준 월별로 점수 있는 리포트의 평균을 <b>오래된 달부터</b>
+     * 돌려줍니다. 유효 점수가 없는 달은 행이 없어 0 으로 끌어내리지 않습니다.
+     *
+     * <p>월 묶음·라벨("YYYY-MM")·기간 경계 모두 <b>세션 완료 시각</b>({@code session.completed_at})을
+     * {@code AT TIME ZONE 'Asia/Seoul'} 로 옮겨 만듭니다(재분석에도 달이 밀리지 않게 — PR #116 리뷰).
+     */
+    @Query(value = """
+            select to_char((s.completed_at at time zone 'Asia/Seoul'), 'YYYY-MM') as yearMonth,
+                   avg(r.score_total) as average
+              from report r
+              join session s on s.session_id = r.session_id
+             where s.user_id = :userId
+               and r.status in ('COMPLETED', 'PARTIAL')
+               and r.score_total is not null
+               and s.completed_at >= :startInclusive
+               and s.completed_at < :endExclusive
+             group by yearMonth
+             order by yearMonth
+            """, nativeQuery = true)
+    List<MonthlyScoreRow> findMonthlyScoreAverages(@Param("userId") String userId,
+                                                    @Param("startInclusive") OffsetDateTime startInclusive,
+                                                    @Param("endExclusive") OffsetDateTime endExclusive);
 }

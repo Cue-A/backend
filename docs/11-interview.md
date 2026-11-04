@@ -307,3 +307,33 @@ Java enum으로 만들지 않습니다. 이유는 [`02-database.md`](./02-databa
 - 질문 텍스트를 숨긴 면접이어도 `questionText` 를 내려줍니다
 - **URL 은 매 요청마다 새로 서명하고 저장하지 않습니다.** 셋 다 1시간이며, 파일은 지우지 않으므로
   만료되면 다시 부르면 됩니다. 만료 기준은 [`20-storage.md`](./20-storage.md)
+
+---
+
+## 질문은행 (북마크, Issue #117)
+
+면접 중 질문마다 북마크 버튼이 있고, 누르면 질문은행에 담깁니다. 질문은행 화면에서는 담은 질문에
+메모를 쓰거나 뺄 수 있습니다. 테이블은 `bookmarked_question` 이고 [`02-database.md`](./02-database.md)
+의 즐겨찾기 절을 보세요.
+
+| API | 용도 | 세션 상태 |
+|---|---|---|
+| `PUT /api/interviews/{sessionId}/questions/{questionId}/bookmark` | 면접 중 켜기 · 끄기 | **`IN_PROGRESS` 만** |
+| `GET /api/bookmarks?page=&size=` | 목록. 담은 시각 최신순, 필터 없음 | 상관없음 |
+| `PATCH /api/bookmarks/{sessionId}/{questionId}` | 메모 쓰기 · 고치기 | 상관없음 |
+| `DELETE /api/bookmarks/{sessionId}/{questionId}` | 질문은행에서 빼기 | 상관없음 |
+
+- **토글이지만 서버에는 바뀔 상태(`{ "bookmarked": true }`)를 보냅니다.** 서버가 상태를 뒤집으면
+  연타 · 재시도로 두 번 온 요청이 서로 상쇄됩니다. 이미 그 상태면 아무것도 바꾸지 않고 성공합니다
+- **행과 `question.is_bookmarked` 를 한 트랜잭션에서 같이 바꿉니다.** 담기는 `ON CONFLICT DO NOTHING`
+  이라 동시 요청에도 UNIQUE 위반(500)이 나지 않습니다
+- **되묻기도 담을 수 있습니다.** 문구만으로는 뜻이 안 통해 목록에 `originalQuestionText`(원래 질문
+  문구)를 함께 줍니다. 그 외 질문이면 null 입니다
+- **재연습에서 같은 질문을 또 담으면 두 줄입니다.** UNIQUE 가 `(user_id, session_id, question_id)` 라
+  세션이 다르면 다른 행이고, 메모도 줄마다 따로입니다
+- 메모는 500자까지이고 비었거나 공백뿐이면 지웁니다. 메모만 지우는 API 는 없습니다
+- 끄기 · 빼기는 메모도 함께 지웁니다. 끝난 면접의 질문은 빼고 나면 다시 담을 수 없습니다
+- 질문은행에 없거나 남의 것이면 404 `BOOKMARK_NOT_FOUND`. 세션 쪽 오류는 답변 제출과 같습니다
+  (`SESSION_NOT_FOUND` · `SESSION_ENDED` · `SESSION_ABORTED` · `QUESTION_NOT_FOUND`)
+- **질문 push 에는 북마크 여부가 없습니다.** 새 질문은 항상 담기지 않은 상태라서입니다. 면접 중
+  새로고침하면 아이콘이 비어 보이지만, 그때 `true` 를 보내도 이미 담겨 있으면 그대로라 안전합니다

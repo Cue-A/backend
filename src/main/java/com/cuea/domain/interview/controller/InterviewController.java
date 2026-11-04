@@ -7,10 +7,12 @@ import com.cuea.domain.interview.dto.request.AnswerSubmitRequest;
 import com.cuea.domain.interview.dto.request.AnswerUploadUrlRequest;
 import com.cuea.domain.interview.dto.request.InterviewStartRequest;
 import com.cuea.domain.interview.dto.response.AnswerUploadUrlResponse;
+import com.cuea.domain.interview.dto.response.InterviewRecordingsResponse;
 import com.cuea.domain.interview.dto.response.InterviewSessionOptionsResponse;
 import com.cuea.domain.interview.dto.response.InterviewStartResponse;
 import com.cuea.domain.interview.dto.response.ReplaySessionOptionsResponse;
 import com.cuea.domain.interview.service.InterviewAnswerService;
+import com.cuea.domain.interview.service.InterviewRecordingService;
 import com.cuea.domain.interview.service.InterviewSessionOptionsService;
 import com.cuea.domain.interview.service.InterviewStartService;
 import com.cuea.domain.interview.service.ReplaySessionOptionsService;
@@ -45,6 +47,7 @@ public class InterviewController {
     private final InterviewAnswerService interviewAnswerService;
     private final ReplaySessionOptionsService replaySessionOptionsService;
     private final InterviewSessionOptionsService interviewSessionOptionsService;
+    private final InterviewRecordingService interviewRecordingService;
 
     @Operation(summary = "면접 세션 시작",
             description = "Document/Company 조회 → AI 세션 생성(session_id·task_id) 까지 동기로 처리하고 "
@@ -103,6 +106,22 @@ public class InterviewController {
     public Result<ReplaySessionOptionsResponse> getReplayOptions(@CurrentUser String userId,
                                                                  @PathVariable String sessionId) {
         return Result.ok(replaySessionOptionsService.getReplayOptions(userId, sessionId));
+    }
+
+    @Operation(summary = "면접 다시보기 재생목록",
+            description = "연습 기록의 「다시보기」에서 부릅니다. 끝난 면접에서 답변한 문항을 나간 순서대로, "
+                    + "면접관 질문 음성(questionAudioUrl)·답변 녹음(answerAudioUrl)·답변 영상(answerVideoUrl) "
+                    + "URL 과 함께 내려줍니다. 면접 전체를 담은 영상 파일은 없어 프론트가 목록 순서대로 이어서 재생합니다. "
+                    + "URL 은 매 요청마다 새로 서명하고 1시간 뒤 만료됩니다. 파일은 지우지 않으므로 다시 부르면 새 URL 을 받습니다. "
+                    + "카메라를 안 쓴 문항은 answerVideoUrl 이 null 이고, 영상이 하나도 없으면 hasVideo=false 입니다. "
+                    + "음성 합성이나 URL 서명에 실패한 질문은 questionAudioUrl 이 null 입니다. "
+                    + "없거나 다른 사용자의 세션이면 404(SESSION_NOT_FOUND), 진행 중이면 409(SESSION_NOT_COMPLETED), "
+                    + "중단된 세션이면 409(SESSION_ABORTED) 입니다.")
+    @GetMapping("/{sessionId}/recordings")
+    @RateLimit(key = "interview-recordings", limit = 60, windowSeconds = 60)
+    public Result<InterviewRecordingsResponse> getRecordings(@CurrentUser String userId,
+                                                             @PathVariable String sessionId) {
+        return Result.ok(interviewRecordingService.getRecordings(userId, sessionId));
     }
 
     @Operation(summary = "답변 업로드 URL 발급",

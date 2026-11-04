@@ -5,6 +5,7 @@ import com.cuea.common.exception.ErrorCode;
 import com.cuea.common.result.Result;
 import com.cuea.domain.interview.dto.response.InterviewSessionOptionsResponse;
 import com.cuea.domain.interview.service.InterviewAnswerService;
+import com.cuea.domain.interview.service.InterviewRecordingService;
 import com.cuea.domain.interview.service.InterviewSessionOptionsService;
 import com.cuea.domain.interview.service.InterviewStartService;
 import com.cuea.domain.interview.service.ReplaySessionOptionsService;
@@ -41,7 +42,8 @@ class InterviewControllerSessionOptionsTest {
                 mock(InterviewStartService.class),
                 mock(InterviewAnswerService.class),
                 mock(ReplaySessionOptionsService.class),
-                interviewSessionOptionsService);
+                interviewSessionOptionsService,
+                mock(InterviewRecordingService.class));
     }
 
     @Test

@@ -19,7 +19,7 @@ import java.time.OffsetDateTime;
  * @param questionCount 고른 문항 수(되묻기는 세지 않음)
  * @param status        COMPLETED | PARTIAL. 홈에는 이 둘(열람 가능한 리포트)만 노출합니다
  * @param scoreTotal    종합 점수 0~100. PARTIAL 등으로 점수가 없으면 null (임의로 0 을 만들지 않음)
- * @param completedAt   리포트가 완료(열람 가능)된 시각. 최근 리포트 정렬 기준이기도 합니다
+ * @param practicedOn   연습(면접)을 본 시각. 최근 리포트 정렬 기준이며, 재분석에도 바뀌지 않습니다
  */
 @Schema(description = "홈 최근 리포트 요약 한 건")
 public record RecentReportResponse(
@@ -40,7 +40,7 @@ public record RecentReportResponse(
         @Schema(description = "종합 점수 0~100. 점수가 없으면 null")
         Integer scoreTotal,
 
-        @Schema(description = "리포트가 완료(열람 가능)된 시각. 정렬 기준입니다")
-        OffsetDateTime completedAt
+        @Schema(description = "연습(면접)을 본 시각. 정렬 기준이며 재분석에도 바뀌지 않습니다")
+        OffsetDateTime practicedOn
 ) {
 }

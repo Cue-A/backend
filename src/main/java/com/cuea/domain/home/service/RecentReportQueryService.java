@@ -4,35 +4,31 @@ import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.home.dto.response.RecentReportListResponse;
 import com.cuea.domain.home.dto.response.RecentReportResponse;
-import com.cuea.domain.report.entity.ReportStatus;
 import com.cuea.domain.report.repository.RecentReportRow;
-import com.cuea.domain.report.repository.ReportRepository;
+import com.cuea.domain.report.service.ReportSummaryQueryService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 
 /**
- * 홈 대시보드 "최근 리포트 요약". 본인의 열람 가능한(COMPLETED · PARTIAL) 리포트를
- * 최신 완료순으로 몇 건 돌려줍니다(Issue #107).
+ * 홈 대시보드 "최근 리포트 요약". 본인의 열람 가능한 리포트를 연습을 최근에 본 순서로 몇 건
+ * 돌려줍니다(Issue #107).
  *
- * <p>리포트 조회·소유권 스코프는 {@link ReportRepository} 에 맡기고, 여기서는 limit 검증과
- * 응답 매핑만 합니다. report 도메인의 조회 로직을 복사하지 않습니다.
+ * <p>리포트 조회·소유권 스코프·상태 필터는 리포트 도메인의 {@link ReportSummaryQueryService} 에
+ * 맡기고(도메인 간 참조는 service 레벨에서만 — docs/01-conventions.md), 여기서는 limit 검증과
+ * 응답 매핑만 합니다.
  */
 @Service
 @RequiredArgsConstructor
 public class RecentReportQueryService {
 
-    /** 홈에 노출하는 리포트 상태. 클릭하면 바로 상세로 이어지는 열람 가능한 둘입니다. */
-    private static final List<ReportStatus> VIEWABLE = List.of(ReportStatus.COMPLETED, ReportStatus.PARTIAL);
-
     static final int DEFAULT_LIMIT = 3;
     static final int MIN_LIMIT = 1;
     static final int MAX_LIMIT = 10;
 
-    private final ReportRepository reportRepository;
+    private final ReportSummaryQueryService reportSummaryQueryService;
 
     /**
      * 최근 리포트 요약. {@code limit} 은 1~10 이며 비우면 {@value #DEFAULT_LIMIT} 건입니다.
@@ -42,8 +38,8 @@ public class RecentReportQueryService {
     public RecentReportListResponse recentReports(String userId, Integer limit) {
         int size = sizeOf(limit);
 
-        List<RecentReportResponse> reports = reportRepository
-                .findRecentViewable(userId, VIEWABLE, PageRequest.of(0, size))
+        List<RecentReportResponse> reports = reportSummaryQueryService
+                .findRecentViewable(userId, size)
                 .stream()
                 .map(RecentReportQueryService::toResponse)
                 .toList();
@@ -74,6 +70,6 @@ public class RecentReportQueryService {
                 row.questionCount(),
                 row.status(),
                 row.scoreTotal(),
-                row.completedAt());
+                row.practicedOn());
     }
 }

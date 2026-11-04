@@ -180,10 +180,8 @@ class BookmarkServiceTest {
         service.editMemo(USER_ID, SESSION_ID, QUESTION_ID, "가".repeat(500));
         assertThat(bookmark.getMemo()).hasSize(500);
 
-        assertThatThrownBy(() -> service.editMemo(USER_ID, SESSION_ID, QUESTION_ID, "가".repeat(501)))
-                .isInstanceOf(BusinessException.class)
-                .extracting(e -> ((BusinessException) e).getErrorCode())
-                .isEqualTo(ErrorCode.INVALID_REQUEST);
+        assertErrorCode(() -> service.editMemo(USER_ID, SESSION_ID, QUESTION_ID, "가".repeat(501)),
+                ErrorCode.INVALID_REQUEST);
         assertThat(bookmark.getMemo()).hasSize(500);
     }
 
@@ -191,10 +189,7 @@ class BookmarkServiceTest {
     void 질문은행에_없으면_메모도_BOOKMARK_NOT_FOUND() {
         when(bookmarkRepository.findOwned(USER_ID, SESSION_ID, QUESTION_ID)).thenReturn(Optional.empty());
 
-        assertThatThrownBy(() -> service.editMemo(USER_ID, SESSION_ID, QUESTION_ID, "메모"))
-                .isInstanceOf(BusinessException.class)
-                .extracting(e -> ((BusinessException) e).getErrorCode())
-                .isEqualTo(ErrorCode.BOOKMARK_NOT_FOUND);
+        assertErrorCode(() -> service.editMemo(USER_ID, SESSION_ID, QUESTION_ID, "메모"), ErrorCode.BOOKMARK_NOT_FOUND);
     }
 
     /** 끝난 면접의 질문도 질문은행에서는 뺄 수 있어야 합니다. 세션 상태를 보지 않습니다. */
@@ -215,10 +210,7 @@ class BookmarkServiceTest {
         Question question = givenQuestion(true);
         when(bookmarkRepository.deleteOwned(USER_ID, SESSION_ID, QUESTION_ID)).thenReturn(0);
 
-        assertThatThrownBy(() -> service.delete(USER_ID, SESSION_ID, QUESTION_ID))
-                .isInstanceOf(BusinessException.class)
-                .extracting(e -> ((BusinessException) e).getErrorCode())
-                .isEqualTo(ErrorCode.BOOKMARK_NOT_FOUND);
+        assertErrorCode(() -> service.delete(USER_ID, SESSION_ID, QUESTION_ID), ErrorCode.BOOKMARK_NOT_FOUND);
         assertThat(question.isBookmarked()).isTrue();
     }
 
@@ -248,11 +240,15 @@ class BookmarkServiceTest {
 
     /** 거절되면 행도 건드리지 않아야 합니다. */
     private void assertToggleRejected(ThrowingCallable call, ErrorCode expected) {
+        assertErrorCode(call, expected);
+        verify(bookmarkRepository, never()).insertIfAbsent(anyString(), anyString(), anyString());
+        verify(bookmarkRepository, never()).deleteOwned(anyString(), anyString(), anyString());
+    }
+
+    private static void assertErrorCode(ThrowingCallable call, ErrorCode expected) {
         assertThatThrownBy(call)
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(expected);
-        verify(bookmarkRepository, never()).insertIfAbsent(anyString(), anyString(), anyString());
-        verify(bookmarkRepository, never()).deleteOwned(anyString(), anyString(), anyString());
     }
 }

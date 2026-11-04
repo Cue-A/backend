@@ -39,12 +39,14 @@ public interface BookmarkedQuestionRepository extends Repository<BookmarkedQuest
                        @Param("sessionId") String sessionId,
                        @Param("questionId") String questionId);
 
-    @Query("""
-            select b from BookmarkedQuestion b
+    /** 내 북마크 한 건을 가리키는 조건. 찾기와 지우기가 같이 씁니다. */
+    String OWNED_CONDITION = """
              where b.user.userId = :userId
                and b.question.sessionId = :sessionId
                and b.question.questionId = :questionId
-            """)
+            """;
+
+    @Query("select b from BookmarkedQuestion b" + OWNED_CONDITION)
     Optional<BookmarkedQuestion> findOwned(@Param("userId") String userId,
                                            @Param("sessionId") String sessionId,
                                            @Param("questionId") String questionId);
@@ -69,12 +71,7 @@ public interface BookmarkedQuestionRepository extends Repository<BookmarkedQuest
 
     /** 내 북마크를 지웁니다. 메모도 같은 행이라 함께 사라집니다. @return 지운 행 수. 없던 것이면 0 */
     @Modifying
-    @Query("""
-            delete from BookmarkedQuestion b
-             where b.user.userId = :userId
-               and b.question.sessionId = :sessionId
-               and b.question.questionId = :questionId
-            """)
+    @Query("delete from BookmarkedQuestion b" + OWNED_CONDITION)
     int deleteOwned(@Param("userId") String userId,
                     @Param("sessionId") String sessionId,
                     @Param("questionId") String questionId);

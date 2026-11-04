@@ -8,10 +8,8 @@ import com.cuea.domain.interview.dto.response.BookmarkMemoResponse;
 import com.cuea.domain.interview.dto.response.BookmarkResponse;
 import com.cuea.domain.interview.dto.response.BookmarkToggleResponse;
 import com.cuea.domain.interview.entity.BookmarkedQuestion;
-import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.interview.entity.Question;
 import com.cuea.domain.interview.entity.QuestionId;
-import com.cuea.domain.interview.entity.SessionStatus;
 import com.cuea.domain.interview.repository.BookmarkedQuestionRepository;
 import com.cuea.domain.interview.repository.InterviewSessionRepository;
 import com.cuea.domain.interview.repository.QuestionRepository;
@@ -121,15 +119,9 @@ public class BookmarkService {
                 : originals.get(new QuestionId(question.getSessionId(), question.getReaskOf()));
     }
 
-    /** 답변 제출과 같은 기준입니다. 중단은 SESSION_ABORTED, 그 밖에 진행 중이 아니면 SESSION_ENDED. */
+    /** 답변 제출과 같은 상태 규칙({@link ActiveSession})입니다. */
     private void requireOwnedActiveSession(String userId, String sessionId) {
-        InterviewSession session = sessionRepository.findBySessionIdAndUser_UserId(sessionId, userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND));
-        if (session.getStatus() == SessionStatus.ABORTED) {
-            throw new BusinessException(ErrorCode.SESSION_ABORTED);
-        }
-        if (session.getStatus() != SessionStatus.IN_PROGRESS) {
-            throw new BusinessException(ErrorCode.SESSION_ENDED);
-        }
+        ActiveSession.require(sessionRepository.findBySessionIdAndUser_UserId(sessionId, userId)
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND)));
     }
 }

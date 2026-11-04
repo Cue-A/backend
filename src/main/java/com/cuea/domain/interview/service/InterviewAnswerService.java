@@ -197,26 +197,14 @@ public class InterviewAnswerService {
     }
 
     /**
-     * 세션을 소유자 기준으로 조회하고, 진행 중인지 확인합니다.
+     * 세션을 소유자 기준으로 조회하고, 진행 중인지 확인합니다. 상태 규칙은 {@link ActiveSession}.
      *
-     * <p>정상 종료(COMPLETED)와 중단(ABORTED)을 구분해 각각 {@code SESSION_ENDED} ·
-     * {@code SESSION_ABORTED} 로 알립니다. 클라이언트가 두 상황을 다르게 안내할 수
-     * 있어야 하기 때문입니다. error_code 별 재시도·중복 제출 정책은 Issue #25 범위이므로
-     * 여기서는 상태 구분까지만 합니다.
+     * <p>error_code 별 재시도·중복 제출 정책은 Issue #25 범위이므로 여기서는 상태 구분까지만 합니다.
      */
     private InterviewSession requireOwnedActiveSession(String userId, String sessionId) {
-        InterviewSession session = sessionRepository
+        return ActiveSession.require(sessionRepository
                 .findBySessionIdAndUser_UserId(sessionId, userId)
-                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND));
-        SessionStatus status = session.getStatus();
-        if (status == SessionStatus.ABORTED) {
-            throw new BusinessException(ErrorCode.SESSION_ABORTED);
-        }
-        if (status != SessionStatus.IN_PROGRESS) {
-            // COMPLETED 등 진행 중이 아닌 나머지는 이미 종료된 세션으로 취급합니다.
-            throw new BusinessException(ErrorCode.SESSION_ENDED);
-        }
-        return session;
+                .orElseThrow(() -> new BusinessException(ErrorCode.SESSION_NOT_FOUND)));
     }
 
     /**

@@ -13,6 +13,7 @@ import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PatchMapping;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -77,5 +78,21 @@ public class BookmarkController {
             @RequestBody BookmarkMemoRequest request) {
 
         return Result.ok(bookmarkService.editMemo(userId, sessionId, questionId, request.memo()));
+    }
+
+    @Operation(
+            summary = "질문은행에서 빼기",
+            description = """
+                    메모도 함께 지워집니다. 면접 기록과 리포트는 그대로이고, 면접이 끝난 뒤에도 됩니다.
+                    질문은행에 없거나 남의 것이거나 이미 지웠으면 404 BOOKMARK_NOT_FOUND 입니다.""")
+    @DeleteMapping("/bookmarks/{sessionId}/{questionId}")
+    @RateLimit(key = "bookmark-delete", limit = 30, windowSeconds = 60)
+    public Result<Void> delete(
+            @CurrentUser String userId,
+            @PathVariable String sessionId,
+            @PathVariable String questionId) {
+
+        bookmarkService.delete(userId, sessionId, questionId);
+        return Result.ok();
     }
 }

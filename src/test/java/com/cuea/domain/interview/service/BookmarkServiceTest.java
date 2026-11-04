@@ -197,6 +197,31 @@ class BookmarkServiceTest {
                 .isEqualTo(ErrorCode.BOOKMARK_NOT_FOUND);
     }
 
+    /** 끝난 면접의 질문도 질문은행에서는 뺄 수 있어야 합니다. 세션 상태를 보지 않습니다. */
+    @Test
+    void 질문은행에서_빼면_플래그도_끈다() {
+        Question question = givenQuestion(true);
+        when(bookmarkRepository.deleteOwned(USER_ID, SESSION_ID, QUESTION_ID)).thenReturn(1);
+
+        service.delete(USER_ID, SESSION_ID, QUESTION_ID);
+
+        verify(bookmarkRepository).deleteOwned(USER_ID, SESSION_ID, QUESTION_ID);
+        assertThat(question.isBookmarked()).isFalse();
+    }
+
+    /** 남의 북마크를 지우려 했다면 그 질문의 플래그도 건드리면 안 됩니다. */
+    @Test
+    void 이미_지웠거나_남의_것이면_BOOKMARK_NOT_FOUND() {
+        Question question = givenQuestion(true);
+        when(bookmarkRepository.deleteOwned(USER_ID, SESSION_ID, QUESTION_ID)).thenReturn(0);
+
+        assertThatThrownBy(() -> service.delete(USER_ID, SESSION_ID, QUESTION_ID))
+                .isInstanceOf(BusinessException.class)
+                .extracting(e -> ((BusinessException) e).getErrorCode())
+                .isEqualTo(ErrorCode.BOOKMARK_NOT_FOUND);
+        assertThat(question.isBookmarked()).isTrue();
+    }
+
     private BookmarkedQuestion givenBookmark(String memo) {
         BookmarkedQuestion bookmark = BookmarkedQuestion.builder().memo(memo).build();
         when(bookmarkRepository.findOwned(USER_ID, SESSION_ID, QUESTION_ID)).thenReturn(Optional.of(bookmark));

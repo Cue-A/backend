@@ -82,6 +82,20 @@ public class BookmarkService {
     }
 
     /**
+     * 질문은행에서 뺍니다. 메모도 함께 지워집니다. 세션 상태를 보지 않아 끝난 면접의 질문도 뺄 수 있습니다.
+     *
+     * <p>지운 행이 없으면(이미 지웠거나 남의 것) 404 이고 플래그도 건드리지 않습니다.
+     */
+    @Transactional
+    public void delete(String userId, String sessionId, String questionId) {
+        if (bookmarkRepository.deleteOwned(userId, sessionId, questionId) == 0) {
+            throw new BusinessException(ErrorCode.BOOKMARK_NOT_FOUND);
+        }
+        questionRepository.findBySessionIdAndQuestionId(sessionId, questionId)
+                .ifPresent(question -> question.markBookmarked(false));
+    }
+
+    /**
      * 페이지 안 되묻기들의 원래 질문 문구. 한 번에 조회하고 {@code (sessionId, questionId)} 쌍으로 맞춥니다.
      * 되묻기가 없으면 조회하지 않습니다.
      */

@@ -60,6 +60,15 @@ class BookmarkControllerTest {
     }
 
     @Test
+    void 삭제는_서비스에_넘기고_빈_성공_응답을_준다() {
+        Result<Void> result = controller.delete(USER_ID, "sess_1", "q_4");
+
+        verify(bookmarkService).delete(USER_ID, "sess_1", "q_4");
+        assertThat(result.success()).isTrue();
+        assertThat(result.data()).isNull();
+    }
+
+    @Test
     void 목록은_page_size_를_서비스에_넘긴다() {
         BookmarkListResponse dto = new BookmarkListResponse(List.of(), 1, 50, 0, 0);
         when(bookmarkService.list(USER_ID, 1, 50)).thenReturn(dto);

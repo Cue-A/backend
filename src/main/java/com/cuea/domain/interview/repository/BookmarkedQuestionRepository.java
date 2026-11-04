@@ -1,6 +1,8 @@
 package com.cuea.domain.interview.repository;
 
 import com.cuea.domain.interview.entity.BookmarkedQuestion;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.Modifying;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.Repository;
@@ -34,6 +36,24 @@ public interface BookmarkedQuestionRepository extends Repository<BookmarkedQuest
     int insertIfAbsent(@Param("userId") String userId,
                        @Param("sessionId") String sessionId,
                        @Param("questionId") String questionId);
+
+    /**
+     * 질문은행 목록. 담은 시각 최신순이고 같은 시각이면 나중에 담은 것이 먼저입니다.
+     *
+     * <p>응답에 질문 문구 · 직무 · 회사명이 들어가 질문과 세션을 함께 가져옵니다. 회사는 고르지 않은
+     * 세션이 있어 left join 입니다. inner join 이면 그 북마크가 목록에서 빠집니다.
+     * 정렬이 쿼리에 있으므로 {@code pageable} 에는 정렬을 넣지 마세요.
+     */
+    @Query(value = """
+            select b from BookmarkedQuestion b
+              join fetch b.question q
+              join fetch q.session s
+              left join fetch s.company
+             where b.user.userId = :userId
+             order by b.createdAt desc, b.bookmarkedQuestionId desc
+            """,
+            countQuery = "select count(b) from BookmarkedQuestion b where b.user.userId = :userId")
+    Page<BookmarkedQuestion> findPageOwned(@Param("userId") String userId, Pageable pageable);
 
     /** 내 북마크를 지웁니다. 메모도 같은 행이라 함께 사라집니다. @return 지운 행 수. 없던 것이면 0 */
     @Modifying

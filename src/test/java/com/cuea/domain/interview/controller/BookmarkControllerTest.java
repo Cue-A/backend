@@ -2,10 +2,13 @@ package com.cuea.domain.interview.controller;
 
 import com.cuea.common.result.Result;
 import com.cuea.domain.interview.dto.request.BookmarkToggleRequest;
+import com.cuea.domain.interview.dto.response.BookmarkListResponse;
 import com.cuea.domain.interview.dto.response.BookmarkToggleResponse;
 import com.cuea.domain.interview.service.BookmarkService;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+
+import java.util.List;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.mockito.Mockito.mock;
@@ -38,6 +41,17 @@ class BookmarkControllerTest {
                 controller.setBookmarked(USER_ID, "sess_1", "q_4r", new BookmarkToggleRequest(false));
 
         verify(bookmarkService).setBookmarked(USER_ID, "sess_1", "q_4r", false);
+        assertThat(result.success()).isTrue();
+        assertThat(result.data()).isSameAs(dto);
+    }
+
+    @Test
+    void 목록은_page_size_를_서비스에_넘긴다() {
+        BookmarkListResponse dto = new BookmarkListResponse(List.of(), 1, 50, 0, 0);
+        when(bookmarkService.list(USER_ID, 1, 50)).thenReturn(dto);
+
+        Result<BookmarkListResponse> result = controller.list(USER_ID, 1, 50);
+
         assertThat(result.success()).isTrue();
         assertThat(result.data()).isSameAs(dto);
     }

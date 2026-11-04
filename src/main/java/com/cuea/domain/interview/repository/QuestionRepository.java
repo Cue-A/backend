@@ -4,6 +4,7 @@ import com.cuea.domain.interview.entity.Question;
 import com.cuea.domain.interview.entity.QuestionId;
 import org.springframework.data.repository.Repository;
 
+import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
@@ -27,6 +28,12 @@ public interface QuestionRepository extends Repository<Question, QuestionId> {
      * object key 를 붙이기 위해 씁니다. 소유권은 세션으로 먼저 확인한 뒤 호출하세요.
      */
     Optional<Question> findBySessionIdAndQuestionId(String sessionId, String questionId);
+
+    /**
+     * 질문은행에서 되묻기의 원래 질문을 한 번에 찾을 때 씁니다. 두 IN 을 따로 거는 것이라 다른 세션의 같은
+     * {@code questionId} 도 섞여 나옵니다. 호출부에서 {@code (sessionId, questionId)} 쌍으로 다시 맞추세요.
+     */
+    List<Question> findAllBySessionIdInAndQuestionIdIn(Collection<String> sessionIds, Collection<String> questionIds);
 
     Question save(Question question);
 }

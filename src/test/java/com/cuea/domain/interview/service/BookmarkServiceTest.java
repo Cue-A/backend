@@ -2,7 +2,10 @@ package com.cuea.domain.interview.service;
 
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
+import com.cuea.domain.interview.dto.response.BookmarkListResponse;
+import com.cuea.domain.interview.dto.response.BookmarkResponse;
 import com.cuea.domain.interview.dto.response.BookmarkToggleResponse;
+import com.cuea.domain.interview.entity.BookmarkedQuestion;
 import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.interview.entity.Question;
 import com.cuea.domain.interview.entity.QuestionType;
@@ -13,12 +16,18 @@ import com.cuea.domain.interview.repository.QuestionRepository;
 import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.PageImpl;
 
+import java.util.List;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
@@ -104,6 +113,43 @@ class BookmarkServiceTest {
 
         assertToggleRejected(() -> service.setBookmarked(USER_ID, SESSION_ID, QUESTION_ID, true),
                 ErrorCode.QUESTION_NOT_FOUND);
+    }
+
+    /** question_id 는 세션 스코프라 다른 세션에도 q_4 가 있습니다. 같은 세션의 q_4 를 붙여야 합니다. */
+    @Test
+    void 되묻기에는_같은_세션의_원래_질문_문구를_붙인다() {
+        InterviewSession first = InterviewSession.builder().sessionId("sess_1").jobRole("백엔드").build();
+        InterviewSession second = InterviewSession.builder().sessionId("sess_2").jobRole("백엔드").build();
+        BookmarkedQuestion reask = bookmarked(Question.builder().sessionId("sess_1").questionId("q_4r")
+                .session(first).type(QuestionType.REASK).text("수치로 다시 설명해 주시겠어요?").reaskOf("q_4").build());
+        BookmarkedQuestion plain = bookmarked(Question.builder().sessionId("sess_2").questionId("q_4")
+                .session(second).type(QuestionType.QUESTION).text("다른 세션의 질문").category("프로젝트경험").build());
+        when(bookmarkRepository.findPageOwned(eq(USER_ID), any())).thenReturn(new PageImpl<>(List.of(reask, plain)));
+        when(questionRepository.findAllBySessionIdInAndQuestionIdIn(anyCollection(), anyCollection())).thenReturn(List.of(
+                Question.builder().sessionId("sess_1").questionId("q_4").text("프로젝트 경험을 말씀해 주세요.").build(),
+                Question.builder().sessionId("sess_2").questionId("q_4").text("다른 세션의 질문").build()));
+
+        BookmarkListResponse response = service.list(USER_ID, 0, 20);
+
+        assertThat(response.bookmarks())
+                .extracting(BookmarkResponse::questionId, BookmarkResponse::originalQuestionText)
+                .containsExactly(tuple("q_4r", "프로젝트 경험을 말씀해 주세요."), tuple("q_4", null));
+    }
+
+    @Test
+    void 되묻기가_없으면_원래_질문을_조회하지_않는다() {
+        InterviewSession session = InterviewSession.builder().sessionId(SESSION_ID).jobRole("백엔드").build();
+        BookmarkedQuestion plain = bookmarked(Question.builder().sessionId(SESSION_ID).questionId(QUESTION_ID)
+                .session(session).type(QuestionType.QUESTION).text("질문").build());
+        when(bookmarkRepository.findPageOwned(eq(USER_ID), any())).thenReturn(new PageImpl<>(List.of(plain)));
+
+        service.list(USER_ID, 0, 20);
+
+        verify(questionRepository, never()).findAllBySessionIdInAndQuestionIdIn(anyCollection(), anyCollection());
+    }
+
+    private static BookmarkedQuestion bookmarked(Question question) {
+        return BookmarkedQuestion.builder().question(question).build();
     }
 
     private void givenSession(SessionStatus status) {

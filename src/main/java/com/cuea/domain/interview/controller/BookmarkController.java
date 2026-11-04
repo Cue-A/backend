@@ -4,16 +4,19 @@ import com.cuea.common.annotation.RateLimit;
 import com.cuea.common.result.Result;
 import com.cuea.common.security.CurrentUser;
 import com.cuea.domain.interview.dto.request.BookmarkToggleRequest;
+import com.cuea.domain.interview.dto.response.BookmarkListResponse;
 import com.cuea.domain.interview.dto.response.BookmarkToggleResponse;
 import com.cuea.domain.interview.service.BookmarkService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /** 면접 중 북마크는 면접 경로 아래, 질문은행 화면의 API 는 {@code /api/bookmarks} 아래에 둡니다. */
@@ -40,5 +43,20 @@ public class BookmarkController {
             @Valid @RequestBody BookmarkToggleRequest request) {
 
         return Result.ok(bookmarkService.setBookmarked(userId, sessionId, questionId, request.bookmarked()));
+    }
+
+    @Operation(
+            summary = "질문은행 목록",
+            description = """
+                    내가 담은 질문을 담은 시각 최신순으로 줍니다. 필터는 없고 size 는 100 을 넘길 수 없습니다.
+                    되묻기는 originalQuestionText 에 원래 질문 문구가 오고, 그 외에는 null 입니다.""")
+    @GetMapping("/bookmarks")
+    @RateLimit(key = "bookmark-list", limit = 60, windowSeconds = 60)
+    public Result<BookmarkListResponse> list(
+            @CurrentUser String userId,
+            @RequestParam(required = false) Integer page,
+            @RequestParam(required = false) Integer size) {
+
+        return Result.ok(bookmarkService.list(userId, page, size));
     }
 }

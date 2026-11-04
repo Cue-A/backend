@@ -2,16 +2,28 @@ package com.cuea.domain.interview.service;
 
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
+import com.cuea.common.paging.PageRequests;
+import com.cuea.domain.interview.dto.response.BookmarkListResponse;
+import com.cuea.domain.interview.dto.response.BookmarkResponse;
 import com.cuea.domain.interview.dto.response.BookmarkToggleResponse;
+import com.cuea.domain.interview.entity.BookmarkedQuestion;
 import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.interview.entity.Question;
+import com.cuea.domain.interview.entity.QuestionId;
 import com.cuea.domain.interview.entity.SessionStatus;
 import com.cuea.domain.interview.repository.BookmarkedQuestionRepository;
 import com.cuea.domain.interview.repository.InterviewSessionRepository;
 import com.cuea.domain.interview.repository.QuestionRepository;
 import lombok.RequiredArgsConstructor;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Sort;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
+import java.util.stream.Collectors;
 
 /**
  * 질문은행. 면접 중에 질문을 담고 빼기와, 담은 질문의 목록 · 메모 · 삭제.
@@ -46,6 +58,42 @@ public class BookmarkService {
         }
         question.markBookmarked(bookmarked);
         return new BookmarkToggleResponse(bookmarked);
+    }
+
+    /** 질문은행 목록. 담은 시각 최신순이고 필터는 없습니다. 재연습에서 같은 질문을 또 담았으면 두 줄입니다. */
+    @Transactional(readOnly = true)
+    public BookmarkListResponse list(String userId, Integer page, Integer size) {
+        Page<BookmarkedQuestion> bookmarks =
+                bookmarkRepository.findPageOwned(userId, PageRequests.of(page, size, Sort.unsorted()));
+        Map<QuestionId, String> originals = originalTexts(bookmarks.getContent());
+        return BookmarkListResponse.from(bookmarks.map(bookmark ->
+                BookmarkResponse.of(bookmark, originalTextOf(bookmark.getQuestion(), originals))));
+    }
+
+    /**
+     * 페이지 안 되묻기들의 원래 질문 문구. 한 번에 조회하고 {@code (sessionId, questionId)} 쌍으로 맞춥니다.
+     * 되묻기가 없으면 조회하지 않습니다.
+     */
+    private Map<QuestionId, String> originalTexts(List<BookmarkedQuestion> bookmarks) {
+        List<Question> reasks = bookmarks.stream()
+                .map(BookmarkedQuestion::getQuestion)
+                .filter(question -> question.getReaskOf() != null)
+                .toList();
+        if (reasks.isEmpty()) {
+            return Map.of();
+        }
+        Set<String> sessionIds = reasks.stream().map(Question::getSessionId).collect(Collectors.toSet());
+        Set<String> questionIds = reasks.stream().map(Question::getReaskOf).collect(Collectors.toSet());
+        return questionRepository.findAllBySessionIdInAndQuestionIdIn(sessionIds, questionIds).stream()
+                .collect(Collectors.toMap(
+                        question -> new QuestionId(question.getSessionId(), question.getQuestionId()),
+                        Question::getText));
+    }
+
+    private static String originalTextOf(Question question, Map<QuestionId, String> originals) {
+        return question.getReaskOf() == null
+                ? null
+                : originals.get(new QuestionId(question.getSessionId(), question.getReaskOf()));
     }
 
     /** 답변 제출과 같은 기준입니다. 중단은 SESSION_ABORTED, 그 밖에 진행 중이 아니면 SESSION_ENDED. */

@@ -3,7 +3,6 @@ package com.cuea.domain.user.service;
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.auth.service.TokenService;
-import com.cuea.domain.interview.service.InterviewSessionQueryService;
 import com.cuea.infrastructure.file.UserFileCleaner;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -25,7 +24,6 @@ class UserWithdrawalServiceTest {
 
     private UserWriter userWriter;
     private TokenService tokenService;
-    private InterviewSessionQueryService sessionQueryService;
     private UserFileCleaner fileCleaner;
     private UserWithdrawalService userWithdrawalService;
 
@@ -33,20 +31,17 @@ class UserWithdrawalServiceTest {
     void setUp() {
         userWriter = mock(UserWriter.class);
         tokenService = mock(TokenService.class);
-        sessionQueryService = mock(InterviewSessionQueryService.class);
         fileCleaner = mock(UserFileCleaner.class);
-        userWithdrawalService = new UserWithdrawalService(
-                userWriter, tokenService, sessionQueryService, fileCleaner);
+        userWithdrawalService = new UserWithdrawalService(userWriter, tokenService, fileCleaner);
     }
 
     @Test
     void 탈퇴하면_사용자를_지운_뒤에_토큰을_끊고_S3_파일을_지운다() {
-        when(sessionQueryService.getSessionIdsOf("user-1")).thenReturn(List.of("s-1", "s-2"));
+        when(userWriter.delete("user-1")).thenReturn(List.of("s-1", "s-2"));
 
         userWithdrawalService.withdraw("user-1");
 
-        InOrder order = inOrder(sessionQueryService, userWriter, tokenService, fileCleaner);
-        order.verify(sessionQueryService).getSessionIdsOf("user-1");
+        InOrder order = inOrder(userWriter, tokenService, fileCleaner);
         order.verify(userWriter).delete("user-1");
         order.verify(tokenService).revokeAll("user-1");
         order.verify(fileCleaner).removeAll("user-1", List.of("s-1", "s-2"));

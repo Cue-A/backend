@@ -1,7 +1,6 @@
 package com.cuea.domain.user.service;
 
 import com.cuea.domain.auth.service.TokenService;
-import com.cuea.domain.interview.service.InterviewSessionQueryService;
 import com.cuea.infrastructure.file.UserFileCleaner;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
@@ -20,8 +19,9 @@ import java.util.List;
  *
  * <h2>순서</h2>
  * <ol>
- *   <li>세션 ID 를 먼저 모읍니다. 행이 지워지면 어떤 S3 키가 이 사용자 것인지 알 수 없습니다.</li>
- *   <li>DB 삭제({@link UserWriter}). 여기서만 트랜잭션을 엽니다.</li>
+ *   <li>DB 삭제({@link UserWriter}). 유저 행을 잠그고 세션 ID 를 모은 뒤 지우는 것까지
+ *       한 트랜잭션입니다 — 행이 지워지면 어떤 S3 키가 이 사용자 것인지 알 수 없으므로,
+ *       수집과 삭제 사이에 새 세션이 끼어들지 못하게 묶습니다.</li>
  *   <li>커밋 뒤 전 기기 토큰 폐기와 S3 파일 삭제. 커밋이 실패하면 둘 다 하지 않습니다.</li>
  * </ol>
  *
@@ -34,13 +34,10 @@ public class UserWithdrawalService {
 
     private final UserWriter userWriter;
     private final TokenService tokenService;
-    private final InterviewSessionQueryService sessionQueryService;
     private final UserFileCleaner fileCleaner;
 
     public void withdraw(String userId) {
-        List<String> sessionIds = sessionQueryService.getSessionIdsOf(userId);
-
-        userWriter.delete(userId);
+        List<String> sessionIds = userWriter.delete(userId);
 
         tokenService.revokeAll(userId);
         fileCleaner.removeAll(userId, sessionIds);

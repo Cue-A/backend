@@ -4,7 +4,12 @@ import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 
+import java.util.ArrayList;
 import java.util.List;
+import java.util.concurrent.ExecutionException;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 /**
  * 회원 탈퇴 때 사용자의 S3 파일을 전부 지웁니다.
@@ -26,9 +31,27 @@ public class UserFileCleaner {
 
     private final S3StorageService storage;
 
+    /**
+     * 세션 접두사 삭제는 세션마다 S3 목록 조회·삭제 왕복이 따로 들어, 가상 스레드로
+     * 동시에 돌립니다. {@code spring.threads.virtual.enabled} 가 켜져 있어 이 메서드를
+     * 부르는 요청 스레드도 가상 스레드입니다.
+     */
     public void removeAll(String userId, List<String> sessionIds) {
         removePrefix(ObjectKeys.resumePrefix(userId));
-        sessionIds.forEach(sessionId -> removePrefix(ObjectKeys.sessionPrefix(sessionId)));
+
+        try (ExecutorService executor = Executors.newVirtualThreadPerTaskExecutor()) {
+            List<Future<?>> futures = new ArrayList<>();
+            for (String sessionId : sessionIds) {
+                futures.add(executor.submit(() -> removePrefix(ObjectKeys.sessionPrefix(sessionId))));
+            }
+            for (Future<?> future : futures) {
+                future.get();
+            }
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+        } catch (ExecutionException e) {
+            log.error("탈퇴 사용자 세션 S3 파일 삭제 중 예외. 고아 객체가 남을 수 있습니다 userId={}", userId, e);
+        }
     }
 
     private void removePrefix(String prefix) {

@@ -10,6 +10,7 @@ import software.amazon.awssdk.services.s3.S3Client;
 import software.amazon.awssdk.services.s3.model.Delete;
 import software.amazon.awssdk.services.s3.model.DeleteObjectRequest;
 import software.amazon.awssdk.services.s3.model.DeleteObjectsRequest;
+import software.amazon.awssdk.services.s3.model.DeleteObjectsResponse;
 import software.amazon.awssdk.services.s3.model.HeadObjectRequest;
 import software.amazon.awssdk.services.s3.model.HeadObjectResponse;
 import software.amazon.awssdk.services.s3.model.ListObjectsV2Request;
@@ -120,10 +121,14 @@ public class S3StorageService {
                 if (keys.isEmpty()) {
                     continue;
                 }
-                s3Client.deleteObjects(DeleteObjectsRequest.builder()
+                DeleteObjectsResponse response = s3Client.deleteObjects(DeleteObjectsRequest.builder()
                         .bucket(properties.bucket())
                         .delete(Delete.builder().objects(keys).quiet(true).build())
                         .build());
+                if (!response.errors().isEmpty()) {
+                    log.error("S3 접두사 삭제 중 일부 객체 실패 prefix={} errors={}", prefix, response.errors());
+                    throw new BusinessException(ErrorCode.STORAGE_ERROR);
+                }
             }
         } catch (S3Exception e) {
             log.error("S3 접두사 삭제 실패 prefix={}", prefix, e);

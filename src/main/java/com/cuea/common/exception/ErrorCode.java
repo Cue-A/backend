@@ -62,6 +62,9 @@ public enum ErrorCode {
     FOLDER_NAME_DUPLICATED(HttpStatus.CONFLICT, "같은 이름의 폴더가 이미 있습니다"),
     FOLDER_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "폴더는 최대 20개까지 만들 수 있습니다"),
 
+    // ── 질문은행 ─────────────────────────────────────────────
+    BOOKMARK_NOT_FOUND(HttpStatus.NOT_FOUND, "질문은행에 없는 질문입니다"),
+
     // ── AI 서버 (docs/10-ai-client.md 의 errorCode 와 1:1) ────
     AI_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AI 서버에 연결할 수 없습니다"),
     AI_TIMEOUT(HttpStatus.GATEWAY_TIMEOUT, "AI 처리 시간이 초과되었습니다"),

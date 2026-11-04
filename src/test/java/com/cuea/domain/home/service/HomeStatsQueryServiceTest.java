@@ -1,7 +1,7 @@
 package com.cuea.domain.home.service;
 
 import com.cuea.domain.home.dto.response.HomeStatsResponse;
-import com.cuea.domain.interview.repository.InterviewSessionRepository;
+import com.cuea.domain.interview.service.InterviewSessionQueryService;
 import org.junit.jupiter.api.Test;
 
 import java.time.Clock;
@@ -16,7 +16,7 @@ import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
 
 /**
- * 홈 연습 통계(Issue #113) 계산 로직을 Clock 고정으로 봅니다. 리포지토리는 완료 KST 날짜 목록만
+ * 홈 연습 통계(Issue #113) 계산 로직을 Clock 고정으로 봅니다. 도메인 창구는 완료 KST 날짜 목록만
  * 돌려주므로 mock 으로 주입하고, 이번 달 집계·지난달 대비 증감·스트릭 규칙을 검증합니다.
  */
 class HomeStatsQueryServiceTest {
@@ -30,10 +30,10 @@ class HomeStatsQueryServiceTest {
     }
 
     private HomeStatsQueryService serviceWith(Clock clock, List<LocalDate> dates) {
-        InterviewSessionRepository repo = mock(InterviewSessionRepository.class);
-        when(repo.findCompletedDatesInKst(anyString()))
+        InterviewSessionQueryService sessionQueryService = mock(InterviewSessionQueryService.class);
+        when(sessionQueryService.findCompletedPracticeDatesInKst(anyString()))
                 .thenReturn(dates.stream().map(LocalDate::toString).toList());
-        return new HomeStatsQueryService(repo, clock);
+        return new HomeStatsQueryService(sessionQueryService, clock);
     }
 
     @Test
@@ -78,6 +78,22 @@ class HomeStatsQueryServiceTest {
 
         assertThat(thisMonth.activeDays()).isEqualTo(2);
         assertThat(thisMonth.diffFromLastMonth()).isNull();
+    }
+
+    @Test
+    void 지난달_활동이_같은_기간_밖에만_있어도_증감은_null_이_아니다() {
+        // PR #116 리뷰: null 기준은 "지난달 같은 기간" 이 아니라 "지난달 전체에 활동이 있었는지" 다.
+        LocalDate today = LocalDate.of(2026, 11, 10); // 비교 구간: 1~10일
+        HomeStatsQueryService service = serviceWith(kstClockOn(today), List.of(
+                // 이번 달 1~10일 중 2일
+                LocalDate.of(2026, 11, 3), LocalDate.of(2026, 11, 8),
+                // 지난달 활동은 11~31일(비교 구간 1~10일 밖)에만 있음
+                LocalDate.of(2026, 10, 25)));
+
+        HomeStatsResponse.ThisMonth thisMonth = service.stats(USER).thisMonth();
+
+        // 지난달 전체에는 활동이 있으므로 null 이 아니고, 같은-기간(1~10일) 지난달 활동은 0 이라 2 - 0 = 2
+        assertThat(thisMonth.diffFromLastMonth()).isEqualTo(2);
     }
 
     @Test

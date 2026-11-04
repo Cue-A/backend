@@ -1,14 +1,13 @@
 package com.cuea.domain.home.service;
 
 import com.cuea.domain.home.dto.response.HomeStatsResponse;
-import com.cuea.domain.interview.repository.InterviewSessionRepository;
+import com.cuea.domain.interview.service.InterviewSessionQueryService;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.Clock;
 import java.time.LocalDate;
-import java.util.List;
 import java.util.NavigableSet;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
@@ -21,13 +20,15 @@ import java.util.stream.Collectors;
  * (writer 가 없고 조회 계산이 더 정확 — {@code Streak} 엔티티 주석). "오늘" 은 {@link Clock}
  * 에서 KST 로 얻어 테스트가 날짜 경계를 고정할 수 있습니다.
  *
- * <p>리포지토리가 날짜 한 칸만 투영하므로 엔티티·{@code report_data}(jsonb)를 끌어오지 않습니다.
+ * <p>세션 조회는 면접 도메인의 {@link InterviewSessionQueryService} 를 거칩니다(도메인 간 참조는
+ * service 레벨에서만 — docs/01-conventions.md). 그 창구가 날짜 한 칸만 투영하므로 엔티티·
+ * {@code report_data}(jsonb)를 끌어오지 않습니다.
  */
 @Service
 @RequiredArgsConstructor
 public class HomeStatsQueryService {
 
-    private final InterviewSessionRepository sessionRepository;
+    private final InterviewSessionQueryService sessionQueryService;
     private final Clock clock;
 
     @Transactional(readOnly = true)
@@ -35,7 +36,7 @@ public class HomeStatsQueryService {
         LocalDate today = KoreaTime.today(clock);
 
         // 완료 세션의 KST 날짜(중복 없음, 오름차순). 이번 달·스트릭 모두 이 집합에서 계산합니다.
-        NavigableSet<LocalDate> activeDates = sessionRepository.findCompletedDatesInKst(userId).stream()
+        NavigableSet<LocalDate> activeDates = sessionQueryService.findCompletedPracticeDatesInKst(userId).stream()
                 .map(LocalDate::parse)
                 .collect(Collectors.toCollection(TreeSet::new));
 
@@ -45,10 +46,15 @@ public class HomeStatsQueryService {
     /**
      * 이번 달(1일~오늘) 연습 일수와 지난달 같은 기간 대비 증감.
      *
-     * <p>지난달은 <b>1일~"오늘과 같은 일자"</b>까지만 봅니다. 월초에 지난달 전체와 비교해 늘 모자라
-     * 보이는 왜곡을 피합니다(프론트 {@code types/home.ts} {@code diffFromLastMonth} 주석과 동일 철학).
-     * 지난달이 더 짧아 같은 일자가 없으면 지난달 말일까지로 clamp 합니다. 지난달 해당 구간에 기록이
-     * 하나도 없으면 비교 대상이 없다는 뜻으로 {@code diffFromLastMonth} 는 null 입니다.
+     * <p>증감 <b>값</b>은 "이번 달 1일~오늘" 과 "지난달 1일~오늘과 같은 일자"(지난달이 짧으면 말일로
+     * clamp)의 연습 일수 차이입니다. 월초에 지난달 전체와 비교해 늘 모자라 보이는 왜곡을 피합니다
+     * (프론트 {@code types/home.ts} {@code diffFromLastMonth} 주석과 동일 철학).
+     *
+     * <p><b>null 조건</b>은 "지난달에 연습 기록이 전혀 없을 때" 입니다(같은 기간이 아니라 지난달 전체
+     * 기준). 지난달에 활동이 있었다면 같은-기간 증감을 보여주고, 그 기간에 겹치는 날이 없으면 증감이
+     * 이번 달 일수 그대로가 될 수 있습니다. 프론트 목업({@code homeMock.ts} {@code monthlyActivity})의
+     * {@code hasLastMonth} 와 같은 동작이며, "지난달에 활동이 있었는지" 를 null 기준으로 삼는 편이
+     * 자연스럽습니다(PR #116 리뷰). 지난달 기록이 전혀 없으면 비교 대상이 없다는 뜻으로 null.
      */
     private static HomeStatsResponse.ThisMonth thisMonth(NavigableSet<LocalDate> activeDates, LocalDate today) {
         LocalDate thisMonthStart = today.withDayOfMonth(1);

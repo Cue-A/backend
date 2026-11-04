@@ -5,6 +5,7 @@ import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.interview.entity.Question;
 import com.cuea.domain.interview.entity.SessionStatus;
+import com.cuea.domain.interview.repository.DailyActivityRow;
 import com.cuea.domain.interview.repository.InterviewSessionRepository;
 import com.cuea.domain.interview.repository.QuestionRepository;
 import lombok.RequiredArgsConstructor;
@@ -13,6 +14,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.OffsetDateTime;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
@@ -199,5 +201,38 @@ public class InterviewSessionQueryService {
     public Map<String, String> findQuestionTextsForInternal(String sessionId) {
         return questionRepository.findAllBySessionIdOrderByCreatedAtAsc(sessionId).stream()
                 .collect(Collectors.toMap(Question::getQuestionId, Question::getText));
+    }
+
+    /**
+     * 홈 스트릭·이번 달 연습 일수용 창구(Issue #113). 본인의 완료 세션이 있는 KST 날짜를 중복 없이
+     * 오름차순 {@code YYYY-MM-DD} 문자열로 돌려줍니다.
+     *
+     * <p>home 도메인이 {@link InterviewSessionRepository} 를 직접 쓰지 않도록 여기를 거칩니다
+     * (도메인 간 참조는 service 레벨에서만 — docs/01-conventions.md).
+     */
+    @Transactional(readOnly = true)
+    public List<String> findCompletedPracticeDatesInKst(String userId) {
+        return sessionRepository.findCompletedDatesInKst(userId);
+    }
+
+    /**
+     * 홈 잔디(활동 히트맵)용 창구(Issue #114). 기간 안에서 KST 날짜별 완료 세션 수를 돌려줍니다.
+     * 반열림 구간 {@code [startInclusive, endExclusive)}. 빈 날 0 채움은 호출부가 합니다.
+     */
+    @Transactional(readOnly = true)
+    public List<DailyActivityRow> countDailyPracticeInKst(String userId,
+                                                          OffsetDateTime startInclusive,
+                                                          OffsetDateTime endExclusive) {
+        return sessionRepository.countDailyActivityInKst(userId, startInclusive, endExclusive);
+    }
+
+    /**
+     * 홈 "총 연습 횟수" 창구(Issue #114). 기간 내 완료 세션 수(재연습 포함). 반열림 구간 {@code [start, end)}.
+     */
+    @Transactional(readOnly = true)
+    public long countCompletedPracticeInPeriod(String userId,
+                                               OffsetDateTime startInclusive,
+                                               OffsetDateTime endExclusive) {
+        return sessionRepository.countCompletedInPeriod(userId, startInclusive, endExclusive);
     }
 }

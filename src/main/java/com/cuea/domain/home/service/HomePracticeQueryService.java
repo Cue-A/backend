@@ -5,13 +5,12 @@ import com.cuea.domain.home.dto.response.HomePracticeResponse.ActivityDay;
 import com.cuea.domain.home.dto.response.HomePracticeResponse.ScorePoint;
 import com.cuea.domain.home.dto.response.HomePracticeResponse.ScoreTrend;
 import com.cuea.domain.interview.repository.DailyActivityRow;
-import com.cuea.domain.interview.repository.InterviewSessionRepository;
+import com.cuea.domain.interview.service.InterviewSessionQueryService;
 import com.cuea.domain.report.repository.MonthlyScoreRow;
-import com.cuea.domain.report.repository.ReportRepository;
 import com.cuea.domain.report.repository.ScorePointRow;
 import com.cuea.domain.report.repository.ScoreSummaryRow;
+import com.cuea.domain.report.service.ReportSummaryQueryService;
 import lombok.RequiredArgsConstructor;
-import org.springframework.data.domain.PageRequest;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -31,10 +30,15 @@ import java.util.stream.Collectors;
 /**
  * 홈 연습 기록(기간 의존, Issue #114): 잔디(활동 히트맵) · 점수 추이 · 기간 통계.
  *
- * <p>활동(잔디·총연습·연습일수)은 완료 세션의 {@code completed_at} 기준, 점수(평균·최고·추이)는
- * 리포트의 {@code completed_at} 기준입니다. 날짜·월 경계는 모두 Asia/Seoul 로 계산하고, "오늘" 은
- * {@link Clock} 에서 KST 로 얻습니다. 집계는 전부 PostgreSQL 쿼리(projection)로 처리해
- * 엔티티·{@code report_data}(jsonb)를 끌어오지 않습니다.
+ * <p>활동(잔디·총연습·연습일수)과 점수(평균·최고·추이) 모두 <b>세션(연습) 완료 시각
+ * {@code session.completed_at}</b> 기준입니다(PR #116 리뷰: 재분석에도 날짜가 밀리지 않고 활동과 점수의
+ * 날짜 기준이 일치). 날짜·월 경계는 모두 Asia/Seoul 로 계산하고, "오늘" 은 {@link Clock} 에서 KST 로
+ * 얻습니다.
+ *
+ * <p>세션 집계는 면접 도메인의 {@link InterviewSessionQueryService}, 점수 집계는 리포트 도메인의
+ * {@link ReportSummaryQueryService} 를 거칩니다(도메인 간 참조는 service 레벨에서만 —
+ * docs/01-conventions.md). 두 창구가 PostgreSQL 집계(projection)만 돌려줘 엔티티·
+ * {@code report_data}(jsonb)를 끌어오지 않습니다.
  *
  * <p>DB 에는 쉰 날 행이 없으므로 잔디의 빈 날 0 채움은 여기서(기간 전체 날짜를 돌며) 만듭니다.
  * 점수가 없는 날/달은 0 으로 만들지 않습니다 — 애초에 조회에서 빠집니다.
@@ -46,8 +50,8 @@ public class HomePracticeQueryService {
     private static final DateTimeFormatter ISO_DATE = DateTimeFormatter.ISO_LOCAL_DATE;
     private static final DateTimeFormatter YEAR_MONTH = DateTimeFormatter.ofPattern("yyyy-MM");
 
-    private final InterviewSessionRepository sessionRepository;
-    private final ReportRepository reportRepository;
+    private final InterviewSessionQueryService sessionQueryService;
+    private final ReportSummaryQueryService reportSummaryQueryService;
     private final Clock clock;
 
     @Transactional(readOnly = true)
@@ -61,9 +65,9 @@ public class HomePracticeQueryService {
 
         List<ActivityDay> days = heatmap(userId, startDate, today, startInclusive, endExclusive);
         int activeDays = (int) days.stream().filter(day -> day.count() > 0).count();
-        long totalCount = sessionRepository.countCompletedInPeriod(userId, startInclusive, endExclusive);
+        long totalCount = sessionQueryService.countCompletedPracticeInPeriod(userId, startInclusive, endExclusive);
 
-        ScoreSummaryRow scores = reportRepository.summarizeScores(userId, startInclusive, endExclusive);
+        ScoreSummaryRow scores = reportSummaryQueryService.summarizeScores(userId, startInclusive, endExclusive);
         Integer averageScore = scores == null ? null : roundToInt(scores.average());
         Integer bestScore = scores == null ? null : scores.best();
 
@@ -76,8 +80,8 @@ public class HomePracticeQueryService {
     /** 기간 모든 날을 날짜 오름차순으로. DB 에 있는 날은 그 수, 쉰 날은 0. */
     private List<ActivityDay> heatmap(String userId, LocalDate startDate, LocalDate endDate,
                                       OffsetDateTime startInclusive, OffsetDateTime endExclusive) {
-        Map<String, Long> counts = sessionRepository
-                .countDailyActivityInKst(userId, startInclusive, endExclusive).stream()
+        Map<String, Long> counts = sessionQueryService
+                .countDailyPracticeInKst(userId, startInclusive, endExclusive).stream()
                 .collect(Collectors.toMap(DailyActivityRow::date, DailyActivityRow::count));
 
         List<ActivityDay> days = new ArrayList<>();
@@ -101,8 +105,8 @@ public class HomePracticeQueryService {
      * 뒤집습니다. 같은 날 여러 리포트도 각각 한 점이고, 완료 시각·{@code publicId} 로 정렬이 안정화됩니다.
      */
     private ScoreTrend sessionTrend(String userId, OffsetDateTime startInclusive, OffsetDateTime endExclusive) {
-        List<ScorePointRow> latestFirst = reportRepository.findScorePointsLatestFirst(
-                userId, startInclusive, endExclusive, PageRequest.of(0, PracticePeriod.SESSION_TREND_LIMIT));
+        List<ScorePointRow> latestFirst = reportSummaryQueryService.findScorePointsLatestFirst(
+                userId, startInclusive, endExclusive, PracticePeriod.SESSION_TREND_LIMIT);
 
         List<ScorePoint> points = latestFirst.stream()
                 .sorted(Comparator.comparing(ScorePointRow::completedAt))
@@ -116,7 +120,7 @@ public class HomePracticeQueryService {
 
     /** 월 평균 추이(6m·1y). 유효 점수가 있는 달만, 오래된 달부터. 점수 없는 달은 점 없음. */
     private ScoreTrend monthlyTrend(String userId, OffsetDateTime startInclusive, OffsetDateTime endExclusive) {
-        List<MonthlyScoreRow> rows = reportRepository.findMonthlyScoreAverages(userId, startInclusive, endExclusive);
+        List<MonthlyScoreRow> rows = reportSummaryQueryService.findMonthlyScoreAverages(userId, startInclusive, endExclusive);
 
         List<ScorePoint> points = rows.stream()
                 .map(row -> {

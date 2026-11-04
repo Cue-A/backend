@@ -82,7 +82,7 @@ class HomeScoreRepositoryTest extends PostgresRepositoryTest {
     }
 
     @Test
-    void 리포트_완료시각이_기간_밖이면_제외한다() {
+    void 세션_완료시각이_기간_밖이면_제외한다() {
         report(owner, ReportStatus.COMPLETED, 70, OffsetDateTime.parse("2026-10-31T14:00:00Z")); // 10-31 23:00 KST, 기간 밖
         report(owner, ReportStatus.COMPLETED, 88, OffsetDateTime.parse("2026-11-01T01:00:00Z")); // 기간 안
         em.flush();
@@ -92,6 +92,23 @@ class HomeScoreRepositoryTest extends PostgresRepositoryTest {
 
         assertThat(summary.average().doubleValue()).isEqualTo(88.0, within(0.0001));
         assertThat(summary.best()).isEqualTo(88);
+    }
+
+    @Test
+    void 재분석으로_리포트_완료가_나중이어도_세션_완료_기준으로_집계한다() {
+        // PR #116 리뷰: 9월 연습을 11월(기간 밖)에 재분석해도 세션 완료(11월 기간 안) 기준이라 포함돼야 한다.
+        reportWithTimes(owner, ReportStatus.PARTIAL, 84,
+                OffsetDateTime.parse("2026-11-10T01:00:00Z"),  // 세션 완료: 기간 안
+                OffsetDateTime.parse("2027-02-01T01:00:00Z")); // 리포트 완료(재분석): 한참 뒤, 기간 밖
+        em.flush();
+        em.clear();
+
+        ScoreSummaryRow summary = reportRepository.summarizeScores(owner.getUserId(), NOV_START, NOV_END);
+        List<ScorePointRow> points = reportRepository.findScorePointsLatestFirst(
+                owner.getUserId(), NOV_START, NOV_END, PageRequest.of(0, 8));
+
+        assertThat(summary.best()).isEqualTo(84); // 세션 완료 기준으로 포함
+        assertThat(points).extracting(ScorePointRow::score).containsExactly(84);
     }
 
     @Test
@@ -140,7 +157,8 @@ class HomeScoreRepositoryTest extends PostgresRepositoryTest {
         User other = em.persist(User.create(null, "다른 사람"));
         Document otherResume = em.persist(Document.ofMarkdown(
                 other, UUID.randomUUID(), DocType.RESUME, "이력서", "본문", "docs/other.txt", DocumentStatus.READY));
-        reportFor(other, otherResume, ReportStatus.COMPLETED, 99, OffsetDateTime.parse("2026-11-06T01:00:00Z"));
+        reportFor(other, otherResume, ReportStatus.COMPLETED, 99,
+                OffsetDateTime.parse("2026-11-06T01:00:00Z"), OffsetDateTime.parse("2026-11-06T01:00:00Z"));
         em.flush();
         em.clear();
 
@@ -152,16 +170,24 @@ class HomeScoreRepositoryTest extends PostgresRepositoryTest {
     /* ---- fixtures ---- */
 
     private void report(User user, ReportStatus status, Integer score, OffsetDateTime completedAt) {
-        reportFor(user, resume, status, score, completedAt);
+        // 기존 케이스는 세션 완료와 리포트 완료 시각을 같게 둔다(집계 기준은 세션 완료 시각).
+        reportFor(user, resume, status, score, completedAt, completedAt);
     }
 
-    private void reportFor(User user, Document doc, ReportStatus status, Integer score, OffsetDateTime completedAt) {
+    /** 세션 완료 시각과 리포트 완료 시각을 따로 둘 수 있는 픽스처(재분석으로 리포트 날짜가 밀리는 상황 재현용). */
+    private void reportWithTimes(User user, ReportStatus status, Integer score,
+                                 OffsetDateTime sessionCompletedAt, OffsetDateTime reportCompletedAt) {
+        reportFor(user, resume, status, score, sessionCompletedAt, reportCompletedAt);
+    }
+
+    private void reportFor(User user, Document doc, ReportStatus status, Integer score,
+                           OffsetDateTime sessionCompletedAt, OffsetDateTime reportCompletedAt) {
         InterviewSession session = em.persist(InterviewSession.builder()
                 .sessionId("sess_" + UUID.randomUUID()).user(user).document(doc)
                 .mode("PRACTICE").jobRole("백엔드").questionCount(6)
                 .persona(Persona.FRIENDLY).hideQuestionText(false)
                 .status(SessionStatus.COMPLETED)
-                .completedAt(completedAt == null ? OffsetDateTime.parse("2026-11-01T00:00:00Z") : completedAt)
+                .completedAt(sessionCompletedAt == null ? OffsetDateTime.parse("2026-11-01T00:00:00Z") : sessionCompletedAt)
                 .build());
         // finish() 는 completedAt 을 now() 로 덮으므로, 고정 시각을 위해 빌더로 직접 세팅합니다.
         em.persist(Report.builder()
@@ -170,7 +196,7 @@ class HomeScoreRepositoryTest extends PostgresRepositoryTest {
                 .status(status)
                 .attempt(1)
                 .scoreTotal(score)
-                .completedAt(completedAt)
+                .completedAt(reportCompletedAt)
                 .build());
     }
 }

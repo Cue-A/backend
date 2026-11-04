@@ -12,11 +12,10 @@ import java.util.List;
  * <b>Asia/Seoul</b> 기준이고, 활동은 완료({@code COMPLETED}) 세션, 점수는 열람 가능하고 점수가 있는
  * ({@code COMPLETED}·{@code PARTIAL} + {@code scoreTotal != null}) 리포트만 셉니다.
  *
- * <p><b>활동 날짜와 점수 날짜의 기준이 다릅니다.</b> 잔디·총연습·활동일은 <b>세션 완료 시각</b>
- * ({@code session.completedAt}), 평균·최고·추이는 <b>리포트 완료 시각</b>({@code report.completedAt})
- * 기준입니다. 세션은 면접이 끝난 순간, 리포트는 AI 분석이 끝난 순간이라 보통 몇 분~수십 분 차이가 납니다.
- * 자정 근처에 끝낸 한 번의 연습이 <b>잔디에서는 그날, 점수 추이에서는 다음 날</b>에 찍힐 수 있습니다
- * (드문 경계 사례). 두 영역의 합계가 날짜 단위로 꼭 일치하지는 않으며, 이는 의도된 동작입니다.
+ * <p><b>활동과 점수의 날짜 기준을 세션(연습) 완료 시각으로 통일했습니다.</b> 잔디·총연습·활동일과
+ * 평균·최고·추이 모두 {@code session.completedAt} 을 씁니다. 리포트 완료 시각({@code report.completedAt})
+ * 은 재분석(FAILED 재요청·PARTIAL 축 재시도)마다 다시 찍혀 같은 연습의 점수가 다른 날로 밀리므로 쓰지
+ * 않습니다(PR #116 리뷰). 덕분에 같은 연습이 잔디와 점수 추이에서 같은 시점에 놓입니다.
  *
  * @param period       요청한 기간 코드("4w" 등)
  * @param startDate    기간 첫날(YYYY-MM-DD, KST). {@code 오늘 - (days - 1)}

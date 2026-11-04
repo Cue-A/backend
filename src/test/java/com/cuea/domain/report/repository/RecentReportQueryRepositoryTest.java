@@ -63,9 +63,11 @@ class RecentReportQueryRepositoryTest extends PostgresRepositoryTest {
 
     @Test
     void 열람_가능한_리포트를_연습을_최근에_본_순서로_준다() {
-        // 삼성(10/1 완료) 먼저, 네이버(10/3 완료) 나중
-        completedReport(owner, "삼성전자", "백엔드", 6, 80, BASE);
-        completedReport(owner, "네이버", "프론트엔드", 9, 92, BASE.plusDays(2));
+        // 회사명은 시드(Flyway V2)와 겹치지 않는 테스트 전용 이름을 씁니다. company_name 이 UNIQUE 라
+        // 시드에 있는 실제 기업명(예: 네이버)을 그대로 쓰면 중복 INSERT 로 깨집니다. 이 테스트가 보는 것은
+        // "완료 최신순 정렬과 회사명 매핑" 이라 이름 값 자체는 서로 구분만 되면 됩니다.
+        completedReport(owner, "백엔드회사", "백엔드", 6, 80, BASE);               // 10/1 완료 (먼저)
+        completedReport(owner, "프론트회사", "프론트엔드", 9, 92, BASE.plusDays(2)); // 10/3 완료 (나중)
         em.flush();
         em.clear();
 
@@ -73,7 +75,7 @@ class RecentReportQueryRepositoryTest extends PostgresRepositoryTest {
                 owner.getUserId(), VIEWABLE, PageRequest.of(0, 3));
 
         assertThat(rows).extracting(RecentReportRow::companyName)
-                .containsExactly("네이버", "삼성전자");
+                .containsExactly("프론트회사", "백엔드회사");
         assertThat(rows.get(0).scoreTotal()).isEqualTo(92);
         assertThat(rows.get(0).practicedOn()).isEqualTo(BASE.plusDays(2));
     }

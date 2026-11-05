@@ -30,6 +30,9 @@ public enum ErrorCode {
     INVALID_PASSWORD_FORMAT(HttpStatus.BAD_REQUEST, "비밀번호는 영문·숫자를 포함해 8~64자여야 합니다"),
     OAUTH_FAILED(HttpStatus.UNAUTHORIZED, "소셜 로그인에 실패했습니다"),
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다"),
+    // 카카오 전용 계정(LOCAL 인증 없음)의 비밀번호 변경 시도. 비밀번호 자체가 없어 확인할
+    // 대상이 없다. "비밀번호 설정"(OAuth 계정에 LOCAL 인증 신규 추가)은 별도 기능, 범위 밖.
+    PASSWORD_NOT_SET(HttpStatus.BAD_REQUEST, "카카오 계정은 비밀번호가 설정되어 있지 않습니다"),
 
     // ── 문서 · 파일 ──────────────────────────────────────────
     DOCUMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "문서를 찾을 수 없습니다"),

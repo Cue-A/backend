@@ -58,4 +58,14 @@ class UserWithdrawalServiceTest {
         verify(tokenService, never()).revokeAll(anyString());
         verify(fileCleaner, never()).removeAll(anyString(), any());
     }
+
+    @Test
+    void 토큰_폐기가_실패해도_S3_정리는_이어서_진행한다() {
+        when(userWriter.delete("user-1")).thenReturn(List.of("s-1"));
+        doThrow(new RuntimeException("redis down")).when(tokenService).revokeAll("user-1");
+
+        userWithdrawalService.withdraw("user-1");
+
+        verify(fileCleaner).removeAll("user-1", List.of("s-1"));
+    }
 }

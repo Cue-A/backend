@@ -81,6 +81,11 @@ public class User {
         }
     }
 
+    /** 프로필 수정에서 닉네임(마이페이지 노출명)을 바꿉니다. */
+    public void changeNickname(String nickname) {
+        this.nickname = nickname;
+    }
+
     /** 이 사람에게 로그인 수단을 하나 연결합니다. */
     public UserAuth link(Provider provider, String providerId, String password) {
         UserAuth auth = UserAuth.of(this, provider, providerId, password);

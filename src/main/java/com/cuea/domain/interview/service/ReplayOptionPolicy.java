@@ -28,7 +28,7 @@ import java.util.UUID;
  *   <tr><td>companyId</td><td>400 거부</td><td>고정</td></tr>
  *   <tr><td>jobRole</td><td>400 거부</td><td>고정</td></tr>
  *   <tr><td>hideQuestionText</td><td>허용</td><td>표시 방식만 바꿈. 질문 구성에 무관</td></tr>
- *   <tr><td>타이머</td><td>허용</td><td>프론트 표시 설정. Backend 요청/DB 에 없음</td></tr>
+ *   <tr><td>타이머</td><td>허용</td><td>세션마다 저장(duration_limit)하지만 질문 구성에 무관해 고정하지 않음</td></tr>
  * </table>
  *
  * <p>AI 계약 자체는 문항 수·페르소나 변경 시 일반 면접으로 처리하는 규칙이지만, 이번

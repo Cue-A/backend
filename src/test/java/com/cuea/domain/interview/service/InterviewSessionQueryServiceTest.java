@@ -4,24 +4,33 @@ import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.interview.entity.Persona;
+import com.cuea.domain.interview.entity.Question;
 import com.cuea.domain.interview.entity.SessionStatus;
 import com.cuea.domain.interview.repository.InterviewSessionRepository;
 import com.cuea.domain.interview.repository.QuestionRepository;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.springframework.data.domain.Pageable;
 
+import java.time.OffsetDateTime;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.mockito.ArgumentMatchers.any;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyString;
+import static org.mockito.ArgumentMatchers.eq;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
 /**
- * {@link InterviewSessionQueryService#getReplayRoot} 의 공통 단계 동작을 봅니다.
+ * {@link InterviewSessionQueryService#getReplayRoot} 의 공통 단계 동작과 연습 기록 목록의
+ * 회차 계산 · 검색어 처리, 회차 비교가 쓰는 회차 고르기를 봅니다.
  *
  * <p>{@code getReplayRoot} 는 재연습 시작({@code InterviewStartService})과 옵션 조회
  * ({@code ReplaySessionOptionsService})가 공유하는 단일 진입점입니다. 양쪽이 같은 단계
@@ -42,14 +51,17 @@ import static org.mockito.Mockito.when;
 class InterviewSessionQueryServiceTest {
 
     private static final String USER_ID = "user-1";
+    private static final OffsetDateTime T0 = OffsetDateTime.parse("2026-07-01T00:00:00Z");
 
     private InterviewSessionRepository sessionRepository;
+    private QuestionRepository questionRepository;
     private InterviewSessionQueryService service;
 
     @BeforeEach
     void setUp() {
         sessionRepository = mock(InterviewSessionRepository.class);
-        service = new InterviewSessionQueryService(sessionRepository, mock(QuestionRepository.class));
+        questionRepository = mock(QuestionRepository.class);
+        service = new InterviewSessionQueryService(sessionRepository, questionRepository);
     }
 
     private InterviewSession session(String sessionId, InterviewSession retryOf, SessionStatus status) {
@@ -147,5 +159,145 @@ class InterviewSessionQueryServiceTest {
         assertThatThrownBy(() -> service.getReplayRoot("sess_2nd", USER_ID))
                 .isInstanceOf(BusinessException.class)
                 .extracting("errorCode").isEqualTo(ErrorCode.SESSION_NOT_FOUND);
+    }
+
+    @Test
+    void 일회차는_1_재연습은_먼저_시작한_재연습_수_더하기_2() {
+        InterviewSession root = sessionAt("root", null, 0);
+        InterviewSession second = sessionAt("second", root, 1);
+        InterviewSession third = sessionAt("third", root, 2);
+        when(sessionRepository.findRetriesOf(USER_ID, List.of("root"), SessionStatus.ABORTED))
+                .thenReturn(List.of(second, third));
+
+        Map<String, Integer> rounds = service.roundsOf(USER_ID, List.of(third, second, root));
+
+        assertThat(rounds).containsEntry("root", 1).containsEntry("second", 2).containsEntry("third", 3);
+    }
+
+    /** 중단된 재연습은 조회에서 빠지므로 그 뒤 회차가 당겨집니다. */
+    @Test
+    void 중단된_재연습은_세지_않는다() {
+        InterviewSession root = sessionAt("root", null, 0);
+        InterviewSession afterAborted = sessionAt("after", root, 3);
+        when(sessionRepository.findRetriesOf(USER_ID, List.of("root"), SessionStatus.ABORTED))
+                .thenReturn(List.of(sessionAt("second", root, 1), afterAborted));
+
+        assertThat(service.roundsOf(USER_ID, List.of(afterAborted))).containsEntry("after", 3);
+    }
+
+    /** 목록을 읽은 뒤 그 세션이 중단돼 회차 조회에서 빠져도 목록이 깨지지 않습니다. */
+    @Test
+    void 회차_조회에_없는_재연습도_앞선_재연습_수로_센다() {
+        InterviewSession root = sessionAt("root", null, 0);
+        InterviewSession justAborted = sessionAt("aborted", root, 5);
+        when(sessionRepository.findRetriesOf(USER_ID, List.of("root"), SessionStatus.ABORTED))
+                .thenReturn(List.of(sessionAt("second", root, 1)));
+
+        assertThat(service.roundsOf(USER_ID, List.of(justAborted))).containsEntry("aborted", 3);
+    }
+
+    @Test
+    void 재연습이_없으면_회차_조회를_하지_않는다() {
+        assertThat(service.roundsOf(USER_ID, List.of(sessionAt("root", null, 0)))).containsEntry("root", 1);
+
+        verify(sessionRepository, never()).findRetriesOf(anyString(), anyCollection(), any());
+    }
+
+    @Test
+    void 이_세션까지의_회차는_1회차와_먼저_시작한_재연습을_시작_순서로_준다() {
+        InterviewSession root = sessionAt("root", null, 0);
+        InterviewSession second = sessionAt("second", root, 1);
+        InterviewSession third = sessionAt("third", root, 2);
+        given(root, third);
+        when(sessionRepository.findRetriesOf(USER_ID, List.of("root"), SessionStatus.ABORTED))
+                .thenReturn(List.of(third, second));
+
+        List<SessionRound> rounds = service.roundsUpTo(USER_ID, "third");
+
+        assertThat(rounds).containsExactly(
+                new SessionRound("root", 1, T0),
+                new SessionRound("second", 2, T0.plusMinutes(1)),
+                new SessionRound("third", 3, T0.plusMinutes(2)));
+    }
+
+    /** 2회차 리포트에서 부르면 3회차는 비교 대상이 아닙니다. */
+    @Test
+    void 이_세션보다_늦게_시작한_재연습은_빠진다() {
+        InterviewSession root = sessionAt("root", null, 0);
+        InterviewSession second = sessionAt("second", root, 1);
+        given(root, second);
+        when(sessionRepository.findRetriesOf(USER_ID, List.of("root"), SessionStatus.ABORTED))
+                .thenReturn(List.of(second, sessionAt("third", root, 2)));
+
+        assertThat(service.roundsUpTo(USER_ID, "second")).extracting(SessionRound::sessionId)
+                .containsExactly("root", "second");
+    }
+
+    /** 중단된 재연습은 조회에서 빠지므로 연습 기록 목록과 같은 번호가 됩니다. */
+    @Test
+    void 중단된_재연습_뒤의_회차는_당겨진_번호다() {
+        InterviewSession root = sessionAt("root", null, 0);
+        InterviewSession afterAborted = sessionAt("after", root, 3);
+        given(root, afterAborted);
+        when(sessionRepository.findRetriesOf(USER_ID, List.of("root"), SessionStatus.ABORTED))
+                .thenReturn(List.of(sessionAt("second", root, 1), afterAborted));
+
+        assertThat(service.roundsUpTo(USER_ID, "after")).extracting(SessionRound::round)
+                .containsExactly(1, 2, 3);
+    }
+
+    @Test
+    void 일회차면_자기_자신만_주고_재연습을_조회하지_않는다() {
+        given(sessionAt("root", null, 0));
+
+        assertThat(service.roundsUpTo(USER_ID, "root")).containsExactly(new SessionRound("root", 1, T0));
+        verify(sessionRepository, never()).findRetriesOf(anyString(), anyCollection(), any());
+    }
+
+    @Test
+    void 없거나_남의_세션의_회차는_SESSION_NOT_FOUND() {
+        when(sessionRepository.findBySessionIdAndUser_UserId("other", USER_ID)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> service.roundsUpTo(USER_ID, "other"))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.SESSION_NOT_FOUND);
+    }
+
+    /** 리포트 · 회차 비교가 질문 엔티티 대신 받는 값입니다. 되묻기도 들어갑니다. */
+    @Test
+    void 질문_ID_로_원문을_묶어_준다() {
+        when(questionRepository.findAllBySessionIdOrderByCreatedAtAsc("sess_1")).thenReturn(List.of(
+                Question.builder().sessionId("sess_1").questionId("q_1").text("지원 동기를 말씀해 주세요").build(),
+                Question.builder().sessionId("sess_1").questionId("q_1r").text("조금 더 말씀해 주시겠어요?").build()));
+
+        assertThat(service.findQuestionTextsForInternal("sess_1"))
+                .containsEntry("q_1", "지원 동기를 말씀해 주세요")
+                .containsEntry("q_1r", "조금 더 말씀해 주시겠어요?");
+    }
+
+    @Test
+    void 검색어는_소문자로_바꾸고_특수문자를_이스케이프해_부분일치로_찾는다() {
+        service.findRecords(USER_ID, List.of(SessionStatus.COMPLETED), null, "  QA 100%_! ", Pageable.unpaged());
+
+        verify(sessionRepository).findRecords(eq(USER_ID), any(), eq(null), eq("%qa 100!%!_!!%"), any());
+    }
+
+    @Test
+    void 검색어가_비어_있으면_모두_찾는다() {
+        service.findRecords(USER_ID, List.of(SessionStatus.COMPLETED), null, " ", Pageable.unpaged());
+
+        verify(sessionRepository).findRecords(eq(USER_ID), any(), eq(null), eq("%"), any());
+    }
+
+    private void given(InterviewSession... sessions) {
+        for (InterviewSession session : sessions) {
+            when(sessionRepository.findBySessionIdAndUser_UserId(session.getSessionId(), USER_ID))
+                    .thenReturn(Optional.of(session));
+        }
+    }
+
+    private static InterviewSession sessionAt(String id, InterviewSession root, int minutes) {
+        return InterviewSession.builder().sessionId(id).retryOfSession(root)
+                .status(SessionStatus.COMPLETED).createdAt(T0.plusMinutes(minutes)).build();
     }
 }

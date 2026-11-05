@@ -147,7 +147,7 @@ String rootId = sourceSession.getRetryOfSessionId() != null
 | `companyId` 기업 | **400 거부** | 고정 |
 | `jobRole` 직무 | **400 거부** | 고정 |
 | `hideQuestionText` 질문 텍스트 숨김 | **허용** | 표시 방식만 바꿈 |
-| 타이머 | **허용** | 프론트 표시 설정. Backend 요청/DB 에 필드 없음 |
+| 타이머 | **허용** | 세션마다 저장(`duration_limit`)하지만 질문 구성에 무관해 고정하지 않음 |
 
 ### AI 계약과 Backend 서비스 정책의 구분
 
@@ -229,8 +229,9 @@ GET /api/interviews/{sessionId}/replay-options
 
 고정 옵션 5개(`documentId`·`companyId`·`jobRole`·`questionCount`·`persona`)를 그대로
 `POST /api/interviews` 에 실으면 `ReplayOptionPolicy` 비교를 통과합니다. 타이머와
-`hideQuestionText` 는 **담지 않습니다**(타이머는 프론트 전용, `hideQuestionText` 는 변경
-허용 옵션이라 고정 옵션이 아님).
+`hideQuestionText` 는 **담지 않습니다**(타이머는 세션마다 `duration_limit` 에 저장되지만
+재연습에서 변경 가능해 고정 옵션이 아니고, `hideQuestionText` 도 변경 허용 옵션이라 고정
+옵션이 아님).
 
 `replayable`·`replayBlockReasons` 는 Issue #83 리뷰에서 추가된 필드입니다. 기존 8개 필드의
 이름·타입·의미는 그대로이며 뒤에 덧붙였을 뿐이라 **하위 호환됩니다.**
@@ -289,6 +290,9 @@ GET /api/interviews/{sessionId}/replay-options
 public List<ReplayLogItem> buildReplayLog(String rootSessionId) {
     return questionLogRepository
             .findBySessionIdOrderByCreatedAt(rootSessionId).stream()
+            // 1차 created_at(위 쿼리) + 2차 question_number 로 재정렬(동률 안정화)
+            .sorted(comparing(QuestionLog::getCreatedAt)
+                    .thenComparingInt(QuestionLog::getQuestionNumber))
             .filter(log -> !log.isReask())          // reask 제외
             .map(this::toReplayItem)
             .toList();
@@ -307,8 +311,13 @@ private ReplayLogItem toReplayItem(QuestionLog log) {
 }
 ```
 
-정렬 기준은 `created_at` 입니다. `question_number` 는 되묻기 때문에 중복될 수
-있으므로 정렬 키로 쓰지 않습니다.
+정렬 기준은 1차 `created_at` 오름차순, 2차 `question_number` 입니다. `created_at`
+이 드물게 동률일 때 `questionId` 문자열(`"q_2"` vs `"q_10"`)로 정렬하면 숫자 순서가
+깨지므로, AI 가 매긴 출제 순번(`question_number`)을 2차 키로 씁니다. `question_number`
+는 되묻기(`REASK`)에서는 올라가지 않지만, REASK 는 조립에서 제외되고 보존되는
+`QUESTION`·`FOLLOWUP` 의 번호는 단조 증가하므로 보존 항목의 순서가 흔들리지 않습니다.
+(구현: `ReplayLogAssembler` 가 `QuestionRepository.findAllBySessionIdOrderByCreatedAtAsc`
+결과를 `Comparator.comparing(createdAt).thenComparingInt(questionNumber)` 로 다시 정렬.)
 
 ---
 

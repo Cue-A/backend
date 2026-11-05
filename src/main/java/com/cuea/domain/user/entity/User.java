@@ -81,6 +81,15 @@ public class User {
         }
     }
 
+    /**
+     * 계정 설정에서 LOCAL 인증이 있는 사용자가 비밀번호 확인을 거친 뒤 호출합니다.
+     * {@link #fillEmailIfAbsent} 와 달리 기존 값이 있어도 덮어씁니다 — 호출부
+     * ({@code UserEmailService})가 이미 비밀번호 확인과 UNIQUE 중복 검사를 끝냈습니다.
+     */
+    public void changeEmail(String newEmail) {
+        this.email = newEmail;
+    }
+
     /** 이 사람에게 로그인 수단을 하나 연결합니다. */
     public UserAuth link(Provider provider, String providerId, String password) {
         UserAuth auth = UserAuth.of(this, provider, providerId, password);

@@ -30,6 +30,9 @@ public enum ErrorCode {
     INVALID_PASSWORD_FORMAT(HttpStatus.BAD_REQUEST, "비밀번호는 영문·숫자를 포함해 8~64자여야 합니다"),
     OAUTH_FAILED(HttpStatus.UNAUTHORIZED, "소셜 로그인에 실패했습니다"),
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다"),
+    // 카카오 전용 계정(LOCAL 인증 없음)의 이메일 변경 시도. 이메일이 카카오 쪽 계정
+    // 연동(KakaoAccountLinker)과 묶여 있어 우리 DB에서만 바꾸면 다음 카카오 로그인 때 어긋난다.
+    EMAIL_CHANGE_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "카카오 계정은 이메일을 변경할 수 없습니다"),
 
     // ── 문서 · 파일 ──────────────────────────────────────────
     DOCUMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "문서를 찾을 수 없습니다"),

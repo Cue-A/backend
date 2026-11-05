@@ -52,6 +52,10 @@ public interface InterviewSessionRepository extends Repository<InterviewSession,
     Optional<InterviewSession> findRootForReplay(@Param("sessionId") String sessionId,
                                                  @Param("userId") String userId);
 
+    /** 회원 탈퇴 때 세션 미디어 접두사를 모으려고 씁니다. */
+    @Query("select s.sessionId from InterviewSession s where s.user.userId = :userId")
+    List<String> findSessionIdsByUserId(@Param("userId") String userId);
+
     InterviewSession save(InterviewSession session);
 
     /** 연습 기록 목록과 그 개수 쿼리가 같이 쓰는 조건. 회사(c) · 폴더(f)는 없을 수 있어 left join 입니다. */

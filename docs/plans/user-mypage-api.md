@@ -1,4 +1,4 @@
-# 사용자 마이페이지 API (프로필 · 계정 · 명함)
+# 사용자 마이페이지 API (프로필 · 계정)
 
 > 관련 이슈: 없음 (아직 이슈 생성 전 — 설계 논의 단계)
 > 작성일: 2026-11-02
@@ -12,10 +12,15 @@
 프로필 수정     PATCH  /api/users/me/profile
 계정 정보 조회  GET    /api/users/me/account
 계정 설정(수정) PATCH  /api/users/me/email
-명함 생성       POST   /api/users/me/business-card
-명함 조회       GET    /api/users/me/business-card
-명함 수정       PATCH  /api/users/me/business-card
+~~명함 생성     POST   /api/users/me/business-card~~    (2026-11-05: 범위 제외 결정)
+~~명함 조회     GET    /api/users/me/business-card~~
+~~명함 수정     PATCH  /api/users/me/business-card~~
 ```
+
+> **2026-11-05 결정: 명함(섹션 5~7) 범위에서 완전히 제외.** 더 이상 진행하지 않는다.
+> 새 테이블(`business_card`)·마이그레이션·엔티티·API 모두 만들지 않는다. 이 문서에
+> 남아 있는 명함 관련 설계(아래 섹션 5~7)는 과거 기록용으로만 남기고 "구현 계획"
+> 체크리스트에서 제거했다.
 
 > **헷갈리기 쉬운 지점:** Notion 표의 "내정보 조회"는 이미 구현된 `GET /api/users/me`
 > (로그인 3개 API가 공유하는 `UserResponse`)가 **아니다.** 이름이 같아서 처음에 그걸로
@@ -32,13 +37,12 @@
 
 ## 범위
 
-- 포함: 프로필 조회(`GET /me/profile`, Notion 표의 "내정보 조회")/수정, 계정 정보 조회,
-  계정 설정(이메일), 명함 생성/조회/수정
+- 포함: 프로필 조회(`GET /me/profile`, Notion 표의 "내정보 조회")/수정, 프로필 사진 업로드,
+  계정 정보 조회, 계정 설정(이메일 변경 — #121 구현 완료, 비밀번호 변경)
 - 제외: `GET /api/users/me`(이미 구현된 로그인 공용 `UserResponse`) 변경 — Notion 표의
   "내정보 조회"와 이름이 같아 헷갈리지만 **서로 다른 엔드포인트**다. 아래 "확정된 것" 3번 참고
-- 제외: DB 마이그레이션 — 전부 기존 컬럼 재사용으로 최종 결정 (명함 제외. 명함은 새 테이블이
-  불가피한데, 이 부분 자체가 아직 범위 확정 전이라 아래 "결정 필요 사항" 참고)
-- 제외: 비밀번호 변경, 알림 설정(`notification_setting`) — 이번 7개 행에 없음
+- 제외: DB 마이그레이션 — 전부 기존 컬럼 재사용으로 최종 결정
+- 제외: 명함 (2026-11-05 결정, 위 참고), 알림 설정(`notification_setting`) — 이번 범위 아님
 
 ## 영향 범위 / 관련 도메인
 
@@ -189,17 +193,21 @@ POST /api/users/me/profile/photo  (multipart, 로컬 이미지 파일)
   3. 원본 500 코드가 `PROFILE_UPDATE_FAILED`로 GET 명세의 `INTERNAL_SERVER_ERROR`와
      이름이 달랐다 → `INTERNAL_SERVER_ERROR`로 통일.
 
-#### 보류: 응답 포맷 · 에러 코드 (기획/프론트와 먼저 맞출 것)
+#### 응답 포맷 · 에러 코드 — 레포 컨벤션 그대로 *(확정, 2026-11-05)*
 
-노션 명세 원본은 레포의 실제 `Result<T>`/`ErrorCode` 컨벤션과 다르다. **사람과 맞추기 전까지
-구현에 들어가지 않는다.**
+노션 명세 원본은 레포의 실제 `Result<T>`/`ErrorCode` 컨벤션과 다르다. **새 포맷을 만들지
+않고 기존 `Result<T>`/`ErrorCode`/`GlobalExceptionHandler`를 그대로 쓴다.** `CLAUDE.md`가
+"새 API는 `Result<T>`로 감싸 반환합니다"를 이미 항상 지킬 규칙으로 못박아 둬서, 이 API들만
+다른 포맷을 쓰는 선택지 자체가 없다 — 기획/프론트와 새로 맞출 축이 아니라 기존 컨벤션을
+따르는 것으로 자동 확정. 이메일 변경(#121)도 이 컨벤션으로 이미 구현·머지됐다.
 
-| 항목 | 노션 명세 | 현재 레포 (`Result.java`, `ErrorCode.java`) |
+| 항목 | 노션 명세 (참고용, 적용 안 함) | 실제 구현 (`Result.java`, `ErrorCode.java`) |
 |---|---|---|
 | 응답 키 | `success`/`code`/`message`/`data`, 성공 시에도 안내 문장 | `success`/`data`/`errorCode`/`message`, 성공 시 `message` 항상 `null` |
 | 토큰 에러 | `ACCESS_TOKEN_NOT_FOUND` / `INVALID_ACCESS_TOKEN` / `ACCESS_TOKEN_EXPIRED` | `UNAUTHORIZED` / `INVALID_TOKEN` / `TOKEN_EXPIRED` (enum에 이미 있음, 이름만 다름) |
 | 서버 오류 | `INTERNAL_SERVER_ERROR` | `INTERNAL_ERROR` (enum에 이미 있음, 이름만 다름) |
 | 사용자 없음 | `USER_NOT_FOUND` | `USER_NOT_FOUND` (동일) |
+| 검증 실패 세분화 | `INVALID_INPUT`/`EMPTY_UPDATE_REQUEST` 등 필드별 분리 | `INVALID_REQUEST` 하나 + 메시지로 구분 (`GlobalExceptionHandler.handleValidation`) 그대로 유지 |
 
 이 API 하나만 다른 포맷을 쓸 수는 없다 — 바꾸면 `Result<T>`·`GlobalExceptionHandler`·
 `ErrorCode` enum 전체에 영향이라 다른 모든 API 응답이 같이 바뀐다. 결정 필요 사항 6번과
@@ -294,7 +302,9 @@ POST /api/users/me/profile/photo  (multipart, 로컬 이미지 파일)
 
 **에러:** `INVALID_REQUEST`, `INVALID_CREDENTIALS`, `INVALID_PASSWORD_FORMAT`, `PASSWORD_NOT_SET`(신규), 401 3종, `USER_NOT_FOUND`, `INTERNAL_SERVER_ERROR`.
 
-### 5~7. 명함 생성·조회·수정 — `POST`/`GET`/`PATCH /api/users/me/business-card` *(확정, 2026-11-03 재설계)*
+### 5~7. (제외, 2026-11-05) 명함 생성·조회·수정 — `POST`/`GET`/`PATCH /api/users/me/business-card`
+
+> **범위에서 완전히 제외됐다. 아래는 과거 설계 기록일 뿐 구현하지 않는다.**
 
 > **2026-11-03 재설계:** 사용자가 실제 UI 화면을 공유해 필드 구성이 전부 바뀌었다
 > (`display_name`/`job_role`/`one_liner`/`strengths` 가정 폐기).
@@ -342,12 +352,12 @@ business_card (1:1, user_id UNIQUE)
 
 ## DB 변경
 
-**원칙상 마이그레이션 없음으로 최종 결정** (프로필이 기존 `user_profile` 컬럼만 쓰기로
-좁혀졌기 때문). 단 아래 두 가지는 이 원칙과 충돌한다.
+**마이그레이션 없음.** 프로필이 기존 `user_profile` 컬럼만 쓰고, 명함이 범위에서
+빠지면서(2026-11-05) 새 테이블이 필요한 작업이 없다.
 
-1. **명함** — **확정(2026-11-03): `V2__add_business_card.sql` 진행.** 완전 새 기능이라
-   테이블 없이는 구현 불가능. 섹션 5~7의 확정 스키마대로 생성.
-2. **`user_auth` CASCADE 누락** (이번 설계와 별개로 DB 분석 중 발견) —
+아래는 이번 설계와 별개로 DB 분석 중 발견한 것으로, 별도 판단이 필요하다.
+
+1. **`user_auth` CASCADE 누락** (이번 설계와 별개로 DB 분석 중 발견) —
    `V1__init.sql`에서 `users`를 참조하는 FK 9개(`document`, `folder`, `goal`, `session`,
    `streak`, `user_badge`, `user_company_interest`, `notification_setting`, `user_profile`,
    `bookmarked_question`, `calendar_event`)는 전부 `on delete cascade`가 있는데
@@ -360,18 +370,18 @@ business_card (1:1, user_id UNIQUE)
 
 ## 구현 계획
 
-**명세가 전부 확정된 뒤** 진행한다 (아래 "결정 필요 사항" 선결).
+명함(섹션 5~7)은 2026-11-05 범위 제외. 남은 항목을 이슈 단위로 나눠 진행한다.
 
-1. [ ] 프로필 조회/수정 — `GET`/`PATCH /api/users/me/profile`, 요청·응답 DTO, 서비스, 컨트롤러
-1-1. [ ] 프로필 사진 업로드 — `POST /api/users/me/profile/photo` (multipart), `ObjectKeys.profilePhoto`
-   추가, 탈퇴 시 `UserFileCleaner.removeAll`에 `profiles/{userId}/` 정리 추가
-2. [ ] 계정 정보 조회 — `GET /api/users/me/account`
-3. [x] 이메일 변경 — `PATCH /api/users/me/email` (2026-11-05 구현. `UserEmailService`,
+1. [x] 이메일 변경 — `PATCH /api/users/me/email` (#121, 2026-11-05 구현. `UserEmailService`,
    `ErrorCode.EMAIL_CHANGE_NOT_ALLOWED` 추가. 비밀번호 재확인·중복 이메일 검사 포함,
    `UserEmailServiceTest` 6케이스로 검증)
-4. [ ] 비밀번호 변경 — `PATCH /api/users/me/password`, `ErrorCode.PASSWORD_NOT_SET` 추가
-5. [ ] 명함 — 마이그레이션(`V2__...`) + 엔티티 + `POST`/`GET`/`PATCH /api/users/me/business-card`
-6. [ ] (별도 판단) `user_auth` CASCADE 마이그레이션
+2. [ ] 계정 정보 조회 — `GET /api/users/me/account`
+3. [ ] 비밀번호 변경 — `PATCH /api/users/me/password`, `ErrorCode.PASSWORD_NOT_SET` 추가
+4. [ ] 프로필 조회/수정 — `GET`/`PATCH /api/users/me/profile`, 요청·응답 DTO, 서비스, 컨트롤러,
+   `UserProfileRepository` 신규
+4-1. [ ] 프로필 사진 업로드 — `POST /api/users/me/profile/photo` (multipart), `ObjectKeys.profilePhoto`
+   추가, 탈퇴 시 `UserFileCleaner.removeAll`에 `profiles/{userId}/` 정리 추가
+5. [ ] (별도 판단) `user_auth` CASCADE 마이그레이션
 - 로그아웃(`POST /api/auth/logout`)·탈퇴(`DELETE /api/users/me`)는 이미 구현돼 있어
   계정 설정 메뉴에 그대로 연결만 하면 됨 — 신규 작업 아님.
 
@@ -382,16 +392,14 @@ business_card (1:1, user_id UNIQUE)
    `introduction`/`targetJobRole`/`careerLevel`/`schoolName`/`major`/`graduationYear`.
 ~~2. 프로필·계정 정보 조회의 이메일 중복~~ — **확정: 의도된 중복으로 유지.** 프로필엔
    표시만(읽기 전용), 수정은 계정 설정에서만.
-7. **응답 포맷 / 에러 코드명** (신규, 위 "보류" 섹션 참고) — 노션 명세(`code`, 성공 메시지,
-   `ACCESS_TOKEN_*` 류)를 레포 컨벤션(`errorCode`, `UNAUTHORIZED` 류)에 맞출지, 아니면
-   전체 컨벤션을 명세대로 바꿀지. **기획/프론트와 먼저 맞춘 뒤 결정 — 구현 보류.**
-8. **`careerLevel` 값 형식** — 노션 예시가 소문자 영문(`"entry"`). 문자열 그대로 저장할지
-   서버 enum으로 검증할지 미정.
-9. **검증 실패 코드 세분화 여부** (신규) — PATCH 명세 원본이 `INVALID_INPUT`/
-   `EMPTY_UPDATE_REQUEST`를 별도 코드로 나눴는데, 현재 레포는 전부 `INVALID_REQUEST`
-   하나 + 메시지로만 구분한다(`GlobalExceptionHandler.handleValidation`, 필드 에러를
-   콤마로 이어붙인 **문자열 하나**로 반환 — 배열 아님). 7번(응답 포맷)과 같은 축이라
-   같이 결정.
+~~7. 응답 포맷 / 에러 코드명~~ — **확정(2026-11-05): 레포 컨벤션(`Result<T>`/`ErrorCode`)
+   그대로. 노션 명세 포맷은 적용 안 함.** 위 "응답 포맷 · 에러 코드" 섹션 참고.
+8. **`careerLevel` 값 형식** — **확정(2026-11-05): 애플리케이션 레벨에서 4개 값
+   (`student`/`entry`/`junior`/`experienced`)으로 검증, DB엔 평문 문자열로 저장.**
+   DB `career_level` 컬럼에 `CHECK` 제약이 없어(마이그레이션 불필요 원칙과 일치)
+   서버 검증만으로 충분하다. 허용되지 않은 값은 `INVALID_REQUEST`.
+~~9. 검증 실패 코드 세분화 여부~~ — 7번과 동일 축, 같이 확정. 필드 에러는 지금처럼
+   콤마로 이어붙인 문자열 하나를 `INVALID_REQUEST`에 담아 반환한다.
 ~~10. `profileImageUrl` 임의 URL 허용 여부~~ — **확정(2026-11-05): 허용 안 함.**
     `PATCH /me/profile` 바디에서 이 필드를 아예 제거하고, 전용 업로드 API
     (`POST /me/profile/photo`, 로컬 이미지 파일만)를 거친 결과로만 바뀌도록 확정.
@@ -407,8 +415,9 @@ business_card (1:1, user_id UNIQUE)
     카카오 전용 계정은 전용 에러(`PASSWORD_NOT_SET`, 신규 `ErrorCode` 값, 마이그레이션
     불필요)로 거부하기로 확정. "비밀번호 설정"(OAuth 계정에 LOCAL 인증 추가) 자체는
     범위 밖.
-~~4. 명함 기능 자체~~ — **확정(2026-11-03): 섹션 5~7 참고.** 본인만 조회, `strengths`는
-   쉼표 구분 문자열, `V2__add_business_card.sql` 진행.
-5. **`user_auth` CASCADE 누락** — 고칠지, 이번 PR에 포함할지 별도 이슈로 뺄지.
-6. **검증 실패 응답을 필드별 배열로 바꿀지** — 바꾸면 `GlobalExceptionHandler`
-   전체에 영향이라 이 작업 범위를 넘어서는 별도 결정.
+~~4. 명함 기능 자체~~ — **뒤집힘(2026-11-05): 범위에서 완전히 제외.** 2026-11-03에 확정했던
+   설계(본인만 조회, `strengths` 쉼표 구분 문자열, `V2__add_business_card.sql`)는 더 이상
+   진행하지 않는다.
+5. **`user_auth` CASCADE 누락** — 고칠지, 이번 작업에 포함할지 별도 이슈로 뺄지.
+~~6. 검증 실패 응답을 필드별 배열로 바꿀지~~ — **확정(2026-11-05): 안 바꾼다.** 위
+   "응답 포맷 · 에러 코드" 섹션 참고.

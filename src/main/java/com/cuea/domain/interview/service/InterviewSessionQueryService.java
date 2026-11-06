@@ -3,6 +3,7 @@ package com.cuea.domain.interview.service;
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.entity.InterviewSession;
+import com.cuea.domain.interview.entity.Persona;
 import com.cuea.domain.interview.entity.Question;
 import com.cuea.domain.interview.entity.SessionStatus;
 import com.cuea.domain.interview.repository.DailyActivityRow;
@@ -213,6 +214,29 @@ public class InterviewSessionQueryService {
     @Transactional(readOnly = true)
     public List<String> findCompletedPracticeDatesInKst(String userId) {
         return sessionRepository.findCompletedDatesInKst(userId);
+    }
+
+    /**
+     * FIRST_SESSION·TEN_SESSIONS 배지 판정 창구(Issue #131). 본인의 누적 완료 세션 수
+     * (재연습 포함, {@code COMPLETED} 만). IN_PROGRESS·ABORTED 는 제외합니다.
+     *
+     * <p>growth(배지) 도메인이 {@link InterviewSessionRepository} 를 직접 쓰지 않도록 이 창구를
+     * 거칩니다(도메인 간 참조는 service 레벨에서만 — docs/01-conventions.md).
+     */
+    @Transactional(readOnly = true)
+    public long countCompletedSessions(String userId) {
+        return sessionRepository.countByUser_UserIdAndStatusIn(userId, List.of(SessionStatus.COMPLETED));
+    }
+
+    /**
+     * PRESSURE_CLEAR 배지 판정 창구(Issue #131). 본인에게 압박(PRESSURE) 페르소나로 완료한 세션이
+     * 하나라도 있는지. 실제 저장된 {@code persona} + {@code COMPLETED} 상태 기준입니다. 모드 선택만
+     * 하거나 중단(ABORTED)한 세션은 제외됩니다.
+     */
+    @Transactional(readOnly = true)
+    public boolean hasCompletedPressureSession(String userId) {
+        return sessionRepository.existsByUser_UserIdAndPersonaAndStatus(
+                userId, Persona.PRESSURE, SessionStatus.COMPLETED);
     }
 
     /**

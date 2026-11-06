@@ -36,9 +36,10 @@ class CompanySeedMigrationRerunTest {
                     .locations("classpath:db/migration")
                     .load();
 
-            // 1차: V1 → V2 적용.
+            // 1차: V1 → V2 → V4 적용. (V4 배지 시드가 Issue #131 에서 추가돼 총 3개.
+            // V3 는 아직 머지되지 않은 PR #133 소유라 이 브랜치에는 없고 Flyway 는 버전 공백을 허용한다.)
             int firstApplied = flyway.migrate().migrationsExecuted;
-            assertThat(firstApplied).isEqualTo(2); // V1, V2
+            assertThat(firstApplied).isEqualTo(3); // V1, V2, V4
 
             DataSource ds = flyway.getConfiguration().getDataSource();
             assertThat(countCompanies(ds)).isEqualTo(28);

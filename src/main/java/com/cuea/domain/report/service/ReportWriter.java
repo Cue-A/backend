@@ -2,6 +2,7 @@ package com.cuea.domain.report.service;
 
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
+import com.cuea.domain.growth.badge.ReportScoredEvent;
 import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.report.entity.Report;
 import com.cuea.domain.report.entity.ReportRetryStatus;
@@ -109,6 +110,13 @@ public class ReportWriter {
                 result.scoreSpeech(),
                 result.scoreGaze(),
                 objectMapper.convertValue(result.raw(), RAW_TYPE));
+        // 점수가 확정된 리포트(COMPLETED·PARTIAL + score not null)만 RISING 재평가 대상입니다.
+        // 커밋 뒤 배지를 지급하도록 이벤트를 냅니다(Issue #131). 세션 완료만으로는 리포트가 아직
+        // 없어 RISING 이 영구 누락될 수 있어, 점수 확정 시점에 별도로 봅니다.
+        if (report.getScoreTotal() != null
+                && (report.getStatus() == ReportStatus.COMPLETED || report.getStatus() == ReportStatus.PARTIAL)) {
+            eventPublisher.publishEvent(new ReportScoredEvent(report.getSession().getUser().getUserId()));
+        }
         return report;
     }
 

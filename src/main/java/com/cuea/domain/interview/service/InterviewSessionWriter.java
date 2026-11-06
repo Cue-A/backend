@@ -4,6 +4,7 @@ import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.company.entity.Company;
 import com.cuea.domain.document.entity.Document;
+import com.cuea.domain.growth.badge.SessionCompletedEvent;
 import com.cuea.domain.interview.dto.request.InterviewStartRequest;
 import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.interview.entity.Question;
@@ -15,6 +16,7 @@ import com.cuea.domain.user.entity.User;
 import com.cuea.infrastructure.ai.dto.AiQuestionResult;
 import com.cuea.infrastructure.ai.dto.AiSessionStartResponse;
 import lombok.RequiredArgsConstructor;
+import org.springframework.context.ApplicationEventPublisher;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -32,6 +34,7 @@ public class InterviewSessionWriter {
 
     private final InterviewSessionRepository sessionRepository;
     private final QuestionRepository questionRepository;
+    private final ApplicationEventPublisher eventPublisher;
 
     @Transactional
     public InterviewSession createSession(User user, Document document, Company company,
@@ -121,6 +124,9 @@ public class InterviewSessionWriter {
             return false;
         }
         session.complete();
+        // 완료가 커밋된 뒤 배지를 재평가·지급합니다(AFTER_COMMIT 리스너). 지급 실패가 세션 완료를
+        // 롤백하지 않도록 이벤트로 느슨하게 연결합니다(Issue #131).
+        eventPublisher.publishEvent(new SessionCompletedEvent(session.getUser().getUserId(), sessionId));
         return true;
     }
 

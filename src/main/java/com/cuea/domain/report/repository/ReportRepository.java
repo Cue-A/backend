@@ -225,4 +225,29 @@ public interface ReportRepository extends Repository<Report, Long> {
     List<MonthlyScoreRow> findMonthlyScoreAverages(@Param("userId") String userId,
                                                     @Param("startInclusive") OffsetDateTime startInclusive,
                                                     @Param("endExclusive") OffsetDateTime endExclusive);
+
+    /**
+     * RISING(우상향) 배지 판정용. 본인의 <b>유효 점수</b> 전체를 연습(세션) 완료 순서로
+     * 오래된 것부터 돌려줍니다(Issue #131).
+     *
+     * <p>유효 점수 정책은 홈 점수 통계({@link #findScorePointsLatestFirst}·{@link #summarizeScores})와
+     * 동일합니다: {@code status in (COMPLETED, PARTIAL)} 이고 {@code score_total is not null}.
+     * 정렬 기준도 같게 <b>세션 완료 시각</b>({@code session.completed_at}) 오름차순, 완료 시각이
+     * 같으면 {@code report.public_id} 로 안정 정렬합니다(재분석에도 순서가 흔들리지 않게 —
+     * PR #116 리뷰). 재연습 리포트도 각각 한 점으로 포함됩니다.
+     *
+     * <p>기간 제한이 없습니다. "과거 어느 시점이든 3회 연속 상승했으면 획득" 을 판정하려면
+     * 전체 수열이 필요합니다. 사용자당 보통 수십 개라 전체를 올려 서비스에서 연속 증가를 셉니다.
+     * {@code report_data}(jsonb)는 읽지 않고 점수 한 칸만 투영합니다.
+     */
+    @Query(value = """
+            select r.score_total
+              from report r
+              join session s on s.session_id = r.session_id
+             where s.user_id = :userId
+               and r.status in ('COMPLETED', 'PARTIAL')
+               and r.score_total is not null
+             order by s.completed_at asc, r.public_id asc
+            """, nativeQuery = true)
+    List<Integer> findValidScoresOldestFirst(@Param("userId") String userId);
 }

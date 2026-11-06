@@ -46,7 +46,8 @@ class InterviewSessionWriterTest {
     void setUp() {
         sessionRepository = mock(InterviewSessionRepository.class);
         questionRepository = mock(QuestionRepository.class);
-        writer = new InterviewSessionWriter(sessionRepository, questionRepository);
+        writer = new InterviewSessionWriter(sessionRepository, questionRepository,
+                mock(org.springframework.context.ApplicationEventPublisher.class));
         when(questionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         // 기본값: 세션이 존재하고 IN_PROGRESS. 저장/완료 전이는 IN_PROGRESS 일 때만
         // 일어나므로(늦은 결과 무시, 리뷰 5/#25) 정상 경로 테스트는 이 세션을 씁니다.

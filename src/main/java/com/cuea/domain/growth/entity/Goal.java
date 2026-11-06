@@ -78,4 +78,12 @@ public class Goal extends BaseTimeEntity {
     public void complete() {
         this.completedAt = OffsetDateTime.now();
     }
+
+    /**
+     * 목표치만 바꿉니다(주간 목표 upsert 의 UPDATE 경로, Issue #129). 주기·지표·주 경계는 그대로
+     * 두고 {@code target_value} 만 교체합니다. {@code updated_at} 은 {@code @PreUpdate} 가 채웁니다.
+     */
+    public void updateTargetValue(int targetValue) {
+        this.targetValue = targetValue;
+    }
 }

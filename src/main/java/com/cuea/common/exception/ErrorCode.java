@@ -64,6 +64,7 @@ public enum ErrorCode {
 
     // ── 질문은행 ─────────────────────────────────────────────
     BOOKMARK_NOT_FOUND(HttpStatus.NOT_FOUND, "질문은행에 없는 질문입니다"),
+    CUSTOM_QUESTION_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "내 질문은 최대 100개까지 추가할 수 있습니다"),
 
     // ── AI 서버 (docs/10-ai-client.md 의 errorCode 와 1:1) ────
     AI_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AI 서버에 연결할 수 없습니다"),

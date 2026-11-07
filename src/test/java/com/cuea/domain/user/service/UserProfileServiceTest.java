@@ -65,6 +65,16 @@ class UserProfileServiceTest {
     }
 
     @Test
+    void userName이_공백이면_거부한다() {
+        ProfileUpdateRequest request =
+                new ProfileUpdateRequest("   ", null, null, null, null, null, null);
+
+        assertThatThrownBy(() -> userProfileService.updateProfile("user-1", request))
+                .isInstanceOf(BusinessException.class)
+                .extracting("errorCode").isEqualTo(ErrorCode.INVALID_REQUEST);
+    }
+
+    @Test
     void user_profile_행이_없으면_최초_수정에서_새로_만든다() {
         User user = User.create("kim@example.com", "김취준");
         when(userRepository.findById("user-1")).thenReturn(Optional.of(user));

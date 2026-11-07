@@ -44,6 +44,9 @@ public class UserProfileService {
         if (request.careerLevel() != null && !ALLOWED_CAREER_LEVELS.contains(request.careerLevel())) {
             throw new BusinessException(ErrorCode.INVALID_REQUEST, "허용되지 않은 careerLevel 값입니다");
         }
+        if (request.userName() != null && request.userName().isBlank()) {
+            throw new BusinessException(ErrorCode.INVALID_REQUEST, "userName은 빈 값일 수 없습니다");
+        }
 
         User user = findUser(userId);
         if (request.userName() != null) {

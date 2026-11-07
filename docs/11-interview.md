@@ -340,3 +340,31 @@ Java enum으로 만들지 않습니다. 이유는 [`02-database.md`](./02-databa
   (`SESSION_NOT_FOUND` · `SESSION_ENDED` · `SESSION_ABORTED` · `QUESTION_NOT_FOUND`)
 - **질문 push 에는 북마크 여부가 없습니다.** 새 질문은 항상 담기지 않은 상태라서입니다. 면접 중
   새로고침하면 아이콘이 비어 보이지만, 그때 `true` 를 보내도 이미 담겨 있으면 그대로라 안전합니다
+
+## 질문은행 공통 질문 (Issue #136)
+
+질문은행의 「공통 질문」 탭입니다. 모두가 보는 **기본 질문**에 내가 직접 추가한 **내 질문**을 섞어 보여 주고,
+질문마다 내 즐겨찾기 · 메모를 붙입니다. 면접 세션과 상관없는 질문이라 북마크(`bookmarked_question`)와 테이블이
+다릅니다. 테이블은 [`02-database.md`](./02-database.md) 의 즐겨찾기 절을 보세요.
+
+| API | 용도 |
+|---|---|
+| `GET /api/common-questions` | 목록. 내 질문(최근에 추가한 것부터) → 기본 질문(정해진 순서) |
+| `PUT /api/common-questions/{questionId}/favorite` | 즐겨찾기 켜기 · 끄기. 본문 `{ "favorite": true }` |
+| `PATCH /api/common-questions/{questionId}/memo` | 메모 쓰기 · 고치기. 본문 `{ "memo": "..." }` |
+| `POST /api/common-questions` | 내 질문 추가. 본문 `{ "text", "category" }`, 201 |
+| `PATCH /api/common-questions/{questionId}` | 내 질문 수정. 본문은 추가와 같음 |
+| `DELETE /api/common-questions/{questionId}` | 내 질문 삭제. 즐겨찾기 · 메모도 함께 지워짐 |
+
+- 경로 · 본문 · 응답은 프론트 임시안(frontend `src/domain/question/api/questionResponse.ts`)을 그대로 따릅니다
+- **기본 질문 12개는 V5 마이그레이션 시드입니다.** 문구 · 분류 · 순서가 프론트 목업과 같습니다. 바꾸거나 늘리려면 새
+  마이그레이션을 씁니다. API 로는 고칠 수 없고, 고치거나 지우려 하면 403 `FORBIDDEN` 입니다
+- **내 질문은 주인만 봅니다.** 남의 내 질문 · 없는 질문 · UUID 가 아닌 ID 는 구별하지 않고 404 `QUESTION_NOT_FOUND`
+- `text` 는 앞뒤 공백을 자른 뒤 1~200자, `category` 는 인성 · 경험 · 지원동기 · 직무 · 기타 중 하나입니다. 면접 질문에
+  AI 가 붙이는 분류(직무역량 등 8종)와는 다른 목록입니다. 어기면 400 `INVALID_REQUEST`
+- 내 질문은 사용자당 100개까지이고 넘으면 409 `CUSTOM_QUESTION_LIMIT_EXCEEDED`. 폴더 상한처럼 서비스에서만 셉니다
+- **즐겨찾기는 바뀔 상태를 보냅니다**(북마크와 같은 이유). 이미 켜져 있으면 처음 켠 시각(`favoritedAt`)이 남습니다.
+  즐겨찾기를 위로 올리는 정렬은 프론트가 이 시각으로 합니다. 목록은 즐겨찾기 정렬을 하지 않습니다
+- **즐겨찾기를 꺼도 메모는 남습니다.** 메모 규칙은 북마크 메모와 같습니다(500자, 비었거나 공백뿐이면 지움)
+- 즐겨찾기 · 메모는 `common_question_note` 한 행에 모입니다. 처음 요청이 동시에 와도 `ON CONFLICT DO NOTHING`
+  으로 행이 하나만 생깁니다

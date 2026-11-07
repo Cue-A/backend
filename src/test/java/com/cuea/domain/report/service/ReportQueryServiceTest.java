@@ -54,6 +54,8 @@ class ReportQueryServiceTest {
     private static final String SESSION_ID = "sess_9f2a1c";
     private static final OffsetDateTime CREATED_AT = OffsetDateTime.parse("2026-09-05T14:10:00Z");
     private static final OffsetDateTime COMPLETED_AT = OffsetDateTime.parse("2026-09-05T14:22:40Z");
+    private static final UUID SHARE_ID = UUID.randomUUID();
+    private static final OffsetDateTime SHARED_AT = OffsetDateTime.parse("2026-09-06T09:00:00Z");
 
     /** 리포트 계약 13장 예시. 시선 축 실패라 partial 입니다. 모르는 키(future_field)를 하나 섞었습니다. */
     private static final String CONTRACT_RESULT = """
@@ -328,6 +330,24 @@ class ReportQueryServiceTest {
         givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
 
         assertThat(service.getDetail(USER_ID, PUBLIC_ID.toString()).retry()).isNull();
+    }
+
+    /** 리포트 화면을 다시 열었을 때 공유 토글과 링크를 맞추는 데 씁니다. */
+    @Test
+    void 공유_중이면_상세_조회에_공유_링크를_준다() throws Exception {
+        givenReport(shared(finished(ReportStatus.PARTIAL, CONTRACT_RESULT)));
+
+        ReportDetailResponse response = service.getDetail(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.share().shareId()).isEqualTo(SHARE_ID.toString());
+        assertThat(response.share().sharedAt()).isEqualTo(SHARED_AT);
+    }
+
+    @Test
+    void 공유하지_않았으면_share_는_null() throws Exception {
+        givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
+
+        assertThat(service.getDetail(USER_ID, PUBLIC_ID.toString()).share()).isNull();
     }
 
     @Test
@@ -651,6 +671,14 @@ class ReportQueryServiceTest {
         Map<String, Object> reportData = objectMapper.readValue(resultJson, new TypeReference<>() {
         });
         return report(status, reportData, COMPLETED_AT);
+    }
+
+    /** 같은 리포트에 공유 토큰만 붙입니다. */
+    private static Report shared(Report report) {
+        return Report.builder().reportId(report.getReportId()).publicId(report.getPublicId())
+                .session(report.getSession()).status(report.getStatus()).attempt(report.getAttempt())
+                .reportData(report.getReportData()).createdAt(report.getCreatedAt())
+                .completedAt(report.getCompletedAt()).shareId(SHARE_ID).sharedAt(SHARED_AT).build();
     }
 
     private Report report(ReportStatus status, Map<String, Object> reportData, OffsetDateTime completedAt) {

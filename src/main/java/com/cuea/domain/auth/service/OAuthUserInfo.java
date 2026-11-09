@@ -10,9 +10,9 @@ import com.cuea.domain.user.entity.Provider;
  *
  * @param emailVerified 제공자가 이메일 소유를 검증했는지. 카카오는
  *        {@code kakao_account.is_email_verified} 로 알려줍니다.
- *        <b>이 값이 true 일 때만 기존 계정에 연결할 수 있습니다.</b>
- *        미검증 이메일로 연결하면 남의 이메일 주소만 아는 사람이 그 계정에
- *        올라탈 수 있습니다.
+ *        <b>이 값이 true 일 때만 계정에 이메일을 넣습니다.</b> 검증돼도 같은
+ *        이메일의 기존 계정에 연결하지는 않습니다. 기존 계정의 이메일은 소유가
+ *        검증된 적이 없기 때문입니다(#139, 02-database.md 연동 규칙).
  */
 public record OAuthUserInfo(
         Provider provider,
@@ -22,8 +22,8 @@ public record OAuthUserInfo(
         String nickname
 ) {
 
-    /** 기존 계정에 연결해도 되는지. 아니면 새 계정을 만들어야 합니다. */
-    public boolean linkable() {
+    /** 제공자가 검증한 이메일이 있는지. 있을 때만 그 이메일을 계정에 넣을 수 있습니다. */
+    public boolean hasVerifiedEmail() {
         return email != null && !email.isBlank() && emailVerified;
     }
 }

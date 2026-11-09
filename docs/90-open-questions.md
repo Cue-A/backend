@@ -74,7 +74,7 @@ AI 결과를 `report.report_data` 에 원본 그대로 저장하므로 기다릴
 | 세션 abort·상태 역전 방지 (#43) | `POST /api/interviews/{sessionId}/abort` (멱등). IN_PROGRESS 에서만 전이. abort 후 늦은 결과 무시 | `11-interview.md` |
 | `doc_id` | RAG/인덱스 id 아님. 예약 필드, 현재 항상 null·미저장 | `10-ai-client.md` |
 | 외부 API 문서 식별자 (#46) | `documentId` (문서 API 와 통일). 이전 `documentPublicId` 폐기 | `11-interview.md` |
-| 소셜·이메일 계정 연동 | 인증 수단을 `user_auth` 로 분리. 카카오→기존계정 연결 허용(이메일 검증된 경우만), 이메일가입→기존계정 연결 금지 | `02-database.md` |
+| 소셜·이메일 계정 연동 | 인증 수단을 `user_auth` 로 분리. 이메일가입→기존계정 연결 금지. 카카오→기존계정 연결도 **금지**(#139, 이전엔 카카오 이메일이 검증되면 허용) — 기존 계정의 이메일은 소유가 검증되지 않아서 | `02-database.md` |
 
 ---
 

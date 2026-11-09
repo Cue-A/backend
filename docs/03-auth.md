@@ -153,9 +153,10 @@ return Result.ok(tokenService.issue(user));
 것인지 검증할 책임이 우리에게 넘어옵니다.
 
 계정 연동 규칙은 [`02-database.md`](./02-database.md) 의 "연동 규칙" 을 그대로
-따르세요. **`OAuthUserInfo.linkable()` 이 true 일 때만 기존 계정에 연결합니다.**
-`is_email_verified` 확인은 선택이 아닙니다 — 빼면 남의 이메일 주소만 아는 사람이
-그 계정에 올라탑니다.
+따르세요. **카카오 로그인은 이메일이 같아도 기존 계정에 연결하지 않습니다**(#139).
+카카오 이메일은 `OAuthUserInfo.hasVerifiedEmail()` 이 true 이고 그 이메일을 쓰는 계정이
+없을 때만 새 계정에 넣습니다. `is_email_verified` 확인은 선택이 아닙니다 — 빼면
+남의 이메일 주소가 그 사람 것처럼 저장됩니다.
 
 ---
 

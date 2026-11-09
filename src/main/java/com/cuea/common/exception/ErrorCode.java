@@ -64,6 +64,12 @@ public enum ErrorCode {
 
     // ── 질문은행 ─────────────────────────────────────────────
     BOOKMARK_NOT_FOUND(HttpStatus.NOT_FOUND, "질문은행에 없는 질문입니다"),
+    CUSTOM_QUESTION_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "내 질문은 최대 100개까지 추가할 수 있습니다"),
+
+    // ── 면접 일정(캘린더) ─────────────────────────────────────
+    // 없는 일정과 남의 일정을 구별하지 않고 둘 다 이 코드로 돌려줍니다. 남의 일정 존재 여부를
+    // 노출하지 않기 위함입니다(소유권은 조회 조건으로 묶음).
+    CALENDAR_EVENT_NOT_FOUND(HttpStatus.NOT_FOUND, "일정을 찾을 수 없습니다"),
 
     // ── AI 서버 (docs/10-ai-client.md 의 errorCode 와 1:1) ────
     AI_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AI 서버에 연결할 수 없습니다"),

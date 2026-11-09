@@ -85,6 +85,7 @@ class CalendarEventMigrationTest {
             Flyway toV3 = Flyway.configure()
                     .dataSource(pg.getJdbcUrl(), pg.getUsername(), pg.getPassword())
                     .locations("classpath:db/migration")
+                    .target("3")
                     .load();
             assertThat(toV3.migrate().migrationsExecuted).isEqualTo(1); // V3 만
 
@@ -123,6 +124,7 @@ class CalendarEventMigrationTest {
         return Flyway.configure()
                 .dataSource(pg.getJdbcUrl(), pg.getUsername(), pg.getPassword())
                 .locations("classpath:db/migration")
+                .target("3")
                 .load();
     }
 

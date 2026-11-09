@@ -45,6 +45,12 @@ public class InterviewSessionQueryService {
     private final InterviewSessionRepository sessionRepository;
     private final QuestionRepository questionRepository;
 
+    /** 사용자의 모든 세션 ID. 회원 탈퇴가 S3 미디어를 지울 때 씁니다. */
+    @Transactional(readOnly = true)
+    public List<String> getSessionIdsOf(String userId) {
+        return sessionRepository.findSessionIdsByUserId(userId);
+    }
+
     /** 본인 세션. 없거나 남의 세션이면 구별 없이 404 입니다. */
     @Transactional(readOnly = true)
     public InterviewSession getOwnedSession(String sessionId, String userId) {

@@ -56,6 +56,7 @@ POST /api/auth/oauth/kakao     카카오        → Result<TokenResponse>   (isN
 POST /api/auth/refresh         재발급        → Result<TokenResponse>
 POST /api/auth/logout          로그아웃      → Result<Void>
 GET  /api/users/me             내 정보       → Result<UserResponse>
+DELETE /api/users/me           회원 탈퇴     → Result<Void>
 ```
 
 **로그인 세 경로가 전부 같은 `TokenResponse` 를 반환합니다.**

@@ -81,6 +81,11 @@ public class User {
         }
     }
 
+    /** 프로필 수정에서 닉네임(마이페이지 노출명)을 바꿉니다. */
+    public void changeNickname(String nickname) {
+        this.nickname = nickname;
+    }
+
     /**
      * 계정 설정에서 LOCAL 인증이 있는 사용자가 비밀번호 확인을 거친 뒤 호출합니다.
      * {@link #fillEmailIfAbsent} 와 달리 기존 값이 있어도 덮어씁니다 — 호출부

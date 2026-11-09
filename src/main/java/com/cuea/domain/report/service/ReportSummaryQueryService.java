@@ -86,6 +86,20 @@ public class ReportSummaryQueryService {
         return reportRepository.findMonthlyScoreAverages(userId, startInclusive, endExclusive);
     }
 
+    /**
+     * RISING(우상향) 배지 판정 창구(Issue #131). 본인의 유효 점수(COMPLETED·PARTIAL + score not null)
+     * 전체를 세션 완료 순서로 오래된 것부터 돌려줍니다. 기간 제한이 없어 "과거 어느 시점이든 3회 연속
+     * 상승" 을 판정할 수 있습니다.
+     *
+     * <p>growth(배지) 도메인이 {@link ReportRepository} 를 직접 쓰지 않도록 이 창구를 거칩니다
+     * (도메인 간 참조는 service 레벨에서만 — docs/01-conventions.md). 유효 점수 정책은 홈 통계와
+     * 동일합니다.
+     */
+    @Transactional(readOnly = true)
+    public List<Integer> findValidScoresOldestFirst(String userId) {
+        return reportRepository.findValidScoresOldestFirst(userId);
+    }
+
     private static ReportSummary summaryOf(ReportSummaryRow row) {
         return new ReportSummary(row.publicId().toString(), row.status(), row.scoreTotal());
     }

@@ -3,6 +3,7 @@ package com.cuea.domain.interview.service;
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.document.entity.Document;
+import com.cuea.domain.growth.badge.SessionCompletedEvent;
 import com.cuea.domain.interview.dto.request.AnswerTimeLimit;
 import com.cuea.domain.interview.dto.request.InterviewStartRequest;
 import com.cuea.domain.interview.entity.InterviewSession;
@@ -40,13 +41,15 @@ class InterviewSessionWriterTest {
 
     private InterviewSessionRepository sessionRepository;
     private QuestionRepository questionRepository;
+    private org.springframework.context.ApplicationEventPublisher eventPublisher;
     private InterviewSessionWriter writer;
 
     @BeforeEach
     void setUp() {
         sessionRepository = mock(InterviewSessionRepository.class);
         questionRepository = mock(QuestionRepository.class);
-        writer = new InterviewSessionWriter(sessionRepository, questionRepository);
+        eventPublisher = mock(org.springframework.context.ApplicationEventPublisher.class);
+        writer = new InterviewSessionWriter(sessionRepository, questionRepository, eventPublisher);
         when(questionRepository.save(any())).thenAnswer(inv -> inv.getArgument(0));
         // 기본값: 세션이 존재하고 IN_PROGRESS. 저장/완료 전이는 IN_PROGRESS 일 때만
         // 일어나므로(늦은 결과 무시, 리뷰 5/#25) 정상 경로 테스트는 이 세션을 씁니다.
@@ -57,7 +60,7 @@ class InterviewSessionWriterTest {
 
     private InterviewSession inProgressSession() {
         return InterviewSession.builder()
-                .sessionId(SESSION_ID).user(mock(User.class))
+                .sessionId(SESSION_ID).user(User.create(null, "면접자"))
                 .document(mock(com.cuea.domain.document.entity.Document.class))
                 .mode("PRACTICE").jobRole("백엔드").questionCount(9)
                 .persona(Persona.FRIENDLY).hideQuestionText(false)
@@ -177,6 +180,10 @@ class InterviewSessionWriterTest {
         assertThat(transitioned).isTrue();
         assertThat(session.getStatus()).isEqualTo(SessionStatus.COMPLETED);
         assertThat(session.getCompletedAt()).isNotNull();
+        // 완료 전이 시 배지 지급 트리거 이벤트가 소유자·세션 ID 로 발행돼야 한다(Issue #131).
+        // 이 이벤트가 AFTER_COMMIT @Async 리스너(BadgeEventListener)로 흘러 배지 지급을 트리거한다.
+        verify(eventPublisher).publishEvent(
+                new SessionCompletedEvent(session.getUser().getUserId(), SESSION_ID));
     }
 
     @Test
@@ -192,6 +199,9 @@ class InterviewSessionWriterTest {
 
         assertThat(transitioned).isFalse();
         assertThat(aborted.getStatus()).isEqualTo(SessionStatus.ABORTED);
+        // 전이하지 않았으면 배지 이벤트도 발행하지 않는다(이미 종료된 세션에 늦게 온 session_end).
+        // 중복/허위 지급 트리거를 막는다.
+        verify(eventPublisher, never()).publishEvent(any(SessionCompletedEvent.class));
     }
 
     @Test

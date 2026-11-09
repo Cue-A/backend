@@ -45,6 +45,12 @@ public class InterviewSessionQueryService {
     private final InterviewSessionRepository sessionRepository;
     private final QuestionRepository questionRepository;
 
+    /** 사용자의 모든 세션 ID. 회원 탈퇴가 S3 미디어를 지울 때 씁니다. */
+    @Transactional(readOnly = true)
+    public List<String> getSessionIdsOf(String userId) {
+        return sessionRepository.findSessionIdsByUserId(userId);
+    }
+
     /** 본인 세션. 없거나 남의 세션이면 구별 없이 404 입니다. */
     @Transactional(readOnly = true)
     public InterviewSession getOwnedSession(String sessionId, String userId) {
@@ -213,6 +219,22 @@ public class InterviewSessionQueryService {
     @Transactional(readOnly = true)
     public List<String> findCompletedPracticeDatesInKst(String userId) {
         return sessionRepository.findCompletedDatesInKst(userId);
+    }
+
+    /**
+     * 면접 캘린더(Issue #130)의 {@code practicedDates} 창구. 반열림 구간 {@code [startInclusive,
+     * endExclusive)}(KST 월 경계) 안에서 본인의 완료 세션이 있는 KST 날짜를 중복 없이 오름차순
+     * {@code YYYY-MM-DD} 로 돌려줍니다.
+     *
+     * <p>calendar 도메인이 {@link InterviewSessionRepository} 를 직접 쓰지 않도록 여기를 거칩니다
+     * (도메인 간 참조는 service 레벨에서만 — docs/01-conventions.md). 완료 세션에서 자동 계산하며
+     * 사용자 등록 일정(calendar_event)과 무관합니다.
+     */
+    @Transactional(readOnly = true)
+    public List<String> findCompletedPracticeDatesInKstBetween(String userId,
+                                                               OffsetDateTime startInclusive,
+                                                               OffsetDateTime endExclusive) {
+        return sessionRepository.findCompletedDatesInKstBetween(userId, startInclusive, endExclusive);
     }
 
     /**

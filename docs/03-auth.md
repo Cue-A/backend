@@ -56,6 +56,7 @@ POST /api/auth/oauth/kakao     카카오        → Result<TokenResponse>   (isN
 POST /api/auth/refresh         재발급        → Result<TokenResponse>
 POST /api/auth/logout          로그아웃      → Result<Void>
 GET  /api/users/me             내 정보       → Result<UserResponse>
+DELETE /api/users/me           회원 탈퇴     → Result<Void>
 ```
 
 **로그인 세 경로가 전부 같은 `TokenResponse` 를 반환합니다.**
@@ -88,6 +89,9 @@ GET  /api/users/me             내 정보       → Result<UserResponse>
 
 `/api/auth/**` 는 `JwtAuthFilter` 를 타지 않습니다. 재발급 요청은 정의상 만료된
 access token 을 달고 오기 때문입니다.
+
+공개 경로 `/api/public/**`(공유 리포트 조회)도 타지 않습니다. 로그인한 사람이 만료된 토큰을 단 채
+공유 링크를 열어도 401 이 나지 않게 하려는 것입니다. 이 경로의 핸들러는 `@PublicApi` 입니다.
 
 ---
 

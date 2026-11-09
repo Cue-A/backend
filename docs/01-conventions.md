@@ -71,6 +71,13 @@ AI 서버는 Python이라 snake_case를 씁니다. `infrastructure/ai/` 의 DTO�
 `@JsonNaming(SnakeCaseStrategy.class)` 를 붙이고, 나머지는 camelCase입니다.
 경계를 넘을 때 변환하고, 도메인 안으로 snake_case를 들이지 않습니다.
 
+### 시각
+
+JSON 의 시각(`OffsetDateTime`)은 항상 **UTC ISO-8601** 입니다. 예: `"2026-10-28T11:03:05.206785Z"`.
+`JacksonConfig` 가 전역으로 바꾸므로 DTO 에서 따로 변환하지 않습니다. 방금 저장한
+엔티티는 `+09:00`, DB 에서 읽은 엔티티는 `Z` 를 들고 있어 그대로 두면 같은 시각이
+응답마다 다르게 나갑니다. 화면에 한국 시각으로 보여주는 건 프론트 몫입니다.
+
 ---
 
 ## DTO

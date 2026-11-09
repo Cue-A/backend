@@ -133,7 +133,7 @@ com/cuea/
 │   ├── ai/              AI 서버 클라이언트 (요청·폴링·타임아웃·에러분류)
 │   ├── websocket/       프론트 push
 │   ├── file/            S3 Presigned URL
-│   ├── redis/           세션 캐시, 회사 목록 캐시
+│   ├── redis/           리프레시 토큰, 리포트 진행 단계, 요청 횟수 제한
 │   └── mapper/          MapStruct
 └── domain/               비즈니스 도메인
     ├── auth/            인증
@@ -143,7 +143,7 @@ com/cuea/
     ├── report/          리포트
     ├── record/          연습 기록 (세션 + 리포트 요약 목록)
     ├── growth/          회차 비교
-    └── company/         회사 목록 (AI 프록시)
+    └── company/         회사·인재상 (Backend 가 원본, AI 에 텍스트로 전달)
 ```
 
 각 도메인 모듈은 `controller` / `service` / `repository` / `entity` / `dto` 로 나눕니다.

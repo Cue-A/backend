@@ -150,6 +150,29 @@ public interface InterviewSessionRepository extends Repository<InterviewSession,
     List<String> findCompletedDatesInKst(@Param("userId") String userId);
 
     /**
+     * 면접 캘린더(Issue #130)의 {@code practicedDates} 용. 반열림 구간 {@code [startInclusive,
+     * endExclusive)}(KST 월 경계를 호출부가 UTC {@link OffsetDateTime} 으로 넘김) 안에서 본인의
+     * <b>완료 세션이 있는 KST 날짜</b>를 중복 없이 오름차순 {@code YYYY-MM-DD} 로 돌려줍니다.
+     *
+     * <p>{@link #findCompletedDatesInKst} 와 같은 KST 변환이지만 월 범위만 봅니다. 사용자 등록
+     * 일정과 무관하게 <b>완료 세션에서 자동 계산</b>되며, calendar_event 에 중복 INSERT 하지
+     * 않습니다(읽기 전용 재사용).
+     */
+    @Query(value = """
+            select distinct to_char((s.completed_at at time zone 'Asia/Seoul'), 'YYYY-MM-DD') as d
+              from session s
+             where s.user_id = :userId
+               and s.status = 'COMPLETED'
+               and s.completed_at is not null
+               and s.completed_at >= :startInclusive
+               and s.completed_at < :endExclusive
+             order by d
+            """, nativeQuery = true)
+    List<String> findCompletedDatesInKstBetween(@Param("userId") String userId,
+                                                @Param("startInclusive") OffsetDateTime startInclusive,
+                                                @Param("endExclusive") OffsetDateTime endExclusive);
+
+    /**
      * 홈 잔디(활동 히트맵)용. 기간 안에서 <b>KST 날짜별 완료 세션 수</b>를 돌려줍니다(Issue #114).
      * 쉰 날은 행이 없으므로, 빈 날 0 채움은 서비스가 기간 전체 날짜를 돌며 만듭니다.
      *

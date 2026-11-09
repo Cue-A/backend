@@ -4,9 +4,12 @@ import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.common.result.Result;
 import com.cuea.common.security.CurrentUser;
-import com.cuea.domain.user.dto.request.PasswordChangeRequest;
+import com.cuea.domain.user.dto.request.EmailChangeRequest;
+import com.cuea.domain.user.dto.response.EmailChangeResponse;
 import com.cuea.domain.user.dto.response.UserResponse;
 import com.cuea.domain.user.repository.UserRepository;
+import com.cuea.domain.user.service.UserEmailService;
+import com.cuea.domain.user.dto.request.PasswordChangeRequest;
 import com.cuea.domain.user.service.UserPasswordService;
 import com.cuea.domain.user.dto.response.AccountResponse;
 import com.cuea.domain.user.service.UserAccountService;
@@ -30,6 +33,7 @@ import org.springframework.web.bind.annotation.RestController;
 public class UserController {
 
     private final UserRepository userRepository;
+    private final UserEmailService userEmailService;
     private final UserPasswordService userPasswordService;
     private final UserAccountService userAccountService;
     private final UserWithdrawalService userWithdrawalService;
@@ -41,6 +45,16 @@ public class UserController {
         return Result.ok(userRepository.findById(userId)
                 .map(UserResponse::from)
                 .orElseThrow(() -> new BusinessException(ErrorCode.USER_NOT_FOUND)));
+    }
+
+    @Operation(summary = "이메일 변경",
+            description = "이메일(LOCAL) 가입 계정만 가능합니다. 카카오 전용 계정은 "
+                    + "EMAIL_CHANGE_NOT_ALLOWED 로 거부됩니다.")
+    @PatchMapping("/me/email")
+    public Result<EmailChangeResponse> changeEmail(@CurrentUser String userId,
+                                                     @Valid @RequestBody EmailChangeRequest request) {
+        String email = userEmailService.changeEmail(userId, request.newEmail(), request.currentPassword());
+        return Result.ok(new EmailChangeResponse(email));
     }
 
     @Operation(summary = "비밀번호 변경",

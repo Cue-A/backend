@@ -1,6 +1,7 @@
 package com.cuea.domain.interview.repository;
 
 import com.cuea.domain.interview.entity.InterviewSession;
+import com.cuea.domain.interview.entity.Persona;
 import com.cuea.domain.interview.entity.SessionStatus;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -106,6 +107,13 @@ public interface InterviewSessionRepository extends Repository<InterviewSession,
                                                     @Param("statuses") Collection<SessionStatus> statuses);
 
     long countByUser_UserIdAndStatusIn(String userId, Collection<SessionStatus> statuses);
+
+    /**
+     * PRESSURE_CLEAR 배지 판정용(Issue #131). 본인에게 <b>압박(PRESSURE) 페르소나로 완료한</b>
+     * 세션이 하나라도 있는지. 모드 선택만으로는 지급하지 않으므로 {@code status = COMPLETED}
+     * 를 함께 봅니다. 실제 저장된 {@code persona} 를 기준으로 판정합니다.
+     */
+    boolean existsByUser_UserIdAndPersonaAndStatus(String userId, Persona persona, SessionStatus status);
 
     long countByFolder_FolderIdAndStatusIn(Long folderId, Collection<SessionStatus> statuses);
 

@@ -40,6 +40,20 @@ public class AsyncConfig implements AsyncConfigurer {
         return new TaskExecutorAdapter(Executors.newVirtualThreadPerTaskExecutor());
     }
 
+    /**
+     * 배지 지급(조건 재평가 + 멱등 INSERT) 전용 실행기 빈 이름(Issue #131).
+     *
+     * <p>세션/리포트 완료 커밋 뒤에 배지를 지급합니다. 완료 처리 스레드를 잡아두지 않도록
+     * 별도 실행기에서 돌려, 배지 지급이 느리거나 실패해도 면접/리포트 흐름에 영향이 없게 합니다.
+     * 작업이 대부분 짧은 DB 쓰기라 가상 스레드로 둡니다.
+     */
+    public static final String BADGE_EXECUTOR = "badgeTaskExecutor";
+
+    @Bean(BADGE_EXECUTOR)
+    public AsyncTaskExecutor badgeTaskExecutor() {
+        return new TaskExecutorAdapter(Executors.newVirtualThreadPerTaskExecutor());
+    }
+
     @Override
     public AsyncUncaughtExceptionHandler getAsyncUncaughtExceptionHandler() {
         // 반환값 없는 @Async(void) 에서 던진 예외의 최종 안전망.

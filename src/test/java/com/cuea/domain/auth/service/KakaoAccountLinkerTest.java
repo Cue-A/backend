@@ -92,20 +92,42 @@ class KakaoAccountLinkerTest {
         verify(userRepository, never()).existsByEmail(anyString());
     }
 
+    /**
+     * 기존 계정의 이메일은 소유가 검증된 적이 없습니다(이메일 가입 · 변경에 인증 메일이 없음). 이메일 주인이
+     * 아닌 사람이 만든 계정일 수 있어, 카카오 이메일이 검증됐어도 그 계정에 붙이지 않습니다(#139).
+     * 이메일은 기존 계정이 쓰고 있어 users.email UNIQUE 때문에 새 계정에는 넣지 않습니다.
+     */
     @Test
-    void 검증된_이메일이_같은_기존_계정이_있으면_연결한다() {
+    void 검증된_이메일이_같은_기존_계정이_있어도_연결하지_않고_새_계정을_만든다() {
         User existing = User.create("kim@example.com", "김취준");
         when(userAuthRepository.findByProviderAndProviderId(Provider.KAKAO, "kakao-1"))
                 .thenReturn(Optional.empty());
-        when(userRepository.findByEmail("kim@example.com")).thenReturn(Optional.of(existing));
+        when(userRepository.existsByEmail("kim@example.com")).thenReturn(true);
 
         KakaoLinkResult result = kakaoAccountLinker.linkOrCreate(
                 new OAuthUserInfo(Provider.KAKAO, "kakao-1", "kim@example.com", true, "김취준"));
 
-        assertThat(result.isNewUser()).isFalse();
-        assertThat(existing.providers()).contains(Provider.KAKAO);
+        assertThat(result.isNewUser()).isTrue();
+        assertThat(result.user().email()).isNull();
         assertThat(result.user().providers()).containsExactly(Provider.KAKAO);
-        verify(userRepository).save(existing);
+        assertThat(existing.providers()).doesNotContain(Provider.KAKAO);
+        verify(userRepository, never()).findByEmail(anyString());
+        verify(userRepository, never()).save(existing);
+        verify(userRepository).save(org.mockito.ArgumentMatchers.argThat(u -> u != existing));
+    }
+
+    @Test
+    void 검증된_이메일을_쓰는_계정이_없으면_새_계정에_그_이메일을_넣는다() {
+        when(userAuthRepository.findByProviderAndProviderId(Provider.KAKAO, "kakao-1"))
+                .thenReturn(Optional.empty());
+        when(userRepository.existsByEmail("kim@example.com")).thenReturn(false);
+
+        KakaoLinkResult result = kakaoAccountLinker.linkOrCreate(
+                new OAuthUserInfo(Provider.KAKAO, "kakao-1", "kim@example.com", true, "김취준"));
+
+        assertThat(result.isNewUser()).isTrue();
+        assertThat(result.user().email()).isEqualTo("kim@example.com");
+        assertThat(result.user().nickname()).isEqualTo("김취준");
     }
 
     @Test
@@ -130,32 +152,6 @@ class KakaoAccountLinkerTest {
 
         assertThat(result.isNewUser()).isTrue();
         assertThat(result.user().email()).isNull();
-    }
-
-    /**
-     * 카카오 이메일은 나중에 바뀔 수 있어, "검증된 이메일이 같은 기존 계정"이 사실은
-     * 이미 다른 카카오 계정과 연결돼 있을 수 있습니다. 그대로 연결하면
-     * uk_user_auth_user_provider 위반으로 500이 나므로 새 계정을 만들어야 합니다.
-     * 이때 새 계정에 그 이메일을 그대로 넣으면 이번엔 users.email unique 위반으로
-     * 500이 나므로, 새 계정의 email은 비워야 합니다.
-     */
-    @Test
-    void 이메일이_같아도_이미_다른_카카오_계정과_연결됐으면_새로_만든다() {
-        User existing = User.create("kim@example.com", "김취준");
-        existing.link(Provider.KAKAO, "kakao-old", null);
-        when(userAuthRepository.findByProviderAndProviderId(Provider.KAKAO, "kakao-new"))
-                .thenReturn(Optional.empty());
-        when(userAuthRepository.findByUser_UserIdAndProvider(existing.getUserId(), Provider.KAKAO))
-                .thenReturn(existing.authOf(Provider.KAKAO));
-        when(userRepository.findByEmail("kim@example.com")).thenReturn(Optional.of(existing));
-
-        KakaoLinkResult result = kakaoAccountLinker.linkOrCreate(
-                new OAuthUserInfo(Provider.KAKAO, "kakao-new", "kim@example.com", true, "김취준"));
-
-        assertThat(result.isNewUser()).isTrue();
-        assertThat(result.user().email()).isNull();
-        verify(userRepository, never()).save(existing);
-        verify(userRepository).save(org.mockito.ArgumentMatchers.argThat(u -> u != existing));
     }
 
     @Test

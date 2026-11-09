@@ -33,7 +33,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  * 배지 지급(조건 판정 + 멱등 INSERT)을 실제 PostgreSQL 로 검증합니다(Issue #131).
  *
  * <p>실제 서비스 빈을 띄워 {@code uk_user_badge} UNIQUE 와 {@code ON CONFLICT DO NOTHING} 이
- * 동시성·중복에서 어떻게 동작하는지 봅니다(mock 으로는 드러나지 않습니다). V4 시드가 적용된
+ * 동시성·중복에서 어떻게 동작하는지 봅니다(mock 으로는 드러나지 않습니다). V7 시드가 적용된
  * 컨테이너라 badge 정의 5종이 있습니다. 세션/리포트는 네이티브 insert 로 완료 시각을 고정합니다
  * (엔티티 {@code complete()}/{@code finish()} 는 now() 로 덮어 KST 날짜 경계 검증이 불가).
  * 싱글턴 컨테이너를 공유하므로 넣은 데이터는 {@code @AfterEach} 에서 직접 지웁니다.
@@ -73,6 +73,9 @@ class BadgeGrantServiceIntegrationTest extends PostgresRepositoryTest {
         jdbc.update("delete from session");
         jdbc.update("delete from document");
         jdbc.update("delete from users");
+        // status 를 바꾼 테스트가 있어도 싱글턴 컨테이너를 공유하는 다음 테스트에 새지 않도록
+        // 시드 기본값(ACTIVE)으로 되돌립니다(badge 정의 자체는 지우지 않음).
+        jdbc.update("update badge set status = 'ACTIVE' where status <> 'ACTIVE'");
     }
 
     /* ---------------- FIRST_SESSION ---------------- */
@@ -400,9 +403,36 @@ class BadgeGrantServiceIntegrationTest extends PostgresRepositoryTest {
     /* ---------------- 시드 ---------------- */
 
     @Test
-    void V4_시드로_배지_정의_5종이_있다() {
+    void V7_시드로_배지_정의_5종이_있다() {
         assertThat(badgeRepository.findAll()).extracting(Badge::getBadgeCode)
                 .contains("FIRST_SESSION", "STREAK_3", "PRESSURE_CLEAR", "RISING", "TEN_SESSIONS");
+    }
+
+    /* ---------------- status=ACTIVE 지급 게이트 ---------------- */
+
+    @Test
+    void 비활성_배지는_조건을_만족해도_지급하지_않고_ACTIVE_배지만_준다() {
+        // 운영자가 FIRST_SESSION 을 더 주지 않으려고 status 를 내린 상황(지우지 않고 status 만 변경).
+        jdbc.update("update badge set status = 'INACTIVE' where badge_code = 'FIRST_SESSION'");
+        completed(userId, docId, Persona.FRIENDLY, utc("2026-11-01T01:00:00Z"));
+
+        grantService.reconcile(userId);
+
+        // 비활성 배지(FIRST_SESSION)는 조건을 만족해도 지급되지 않는다.
+        assertThat(earned(userId)).doesNotContain("FIRST_SESSION");
+    }
+
+    @Test
+    void 이미_받은_배지를_비활성화해도_기존_획득_기록은_회수하지_않는다() {
+        // 먼저 ACTIVE 상태에서 지급.
+        completed(userId, docId, Persona.FRIENDLY, utc("2026-11-01T01:00:00Z"));
+        grantService.reconcile(userId);
+        assertThat(earned(userId)).contains("FIRST_SESSION");
+
+        // 이후 운영자가 status 를 내려도 이미 받은 사용자의 user_badge 는 그대로 유지(회수 없음).
+        jdbc.update("update badge set status = 'INACTIVE' where badge_code = 'FIRST_SESSION'");
+        grantService.reconcile(userId);
+        assertThat(countUserBadge(userId, "FIRST_SESSION")).isEqualTo(1);
     }
 
     /* ---------------- fixtures ---------------- */

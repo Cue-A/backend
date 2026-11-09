@@ -61,7 +61,7 @@ AI 결과를 `report.report_data` 에 원본 그대로 저장하므로 기다릴
 | 되묻기 한도 | 토픽당 1회 / 세션당 3회 | `11-interview.md` |
 | Presigned 만료 | 이력서 15분 · 질문 음성 15분 | `20-storage.md` |
 | `STT_FAILED` 재시도 | 1회 후 재녹음 안내 | `10-ai-client.md` |
-| 회사 목록 캐시 | Redis 1시간 | `10-ai-client.md` |
+| 회사 목록 | AI 에 회사 목록 없음(`GET /ai/companies` 없음). Backend `company` 테이블이 원본이라 캐시하지 않음 | `10-ai-client.md` · `11-interview.md` |
 | 세션 상태 소유권 | AI가 보유. 표시 상태는 Spring DB 기준 | `10-ai-client.md` |
 | 리포트 부분 실패 | 내용 실패=전체 실패 / 음성·시선=해당 축만 | `13-report.md` |
 | AI 서버 위치 (구 4·5·6번) | Whisper·시선 분석에 GPU 가 필요해 **실제 모드 AI 는 학과 GPU 서버**에서 상시 운영. Cloudflare `https` 고정 주소로 받아 `APP_AI_BASE_URL` 에 넣음. compose 에 AI 를 넣지 않고 포트도 신경 쓰지 않음 | `00-architecture.md`, `10-ai-client.md` |
@@ -74,7 +74,7 @@ AI 결과를 `report.report_data` 에 원본 그대로 저장하므로 기다릴
 | 세션 abort·상태 역전 방지 (#43) | `POST /api/interviews/{sessionId}/abort` (멱등). IN_PROGRESS 에서만 전이. abort 후 늦은 결과 무시 | `11-interview.md` |
 | `doc_id` | RAG/인덱스 id 아님. 예약 필드, 현재 항상 null·미저장 | `10-ai-client.md` |
 | 외부 API 문서 식별자 (#46) | `documentId` (문서 API 와 통일). 이전 `documentPublicId` 폐기 | `11-interview.md` |
-| 소셜·이메일 계정 연동 | 인증 수단을 `user_auth` 로 분리. 카카오→기존계정 연결 허용(이메일 검증된 경우만), 이메일가입→기존계정 연결 금지 | `02-database.md` |
+| 소셜·이메일 계정 연동 | 인증 수단을 `user_auth` 로 분리. 이메일가입→기존계정 연결 금지. 카카오→기존계정 연결도 **금지**(#139, 이전엔 카카오 이메일이 검증되면 허용) — 기존 계정의 이메일은 소유가 검증되지 않아서 | `02-database.md` |
 
 ---
 

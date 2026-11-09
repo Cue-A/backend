@@ -42,6 +42,9 @@ import java.util.Set;
 @RequiredArgsConstructor
 public class BadgeGrantService {
 
+    /** 지급 대상 배지의 {@code status}. 이 값이 아니면 더 주지 않습니다(Badge 엔티티·시드 규약). */
+    private static final String STATUS_ACTIVE = "ACTIVE";
+
     private final BadgeRepository badgeRepository;
     private final UserBadgeRepository userBadgeRepository;
     private final InterviewSessionQueryService sessionQueryService;
@@ -115,12 +118,21 @@ public class BadgeGrantService {
      * 멱등 지급. badge_code 로 정의를 찾아 {@code ON CONFLICT DO NOTHING} 으로 넣습니다.
      * 시드되지 않은 배지(정의 없음)는 조용히 건너뜁니다(마이그레이션 적용 전 안전).
      *
-     * @return 새로 넣었으면 1, 이미 있으면 0
+     * <p>{@code status} 가 {@code ACTIVE} 가 아닌 배지(운영자가 더 주지 않으려고 내린 배지)는
+     * 지급하지 않습니다. {@code Badge} 엔티티·docs/02-database.md 규약: 획득 기록이 있는 배지는
+     * 지우지 말고 {@code status} 를 내리고, 지급 로직은 {@code status=ACTIVE} 만 줍니다. 이미
+     * 받은 사용자의 기록({@code user_badge})은 회수하지 않습니다(표시만 조회 서비스가 정합니다).
+     *
+     * @return 새로 넣었으면 1, 이미 있거나 지급 대상이 아니면 0
      */
     private int grant(String userId, BadgeCode code, String sourceSessionId) {
         Badge badge = badgeRepository.findByBadgeCode(code.name()).orElse(null);
         if (badge == null) {
-            log.warn("배지 정의가 없어 지급을 건너뜁니다 code={} (V4 시드 확인)", code);
+            log.warn("배지 정의가 없어 지급을 건너뜁니다 code={} (V7 시드 확인)", code);
+            return 0;
+        }
+        if (!STATUS_ACTIVE.equals(badge.getStatus())) {
+            log.debug("비활성 배지라 지급을 건너뜁니다 code={} status={}", code, badge.getStatus());
             return 0;
         }
         OffsetDateTime earnedAt = OffsetDateTime.now(clock);

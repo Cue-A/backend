@@ -174,7 +174,7 @@ cue-a/
     │   │       │       └── response/
     │   │       ├── report/
     │   │       ├── growth/                     회차 비교
-    │   │       └── company/                    AI 프록시
+    │   │       └── company/                    회사·인재상 (Backend 가 원본)
     │   │
     │   └── resources/
     │       ├── application.yml
@@ -221,7 +221,7 @@ AI 서버와의 통신은 폴링, 타임아웃 분기(90초/60초), 에러 분�
 | Spring Boot 3.5 | 4.x 대신 | 자료와 라이브러리 호환성 |
 | Java 21 가상 스레드 | 필수 | 폴링·WebSocket이 스레드를 오래 점유 |
 | PostgreSQL 16 | | |
-| Redis 7 | | 세션 캐시, 회사 목록 캐시 |
+| Redis 7 | | 리프레시 토큰, 리포트 진행 단계, 요청 횟수 제한 |
 | MinIO | S3 호환 | 로컬 개발용. 배포 시 S3로 교체 가능 |
 
 가상 스레드는 이 프로젝트에서 특히 중요합니다. Spring이 AI를 최대 90초 폴링하는

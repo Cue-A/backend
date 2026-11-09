@@ -59,8 +59,8 @@ public class AuthController {
 
     @Operation(summary = "카카오 로그인",
             description = "인가 코드 방식입니다. provider_id 로 이미 연결된 계정이 있으면 로그인, "
-                    + "없으면 이메일이 검증된 경우에 한해 기존 이메일 계정에 연결하고, 그마저 없으면 "
-                    + "새로 가입합니다. 신규 가입 여부는 응답의 isNewUser 로 내려줍니다.")
+                    + "없으면 새로 가입합니다. 같은 이메일의 계정이 있어도 그 계정에 연결하지 않습니다. "
+                    + "신규 가입 여부는 응답의 isNewUser 로 내려줍니다.")
     @PostMapping("/oauth/kakao")
     @RateLimit(key = "auth-kakao", limit = 10, windowSeconds = 60)
     public Result<TokenResponse> loginWithKakao(@Valid @RequestBody KakaoLoginRequest request) {

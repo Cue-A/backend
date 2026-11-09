@@ -10,13 +10,12 @@ import com.cuea.domain.user.entity.Provider;
 import com.cuea.domain.user.entity.User;
 import com.cuea.domain.user.entity.UserAuth;
 import com.cuea.domain.user.repository.UserRepository;
+import com.cuea.domain.user.service.PasswordPolicy;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-
-import java.util.regex.Pattern;
 
 /**
  * 이메일 회원가입·로그인, 카카오 로그인. 토큰 발급 자체는 전부
@@ -30,10 +29,6 @@ import java.util.regex.Pattern;
 @RequiredArgsConstructor
 public class AuthService {
 
-    /** 8~64자, 영문·숫자 최소 1개씩. 코드·문서 어디에도 정책이 없어 임시로 정한 값입니다. */
-    private static final Pattern PASSWORD_PATTERN =
-            Pattern.compile("^(?=.*[A-Za-z])(?=.*\\d).{8,64}$");
-
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
     private final TokenService tokenService;
@@ -45,7 +40,7 @@ public class AuthService {
         if (userRepository.existsByEmail(request.email())) {
             throw new BusinessException(ErrorCode.EMAIL_ALREADY_EXISTS);
         }
-        if (!PASSWORD_PATTERN.matcher(request.password()).matches()) {
+        if (!PasswordPolicy.isValid(request.password())) {
             throw new BusinessException(ErrorCode.INVALID_PASSWORD_FORMAT);
         }
 

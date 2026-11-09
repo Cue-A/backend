@@ -37,7 +37,34 @@ public interface ReportRepository extends Repository<Report, Long> {
     @Query("select r from Report r where r.reportId = :reportId")
     Optional<Report> findByIdForInternal(@Param("reportId") Long reportId);
 
+    /**
+     * 공유 토큰으로 조회. 공개 리포트 조회 전용이라 소유자 조건이 없습니다. <b>본인 API 에서 쓰지 마세요.</b>
+     * 토큰은 공유한 리포트에만 있으므로, 공유하지 않았거나 해제한 리포트는 나오지 않습니다.
+     */
+    @Query("select r from Report r where r.shareId = :shareId")
+    Optional<Report> findByShareIdForPublic(@Param("shareId") UUID shareId);
+
     Report save(Report report);
+
+    /**
+     * 공유하지 않은 리포트에 공유 토큰을 씁니다.
+     *
+     * <p>{@link #reopenFailed} 와 같은 이유로 조건부 UPDATE 한 번으로 합니다. 공유를 두 번 눌러도
+     * {@code share_id is null} 을 만족하는 쪽은 하나뿐이라 링크가 하나만 생깁니다.
+     *
+     * @return 바뀐 행 수. 0 이면 이미 공유 중입니다
+     */
+    @Modifying(clearAutomatically = true, flushAutomatically = true)
+    @Query("""
+            update Report r
+               set r.shareId = :shareId,
+                   r.sharedAt = :sharedAt
+             where r.reportId = :reportId
+               and r.shareId is null
+            """)
+    int share(@Param("reportId") Long reportId,
+              @Param("shareId") UUID shareId,
+              @Param("sharedAt") OffsetDateTime sharedAt);
 
     /** 본인 세션들의 리포트 요약. 연습 기록 목록용입니다. */
     @Query("""

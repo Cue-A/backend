@@ -51,6 +51,9 @@ public record ReportDetailResponse(
         @Schema(description = "실패 축 재시도 상태. 재시도한 적이 없거나 성공했으면 null. 재시도 중에도 리포트는 그대로 내려갑니다")
         ReportRetryInfo retry,
 
+        @Schema(description = "공유 링크. 공유하지 않았으면 null. 화면을 다시 열었을 때 공유 상태를 맞추는 데 씁니다")
+        ReportShareInfo share,
+
         @Schema(description = "AI 가 리포트를 만든 시각")
         OffsetDateTime generatedAt,
 
@@ -182,6 +185,7 @@ public record ReportDetailResponse(
                 map(result.improvedAnswers(), a -> new ImprovedAnswer(
                         a.questionId(), a.originalExcerpt(), a.suggestion(), a.tStart(), a.tEnd())),
                 retry,
+                ReportShareInfo.of(report),
                 result.generatedAt(),
                 report.getCreatedAt(),
                 report.getCompletedAt());

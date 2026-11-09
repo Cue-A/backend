@@ -109,4 +109,9 @@ public class TokenService {
             log.debug("이미 무효한 토큰으로 로그아웃 요청 code={}", e.getErrorCode());
         }
     }
+
+    /** 회원 탈퇴 등으로 이 사용자가 로그인한 모든 기기를 강제로 끊습니다. */
+    public void revokeAll(String userId) {
+        refreshTokenStore.revokeAll(userId);
+    }
 }

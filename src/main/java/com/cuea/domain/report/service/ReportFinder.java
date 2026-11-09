@@ -16,6 +16,8 @@ import java.util.UUID;
  *
  * <p>없는 것 · 남의 것 · UUID 가 아닌 값은 모두 404 {@code REPORT_NOT_FOUND} 입니다. 형식 오류를
  * 400 으로 구별해 주면 "UUID 형태면 존재할 수도 있다"는 정보가 됩니다.
+ *
+ * <p>예외는 공유 링크({@link #getShared}) 하나입니다. 공개 조회라 소유자를 보지 않고 공유 토큰으로만 찾습니다.
  */
 @Component
 @RequiredArgsConstructor
@@ -24,8 +26,18 @@ class ReportFinder {
     private final ReportRepository reportRepository;
 
     Report getOwned(String userId, String reportId) {
-        return reportRepository.findByPublicIdAndSession_User_UserId(parse(reportId), userId)
+        UUID publicId = parse(reportId, ErrorCode.REPORT_NOT_FOUND);
+        return reportRepository.findByPublicIdAndSession_User_UserId(publicId, userId)
                 .orElseThrow(() -> new BusinessException(ErrorCode.REPORT_NOT_FOUND));
+    }
+
+    /**
+     * 공유 링크의 리포트. <b>공개 조회 전용이라 소유자를 보지 않습니다.</b> 없는 링크 · 해제된 링크 ·
+     * UUID 가 아닌 값은 모두 404 {@code SHARED_REPORT_NOT_FOUND} 입니다.
+     */
+    Report getShared(String shareId) {
+        return reportRepository.findByShareIdForPublic(parse(shareId, ErrorCode.SHARED_REPORT_NOT_FOUND))
+                .orElseThrow(() -> new BusinessException(ErrorCode.SHARED_REPORT_NOT_FOUND));
     }
 
     /**
@@ -50,11 +62,11 @@ class ReportFinder {
         return report.getReportData();
     }
 
-    private UUID parse(String reportId) {
+    private UUID parse(String id, ErrorCode notFound) {
         try {
-            return UUID.fromString(reportId);
+            return UUID.fromString(id);
         } catch (IllegalArgumentException e) {
-            throw new BusinessException(ErrorCode.REPORT_NOT_FOUND);
+            throw new BusinessException(notFound);
         }
     }
 }

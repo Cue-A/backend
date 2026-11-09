@@ -124,6 +124,18 @@ public class Report extends BaseCreatedEntity {
     @Column(name = "completed_at")
     private OffsetDateTime completedAt;
 
+    /**
+     * 공유 링크 토큰. null 이면 공유하지 않은 리포트입니다.
+     *
+     * <p>{@code publicId} 와 다른 값입니다. 해제했다가 다시 공유하면 새 토큰이 나와 예전 링크는
+     * 계속 막히고, 본인 API 가 쓰는 {@code reportId} 는 밖으로 나가지 않습니다.
+     */
+    @Column(name = "share_id", unique = true)
+    private UUID shareId;
+
+    @Column(name = "shared_at")
+    private OffsetDateTime sharedAt;
+
     /** 첫 요청. AI 에 task 를 이미 등록한 뒤에 만듭니다. */
     public static Report processing(InterviewSession session, String aiTaskId) {
         return Report.builder()
@@ -169,5 +181,11 @@ public class Report extends BaseCreatedEntity {
         this.status = ReportStatus.FAILED;
         this.errorCode = errorCode;
         this.completedAt = OffsetDateTime.now();
+    }
+
+    /** 공유 링크를 끊습니다. 다시 공유하면 새 토큰이 나옵니다. */
+    public void unshare() {
+        this.shareId = null;
+        this.sharedAt = null;
     }
 }

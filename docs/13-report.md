@@ -1,7 +1,7 @@
 # 13. 리포트 · 성장 추적
 
 리포트 계약(「리포트생성 API계약」)이 도착해 **생성 흐름**(Issue #47)과 **상태 조회**(Issue #48)를
-반영했습니다. 상세 조회 · 실패 축 재시도 · 회차 비교(Issue #102)는 아래 각 절에 있습니다.
+반영했습니다. 상세 조회 · 실패 축 재시도 · 공유 링크(Issue #135) · 회차 비교(Issue #102)는 아래 각 절에 있습니다.
 
 ---
 
@@ -224,10 +224,13 @@ COMPLETED · PARTIAL 이면 부릅니다.
   "companyComment": "...",
   "improvedAnswers": [ { "questionId": "q_3", "originalExcerpt": "...", "suggestion": "...",
                          "tStart": 12.4, "tEnd": 19.8 } ],
+  "retry": null,
+  "share": { "shareId": "...", "sharedAt": "2026-09-06T09:00:00Z" },
   "generatedAt": "2026-09-05T14:22:31Z", "createdAt": "...", "completedAt": "..."
 }
 ```
 
+- `share` 는 공유 링크입니다. 공유하지 않았으면 null 입니다. 화면을 다시 열었을 때 공유 상태를 맞추는 데 씁니다(아래 공유 링크 절)
 - **모양은 리포트 계약 13장 그대로**이고 키만 camelCase 로 옮깁니다. AI JSON 을 읽는 곳은
   `infrastructure/ai` 의 `AiReportResultReader` · `AiReportResult` 뿐입니다
 - `questionText` 만 AI 결과에 없어 우리 `question` 테이블에서 붙입니다. 못 찾으면 null
@@ -360,6 +363,61 @@ PARTIAL 리포트에서 **실패한 축(말하기·시선)만** 다시 분석합
   나머지는 `ErrorCode` 문구 그대로입니다. 재시도 실패 WS `error.message` 도 같은 문구입니다
 - 202 는 재시도를 **시작했다는 응답**입니다. 바뀐 점수는 WS `report` 를 받고 상세 조회로 가져옵니다
 - 처음 생성 때 쓴 소켓은 닫혀 있을 수 있으므로, 프론트는 202 를 받으면 소켓에 다시 붙고 상태 조회를 1회 부릅니다
+
+---
+
+## 공유 링크
+
+로그인하지 않은 사람(지인 · 멘토)에게 리포트를 보여줍니다.
+
+```
+POST   /api/reports/{reportId}/share       → 200 { shareId, sharedAt }
+DELETE /api/reports/{reportId}/share       → 200 (data 없음)
+GET    /api/public/reports/{shareId}       → 200 공개 리포트 (로그인 없이)
+```
+
+명세의 `/v1/...` 는 다른 API 와 같이 `/api/...` 로 씁니다. 링크 URL 은 프론트가 `shareId` 로 만듭니다.
+
+### 생성 · 해제
+
+- **링크는 `reportId` 가 아니라 따로 발급한 토큰(`share_id`)입니다.** 해제했다가 다시 공유하면 새 토큰이
+  나와 예전 링크는 계속 404 이고, 본인 API 를 부르는 `reportId` 는 밖으로 나가지 않습니다
+- 유효기간은 없습니다. 해제할 때까지 열립니다
+- 끝난 리포트(COMPLETED · PARTIAL)만 공유합니다. 상태별 응답(202 `REPORT_NOT_READY` · 409 `REPORT_FAILED` ·
+  404 `REPORT_NOT_FOUND`)은 상세 조회와 같습니다. 끝난 리포트는 진행 중 · 실패로 돌아가지 않으므로 공유한
+  리포트가 나중에 막히는 일은 없습니다
+- **이미 공유 중이면 같은 링크를 줍니다.** 토큰은 `share_id is null` 조건부 UPDATE 로 써서, 공유를 두 번
+  눌러도 링크가 하나만 생깁니다
+- 공유하지 않은 리포트를 해제해도 200 입니다. 남의 리포트는 404 `REPORT_NOT_FOUND`
+- 둘 다 분당 30회로 제한합니다
+
+### 공개 조회
+
+본인 리포트 화면(상세 · 타임라인 · 개선 답변)을 한 응답으로 줍니다.
+
+```json
+{ "status": "PARTIAL",
+  "overall": {...}, "summary": "...", "axes": {...}, "questions": [...],
+  "resilience": {...}, "companyComment": "...",
+  "timeline": [ { "questionId": "q_1", "questionNumber": 1, "questionText": "...", "durationSec": 46.2,
+                  "hadReask": true, "evidence": [...] } ],
+  "improvedAnswers": [ { "questionId": "q_1r", "originalQuestionId": "q_1", "isReask": true, ... } ],
+  "generatedAt": "...", "createdAt": "...", "completedAt": "..." }
+```
+
+- 각 칸은 본인 응답과 같습니다. `timeline` 은 타임라인 조회의 `questions`, `improvedAnswers` 는 개선 답변
+  조회 것입니다. 타임라인의 축 상태 · 회복력은 `axes` · `resilience` 와 겹쳐 뺍니다
+- **`reportId` · `sessionId` · `retry` · `share` 는 넣지 않습니다.** 본인 API 를 부르는 값이거나 본인 화면의
+  버튼용입니다. 그래서 공개 화면에는 재연습 · 실패 축 재시도 · 공유 버튼을 그릴 수 없고, 누가 ID 를 알아내도
+  본인 API 는 404 입니다. 재시도 중이어도 지금 결과를 그대로 보여줍니다
+- **녹음 · 영상 다시보기와 회차 비교는 넣지 않습니다.** presigned URL 은 해제해도 최대 1시간 유효하고 목소리 ·
+  얼굴이라 공유할 때 따로 동의를 받는 게 맞습니다. 회차 비교는 공유하지 않은 다른 회차 점수가 함께 보이고
+  부를 때마다 AI 를 부릅니다. 필요해지면 별도 이슈로 붙입니다
+- 없는 링크 · 해제된 링크 · UUID 가 아닌 값은 모두 404 `SHARED_REPORT_NOT_FOUND` 입니다(구분하지 않음)
+- `@PublicApi` 이고 `JwtAuthFilter` 가 `/api/public/` 을 건너뜁니다. 로그인한 사람이 만료된 토큰을 단 채
+  링크를 열어도 401 이 나지 않게 하려는 것입니다
+- IP 기준 분당 60회로 제한합니다(`@RateLimit`, 토큰을 보지 않으므로 로그인해도 IP 기준)
+- 조회는 소유자 조건이 없는 `ReportRepository.findByShareIdForPublic` 하나뿐입니다. 본인 API 에서 쓰지 않습니다
 
 ---
 

@@ -52,6 +52,10 @@ public interface InterviewSessionRepository extends Repository<InterviewSession,
     Optional<InterviewSession> findRootForReplay(@Param("sessionId") String sessionId,
                                                  @Param("userId") String userId);
 
+    /** 회원 탈퇴 때 세션 미디어 접두사를 모으려고 씁니다. */
+    @Query("select s.sessionId from InterviewSession s where s.user.userId = :userId")
+    List<String> findSessionIdsByUserId(@Param("userId") String userId);
+
     InterviewSession save(InterviewSession session);
 
     /** 연습 기록 목록과 그 개수 쿼리가 같이 쓰는 조건. 회사(c) · 폴더(f)는 없을 수 있어 left join 입니다. */
@@ -148,6 +152,29 @@ public interface InterviewSessionRepository extends Repository<InterviewSession,
              order by d
             """, nativeQuery = true)
     List<String> findCompletedDatesInKst(@Param("userId") String userId);
+
+    /**
+     * 면접 캘린더(Issue #130)의 {@code practicedDates} 용. 반열림 구간 {@code [startInclusive,
+     * endExclusive)}(KST 월 경계를 호출부가 UTC {@link OffsetDateTime} 으로 넘김) 안에서 본인의
+     * <b>완료 세션이 있는 KST 날짜</b>를 중복 없이 오름차순 {@code YYYY-MM-DD} 로 돌려줍니다.
+     *
+     * <p>{@link #findCompletedDatesInKst} 와 같은 KST 변환이지만 월 범위만 봅니다. 사용자 등록
+     * 일정과 무관하게 <b>완료 세션에서 자동 계산</b>되며, calendar_event 에 중복 INSERT 하지
+     * 않습니다(읽기 전용 재사용).
+     */
+    @Query(value = """
+            select distinct to_char((s.completed_at at time zone 'Asia/Seoul'), 'YYYY-MM-DD') as d
+              from session s
+             where s.user_id = :userId
+               and s.status = 'COMPLETED'
+               and s.completed_at is not null
+               and s.completed_at >= :startInclusive
+               and s.completed_at < :endExclusive
+             order by d
+            """, nativeQuery = true)
+    List<String> findCompletedDatesInKstBetween(@Param("userId") String userId,
+                                                @Param("startInclusive") OffsetDateTime startInclusive,
+                                                @Param("endExclusive") OffsetDateTime endExclusive);
 
     /**
      * 홈 잔디(활동 히트맵)용. 기간 안에서 <b>KST 날짜별 완료 세션 수</b>를 돌려줍니다(Issue #114).

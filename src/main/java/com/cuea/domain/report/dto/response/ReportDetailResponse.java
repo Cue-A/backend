@@ -31,6 +31,9 @@ public record ReportDetailResponse(
 
         Overall overall,
 
+        @Schema(description = "한 줄 총평. 없으면 null")
+        String summary,
+
         Axes axes,
 
         @Schema(description = "문항별 결과. 되묻기는 원 질문에 합쳐지고 hadReask 가 true 입니다")
@@ -47,6 +50,9 @@ public record ReportDetailResponse(
 
         @Schema(description = "실패 축 재시도 상태. 재시도한 적이 없거나 성공했으면 null. 재시도 중에도 리포트는 그대로 내려갑니다")
         ReportRetryInfo retry,
+
+        @Schema(description = "공유 링크. 공유하지 않았으면 null. 화면을 다시 열었을 때 공유 상태를 맞추는 데 씁니다")
+        ReportShareInfo share,
 
         @Schema(description = "AI 가 리포트를 만든 시각")
         OffsetDateTime generatedAt,
@@ -119,6 +125,7 @@ public record ReportDetailResponse(
      * @param questionText 질문 원문. AI 결과에 없어 Backend 가 붙입니다. 찾지 못하면 null
      * @param axes         축별 점수. 실패·미사용 축은 null
      * @param wasTimeout   true 면 감점 없이 "시간 초과로 중단됨" 으로 표시
+     * @param comment      문항 코멘트. 없으면 null
      */
     public record QuestionResult(
             String questionId,
@@ -135,7 +142,8 @@ public record ReportDetailResponse(
             Double durationSec,
             Integer wordCount,
             boolean wasTimeout,
-            boolean hadReask
+            boolean hadReask,
+            String comment
     ) {
     }
 
@@ -143,6 +151,10 @@ public record ReportDetailResponse(
     }
 
     public record Resilience(Integer score, Integer display, String comment) {
+
+        static Resilience from(AiReportResult.Resilience r) {
+            return r == null ? null : new Resilience(r.score(), r.display(), r.comment());
+        }
     }
 
     /**
@@ -157,24 +169,23 @@ public record ReportDetailResponse(
     ) {
     }
 
-    /**
-     * @param questionTexts 질문 ID → 질문 원문
-     * @param retry         재시도 상태. 재시도한 적이 없거나 성공했으면 null
-     */
+    /** @param retry 재시도 상태. 재시도한 적이 없거나 성공했으면 null */
     public static ReportDetailResponse of(Report report, AiReportResult result,
-                                          Map<String, String> questionTexts, ReportRetryInfo retry) {
+                                          ReportQuestions questions, ReportRetryInfo retry) {
         return new ReportDetailResponse(
                 report.getPublicId().toString(),
                 report.getSession().getSessionId(),
                 report.getStatus(),
                 overall(result.overall()),
+                result.summary(),
                 axes(result.axes()),
-                map(result.questions(), q -> question(q, questionTexts.get(q.questionId()))),
-                resilience(result.resilience()),
+                map(result.questions(), q -> question(q, questions.textOf(q.questionId()))),
+                Resilience.from(result.resilience()),
                 result.companyComment(),
                 map(result.improvedAnswers(), a -> new ImprovedAnswer(
                         a.questionId(), a.originalExcerpt(), a.suggestion(), a.tStart(), a.tEnd())),
                 retry,
+                ReportShareInfo.of(report),
                 result.generatedAt(),
                 report.getCreatedAt(),
                 report.getCompletedAt());
@@ -212,11 +223,7 @@ public record ReportDetailResponse(
                 q.isReplay(), q.isSpareTopic(), q.score(), q.display(),
                 s == null ? new AxisScores(null, null, null)
                         : new AxisScores(s.content(), s.speech(), s.gaze()),
-                q.transcript(), q.durationSec(), q.wordCount(), q.wasTimeout(), q.hadReask());
-    }
-
-    private static Resilience resilience(AiReportResult.Resilience r) {
-        return r == null ? null : new Resilience(r.score(), r.display(), r.comment());
+                q.transcript(), q.durationSec(), q.wordCount(), q.wasTimeout(), q.hadReask(), q.comment());
     }
 
     /** 글로 된 칸은 생성에 실패하면 빈 배열이 원칙이지만, 키가 빠져도 null 대신 빈 배열로 내려줍니다. */

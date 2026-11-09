@@ -5,6 +5,8 @@ import com.cuea.common.exception.ErrorCode;
 import com.cuea.infrastructure.ai.dto.AiAnswerSubmitRequest;
 import com.cuea.infrastructure.ai.dto.AiQuestionResult;
 import com.cuea.infrastructure.ai.dto.AiReportAnswer;
+import com.cuea.infrastructure.ai.dto.AiReportCompareRequest;
+import com.cuea.infrastructure.ai.dto.AiReportComparison;
 import com.cuea.infrastructure.ai.dto.AiReportRequest;
 import com.cuea.infrastructure.ai.dto.AiReportRetryRequest;
 import com.cuea.infrastructure.ai.dto.AiReportTaskStatusResponse;
@@ -209,6 +211,14 @@ public class MockAiClient implements AiClient {
                 mockReport(task), null, null);
     }
 
+    /** 보낸 리포트의 점수만으로 비교합니다. 실제 AI 처럼 폴링 없이 바로 돌려줍니다. */
+    @Override
+    public AiReportComparison compareReports(AiReportCompareRequest request) {
+        log.info("[MOCK] 회차 비교 rounds={}",
+                request.reports().stream().map(AiReportCompareRequest.Round::round).toList());
+        return MockReportComparison.compare(request);
+    }
+
     /**
      * 계약서 4장 예시 모양의 리포트. 영상이 하나도 없으면 시선 축은 skipped 입니다(실패 아님).
      * 말하기·시선 축이 실패하면 그 축은 점수가 null 이고 {@code partial} 입니다.
@@ -228,6 +238,7 @@ public class MockAiClient implements AiClient {
         overall.put("partial", partial);
         ArrayNode axesUsed = overall.putArray("axes_used").add("content");
         ArrayNode axesFailed = overall.putArray("axes_failed");
+        result.put("summary", "핵심은 잘 짚었지만 근거를 수치로 보여주면 더 설득력 있습니다.");
 
         ObjectNode axes = result.putObject("axes");
         mockAxis(axes.putObject("content"), 72);

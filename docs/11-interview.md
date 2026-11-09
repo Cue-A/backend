@@ -85,6 +85,63 @@ Backend 이며 `verified=false` 기업은 조회 자체에서 제외합니다.
 > 생략하면 기본값은 텍스트+음성(`false`)입니다. 이 값은 질문 생성에 영향을 주지 않고
 > 표시 방식만 바꾸므로 AI 세션 시작 요청에는 포함하지 않습니다.
 
+> **답변 제한 시간도 프론트 → Backend REST 요청 전용입니다(Issue #99).** `POST /api/interviews`
+> 요청 본문에 선택값 `answerTimeLimitSec` 를 받습니다. 허용값은 `60`·`90`·`120`·`null`
+> 이며(프론트 프리셋과 일치), `null` 은 "제한 없음"을 뜻합니다. 그 외 값은 AI 호출·세션 저장
+> 전에 `INVALID_REQUEST`(400)로 거부합니다(`question_count` 화이트리스트와 같은 방식). 저장
+> 컬럼은 기존 `session.duration_limit`(nullable)을 그대로 씁니다(스키마 변경 없음).
+>
+> **필드 누락과 명시적 `null` 을 구분합니다(Issue #99 R3).** 프론트 화면 기본 선택값이 90초라,
+> 필드를 보내지 않으면(누락) 백엔드가 기본값 **90초**를 적용해 저장하고, 사용자가 직접 고른
+> **"제한 없음"**(명시적 `null`)은 그대로 `null` 로 저장합니다. record + `Integer` 만으로는 두
+> 경우가 Jackson 역직렬화상 구별되지 않으므로, 요청 역직렬화 경계에서 3상태 래퍼
+> `AnswerTimeLimit`(ABSENT/UNLIMITED/값)로 받아 구분합니다(새 의존성 없이 Jackson 의
+> absent/null 콜백만 사용). 응답·엔티티·DB 는 그대로 `Integer`(제한 없음이면 `null`)를 쓰며
+> 기존 계약을 바꾸지 않습니다. 기존 `duration_limit=null` 세션도 그대로 제한 없음으로
+> 해석합니다. 타이머는 UI 표시 설정이라 AI 세션 시작 요청에는 포함하지 않으며, 서버가 타이머를
+> 직접 실행하거나 자동 제출하지도 않습니다(저장·반환만 담당).
+
+> **시작 응답에 확정 옵션이 함께 내려갑니다(Issue #99).** `POST /api/interviews` 응답
+> (`InterviewStartResponse`)은 기존 `sessionId`·`questionTotal`·`replayApplied` 에 더해, **실제
+> 저장된 세션의** `hideQuestionText`·`interviewerStyle`·`answerTimeLimitSec` 를 함께 돌려줍니다.
+> 요청값이 아니라 저장값 기준이라 응답과 DB 가 어긋나지 않습니다. `interviewerStyle` 은 프론트
+> 계약에 맞춰 소문자(`friendly`·`pressure`)로 내려갑니다(엔티티 enum 은 대문자, `Persona.toAiValue()`
+> 로 변환). 기존 필드는 그대로라 이 필드들을 읽지 않는 기존 클라이언트는 영향받지 않습니다
+> (필드 추가뿐, 하위 호환).
+
+### 세션 옵션 조회 — `GET /api/interviews/{sessionId}` (Issue #99)
+
+진행 중이거나 완료된 세션의 **현재 진행 옵션**을 조회합니다. 프론트 면접 화면이 시작 시 보낸
+옵션을 자체 보관하지 않아도(새 탭·새로고침·다른 기기) 서버 저장값을 진실 소스로 읽기 위한
+API 입니다. **AI 서버를 호출하지 않고** 저장된 세션만 읽습니다.
+
+| 항목 | 값 |
+|---|---|
+| 인증 | `Authorization: Bearer <accessToken>` 필요. 본인 세션만 |
+| 없음/남의 세션 | `SESSION_NOT_FOUND`(404) |
+| 완료 상태 제약 | **없음.** 진행 중(IN_PROGRESS)·완료·중단 모두 조회 가능 |
+| 재면접 세션 | 최초 세션이 아니라 **그 회차 세션 자신**의 옵션(변경된 숨김·타이머 포함) |
+
+응답(`Result` 공통 포맷의 `data`):
+
+```json
+{
+  "sessionId": "sess_example",
+  "hideQuestionText": true,
+  "interviewerStyle": "pressure",
+  "answerTimeLimitSec": 90
+}
+```
+
+- `interviewerStyle` 은 소문자(`friendly`·`pressure`).
+- `answerTimeLimitSec` 은 `60`·`90`·`120` 중 하나이거나, 제한 없음이면 `null`. **타이머 저장이
+  연결되기 전(Issue #99 이전) 생성된 과거 세션은 저장된 값이 없어 `null`(제한 없음)로 내려갑니다.**
+  과거 데이터는 실제 설정값을 알 수 없어 마이그레이션하지 않습니다.
+- 이 API 는 **현재 세션의 진행 옵션** 조회입니다. 재연습 시작을 위한 **최초 세션의 고정 옵션**은
+  목적이 다른 `GET /api/interviews/{sessionId}/replay-options`([`12-replay.md`](./12-replay.md))를
+  쓰세요. 두 API 는 공존하며 서로 대체하지 않습니다.
+
+
 토픽 수는 보내지 않습니다. `question_count` 에서 자동 결정됩니다.
 
 ```
@@ -217,3 +274,97 @@ Java enum으로 만들지 않습니다. 이유는 [`02-database.md`](./02-databa
 브라우저를 닫았을 때 유실됩니다. 이 로그가 리포트와 재연습의 유일한 근거입니다.
 
 `session_end` 의 `total_questions` 는 되묻기를 제외한 실제 질문 수입니다.
+
+---
+
+## 다시보기 (`GET /api/interviews/{sessionId}/recordings`, Issue #103)
+
+연습 기록에서 세션의 「다시보기」를 누르면 부릅니다. 이 저장소에서 `replay` 는 재연습이라
+다시보기에는 `recordings` 를 씁니다.
+
+**면접 전체를 담은 영상 파일은 없습니다.** 면접 시작 때 녹화를 시작하지 않고, 답변마다 프론트가
+오디오(필수) · 영상(선택)을 따로 올리기 때문입니다. 그래서 파일을 합치지 않고 문항별 재생목록을
+내려주고, 프론트가 순서대로 이어서 재생합니다.
+
+```json
+{
+  "sessionId": "sess_9f2a1c",
+  "hasVideo": true,
+  "items": [
+    { "questionId": "q_1", "questionNumber": 1, "type": "QUESTION", "questionText": "지원 동기를 말씀해 주세요.",
+      "questionAudioUrl": "https://...", "answerAudioUrl": "https://...", "answerVideoUrl": "https://..." }
+  ]
+}
+```
+
+- **완료(`COMPLETED`) 세션만.** 진행 중은 409 `SESSION_NOT_COMPLETED`, 중단은 409 `SESSION_ABORTED`,
+  없거나 남의 세션은 404 `SESSION_NOT_FOUND`. 리포트 요청과 같은 분기입니다
+- 조립 규칙은 리포트 요청(`ReportRequestAssembler`)과 같습니다. 나간 순서대로(되묻기 포함),
+  답변 녹음이 없는 질문은 빼고, 영상 key 가 없으면 `answerVideoUrl` null
+- 영상이 하나도 없으면 오류가 아니라 200 에 `hasVideo: false` 입니다
+- `questionAudioUrl` 은 질문 push 와 같이 계약 key 로 서명하고, 음성이 없거나(TTS 실패) 서명이
+  실패하면 null 입니다
+- 질문 텍스트를 숨긴 면접이어도 `questionText` 를 내려줍니다
+- **URL 은 매 요청마다 새로 서명하고 저장하지 않습니다.** 셋 다 1시간이며, 파일은 지우지 않으므로
+  만료되면 다시 부르면 됩니다. 만료 기준은 [`20-storage.md`](./20-storage.md)
+
+---
+
+## 질문은행 (북마크, Issue #117)
+
+면접 중 질문마다 북마크 버튼이 있고, 누르면 질문은행에 담깁니다. 질문은행 화면에서는 담은 질문에
+메모를 쓰거나 뺄 수 있습니다. 테이블은 `bookmarked_question` 이고 [`02-database.md`](./02-database.md)
+의 즐겨찾기 절을 보세요.
+
+| API | 용도 | 세션 상태 |
+|---|---|---|
+| `PUT /api/interviews/{sessionId}/questions/{questionId}/bookmark` | 면접 중 켜기 · 끄기 | **`IN_PROGRESS` 만** |
+| `GET /api/bookmarks?page=&size=` | 목록. 담은 시각 최신순, 필터 없음 | 상관없음 |
+| `PATCH /api/bookmarks/{sessionId}/{questionId}` | 메모 쓰기 · 고치기 | 상관없음 |
+| `DELETE /api/bookmarks/{sessionId}/{questionId}` | 질문은행에서 빼기 | 상관없음 |
+
+- **토글이지만 서버에는 바뀔 상태(`{ "bookmarked": true }`)를 보냅니다.** 서버가 상태를 뒤집으면
+  연타 · 재시도로 두 번 온 요청이 서로 상쇄됩니다. 이미 그 상태면 아무것도 바꾸지 않고 성공합니다
+- **행과 `question.is_bookmarked` 를 한 트랜잭션에서 같이 바꿉니다.** 담기는 `ON CONFLICT DO NOTHING`
+  이라 동시 요청에도 UNIQUE 위반(500)이 나지 않습니다
+- **주질문 · 꼬리질문 · 되묻기 모두 담을 수 있습니다.** 꼬리질문과 되묻기는 문구만으로는 뜻이 안 통해
+  목록에 `originalQuestionText`(원래 질문 문구)를 함께 줍니다. 주질문이면 null 입니다
+  - 되묻기: `reask_of` 가 가리키는 질문
+  - 꼬리질문: 원래 질문을 가리키는 값이 없어, 같은 세션 · 같은 토픽에서 **그 꼬리질문 직전에 나간 주질문**.
+    대체 주질문이 같은 토픽 번호로 올 수 있어 토픽 번호만으로는 정하지 않습니다. 꼬리질문의 꼬리질문도 주질문이 붙습니다
+- **재연습에서 같은 질문을 또 담으면 두 줄입니다.** UNIQUE 가 `(user_id, session_id, question_id)` 라
+  세션이 다르면 다른 행이고, 메모도 줄마다 따로입니다
+- 메모는 500자까지이고 비었거나 공백뿐이면 지웁니다. 메모만 지우는 API 는 없습니다
+- 끄기 · 빼기는 메모도 함께 지웁니다. 끝난 면접의 질문은 빼고 나면 다시 담을 수 없습니다
+- 질문은행에 없거나 남의 것이면 404 `BOOKMARK_NOT_FOUND`. 세션 쪽 오류는 답변 제출과 같습니다
+  (`SESSION_NOT_FOUND` · `SESSION_ENDED` · `SESSION_ABORTED` · `QUESTION_NOT_FOUND`)
+- **질문 push 에는 북마크 여부가 없습니다.** 새 질문은 항상 담기지 않은 상태라서입니다. 면접 중
+  새로고침하면 아이콘이 비어 보이지만, 그때 `true` 를 보내도 이미 담겨 있으면 그대로라 안전합니다
+
+## 질문은행 공통 질문 (Issue #136)
+
+질문은행의 「공통 질문」 탭입니다. 모두가 보는 **기본 질문**에 내가 직접 추가한 **내 질문**을 섞어 보여 주고,
+질문마다 내 즐겨찾기 · 메모를 붙입니다. 면접 세션과 상관없는 질문이라 북마크(`bookmarked_question`)와 테이블이
+다릅니다. 테이블은 [`02-database.md`](./02-database.md) 의 즐겨찾기 절을 보세요.
+
+| API | 용도 |
+|---|---|
+| `GET /api/common-questions` | 목록. 내 질문(최근에 추가한 것부터) → 기본 질문(정해진 순서) |
+| `PUT /api/common-questions/{questionId}/favorite` | 즐겨찾기 켜기 · 끄기. 본문 `{ "favorite": true }` |
+| `PATCH /api/common-questions/{questionId}/memo` | 메모 쓰기 · 고치기. 본문 `{ "memo": "..." }` |
+| `POST /api/common-questions` | 내 질문 추가. 본문 `{ "text", "category" }`, 201 |
+| `PATCH /api/common-questions/{questionId}` | 내 질문 수정. 본문은 추가와 같음 |
+| `DELETE /api/common-questions/{questionId}` | 내 질문 삭제. 즐겨찾기 · 메모도 함께 지워짐 |
+
+- 경로 · 본문 · 응답은 프론트 임시안(frontend `src/domain/question/api/questionResponse.ts`)을 그대로 따릅니다
+- **기본 질문 12개는 V5 마이그레이션 시드입니다.** 문구 · 분류 · 순서가 프론트 목업과 같습니다. 바꾸거나 늘리려면 새
+  마이그레이션을 씁니다. API 로는 고칠 수 없고, 고치거나 지우려 하면 403 `FORBIDDEN` 입니다
+- **내 질문은 주인만 봅니다.** 남의 내 질문 · 없는 질문 · UUID 가 아닌 ID 는 구별하지 않고 404 `QUESTION_NOT_FOUND`
+- `text` 는 앞뒤 공백을 자른 뒤 1~200자, `category` 는 인성 · 경험 · 지원동기 · 직무 · 기타 중 하나입니다. 면접 질문에
+  AI 가 붙이는 분류(직무역량 등 8종)와는 다른 목록입니다. 어기면 400 `INVALID_REQUEST`
+- 내 질문은 사용자당 100개까지이고 넘으면 409 `CUSTOM_QUESTION_LIMIT_EXCEEDED`. 폴더 상한처럼 서비스에서만 셉니다
+- **즐겨찾기는 바뀔 상태를 보냅니다**(북마크와 같은 이유). 이미 켜져 있으면 처음 켠 시각(`favoritedAt`)이 남습니다.
+  즐겨찾기를 위로 올리는 정렬은 프론트가 이 시각으로 합니다. 목록은 즐겨찾기 정렬을 하지 않습니다
+- **즐겨찾기를 꺼도 메모는 남습니다.** 메모 규칙은 북마크 메모와 같습니다(500자, 비었거나 공백뿐이면 지움)
+- 즐겨찾기 · 메모는 `common_question_note` 한 행에 모입니다. 처음 요청이 동시에 와도 `ON CONFLICT DO NOTHING`
+  으로 행이 하나만 생깁니다

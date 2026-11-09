@@ -4,8 +4,12 @@ import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.entity.InterviewSession;
 import com.cuea.domain.interview.entity.Question;
+import com.cuea.domain.interview.entity.QuestionType;
 import com.cuea.domain.interview.service.InterviewSessionQueryService;
 import com.cuea.domain.report.dto.response.ReportDetailResponse;
+import com.cuea.domain.report.dto.response.PublicReportResponse;
+import com.cuea.domain.report.dto.response.ReportImprovementsResponse;
+import com.cuea.domain.report.dto.response.ReportTimelineResponse;
 import com.cuea.domain.report.entity.Report;
 import com.cuea.domain.report.entity.ReportRetryStatus;
 import com.cuea.domain.report.entity.ReportStatus;
@@ -16,8 +20,12 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.SerializationFeature;
 import com.fasterxml.jackson.databind.json.JsonMapper;
+import org.assertj.core.api.ThrowableAssert.ThrowingCallable;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.api.extension.ExtendWith;
+import org.springframework.boot.test.system.CapturedOutput;
+import org.springframework.boot.test.system.OutputCaptureExtension;
 
 import java.time.OffsetDateTime;
 import java.util.ArrayList;
@@ -28,6 +36,7 @@ import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
+import static org.assertj.core.api.Assertions.tuple;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
@@ -46,6 +55,8 @@ class ReportQueryServiceTest {
     private static final String SESSION_ID = "sess_9f2a1c";
     private static final OffsetDateTime CREATED_AT = OffsetDateTime.parse("2026-09-05T14:10:00Z");
     private static final OffsetDateTime COMPLETED_AT = OffsetDateTime.parse("2026-09-05T14:22:40Z");
+    private static final UUID SHARE_ID = UUID.randomUUID();
+    private static final OffsetDateTime SHARED_AT = OffsetDateTime.parse("2026-09-06T09:00:00Z");
 
     /** 리포트 계약 13장 예시. 시선 축 실패라 partial 입니다. 모르는 키(future_field)를 하나 섞었습니다. */
     private static final String CONTRACT_RESULT = """
@@ -58,6 +69,7 @@ class ReportQueryServiceTest {
                 "score": 68, "display": 4, "gated": false, "gate_reason": null,
                 "partial": true, "axes_used": ["content", "speech"], "axes_failed": ["gaze"]
               },
+              "summary": "경험은 구체적이지만 근거를 수치로 보여주면 더 좋습니다.",
               "axes": {
                 "content": { "status": "ok", "score": 72, "display": 4, "metrics": {},
                   "evidence": [ { "question_id": "q_3", "t_start": 12.4, "t_end": 19.8,
@@ -73,7 +85,8 @@ class ReportQueryServiceTest {
                   "is_replay": false, "is_spare_topic": false, "score": 70, "display": 4,
                   "axes": { "content": 74, "speech": 63, "gaze": null },
                   "transcript": "저는 데이터가 쌓이고 흐르는 구조에...", "duration_sec": 46.2,
-                  "word_count": 138, "was_timeout": false, "had_reask": true }
+                  "word_count": 138, "was_timeout": false, "had_reask": true,
+                  "comment": "회사와 직무를 연결한 설명이 좋습니다." }
               ],
               "resilience": { "score": 58, "display": 3, "comment": "..." },
               "company_comment": "도전과 협업을 강조하는 인재상에 비추어...",
@@ -81,6 +94,35 @@ class ReportQueryServiceTest {
                 { "question_id": "q_3", "original_excerpt": "낙관적 락을 썼습니다.",
                   "suggestion": "선택 이유와 대안 비교를 함께 언급하면...", "t_start": 12.4, "t_end": 19.8 }
               ]
+            }
+            """;
+
+    /** q_1 근거가 원 답변(q_1)과 되묻기(q_1r)에 나뉘고, q_3 은 근거가 없습니다. */
+    private static final String REASK_RESULT = """
+            {
+              "report_status": "complete",
+              "overall": { "score": 72, "display": 4, "gated": false, "partial": false,
+                           "axes_used": ["content", "speech", "gaze"], "axes_failed": [] },
+              "axes": {
+                "content": { "status": "ok", "score": 72, "display": 4, "metrics": {}, "evidence": [
+                  { "question_id": "q_1r", "t_start": 3.1, "t_end": 8.0, "kind": "strength",
+                    "label": "구체적 사례", "comment": "되묻기에서 사례를 보완했습니다." },
+                  { "question_id": "q_1", "t_start": 12.4, "t_end": 19.8, "kind": "weakness",
+                    "label": "근거 부족", "comment": "결과 수치가 없습니다." },
+                  { "question_id": "q_2", "t_start": 5.0, "t_end": 9.0, "kind": "weakness",
+                    "label": "논리 비약", "comment": "..." } ] },
+                "speech": { "status": "ok", "score": 61, "display": 4, "metrics": {}, "evidence": [] },
+                "gaze": { "status": "ok", "score": 70, "display": 4, "metrics": {}, "evidence": [
+                  { "question_id": "q_1", "t_start": 1.0, "t_end": 2.5, "kind": "weakness",
+                    "label": "시선 회피", "comment": "..." } ] }
+              },
+              "questions": [
+                { "question_id": "q_1", "question_number": 1, "duration_sec": 46.2, "had_reask": true },
+                { "question_id": "q_2", "question_number": 2, "duration_sec": 52.0, "had_reask": false },
+                { "question_id": "q_3", "question_number": 3, "duration_sec": 30.0, "had_reask": false }
+              ],
+              "resilience": null,
+              "improved_answers": []
             }
             """;
 
@@ -118,6 +160,7 @@ class ReportQueryServiceTest {
         assertThat(response.overall().score()).isEqualTo(68);
         assertThat(response.overall().partial()).isTrue();
         assertThat(response.overall().axesFailed()).containsExactly("gaze");
+        assertThat(response.summary()).startsWith("경험은 구체적");
 
         assertThat(response.axes().content().evidence()).singleElement()
                 .satisfies(e -> {
@@ -135,6 +178,7 @@ class ReportQueryServiceTest {
         assertThat(question.axes().gaze()).isNull();
         assertThat(question.durationSec()).isEqualTo(46.2);
         assertThat(question.hadReask()).isTrue();
+        assertThat(question.comment()).startsWith("회사와 직무");
 
         assertThat(response.resilience().score()).isEqualTo(58);
         assertThat(response.companyComment()).startsWith("도전과 협업");
@@ -192,6 +236,8 @@ class ReportQueryServiceTest {
         assertThat(json.path("axes").path("content").path("evidence").get(0).has("tStart")).isTrue();
         assertThat(json.path("overall").has("axesFailed")).isTrue();
         assertThat(json.has("improvedAnswers")).isTrue();
+        assertThat(json.has("summary")).isTrue();
+        assertThat(question.has("comment")).isTrue();
         assertThat(fieldNames(json)).noneMatch(name -> name.contains("_"));
     }
 
@@ -238,6 +284,19 @@ class ReportQueryServiceTest {
         assertThat(response.companyComment()).isNull();
     }
 
+    @Test
+    void 총평과_문항_코멘트가_없으면_null() throws Exception {
+        givenReport(finished(ReportStatus.COMPLETED, """
+                { "report_status": "complete", "overall": { "score": 50 }, "axes": {},
+                  "questions": [ { "question_id": "q_1", "question_number": 1, "score": 50 } ] }
+                """));
+
+        ReportDetailResponse response = service.getDetail(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.summary()).isNull();
+        assertThat(response.questions().get(0).comment()).isNull();
+    }
+
     /** 글로 된 칸의 키가 아예 빠져도 null 이 아니라 빈 배열로 내려줍니다. */
     @Test
     void 배열_키가_빠져도_빈_배열이다() throws Exception {
@@ -272,6 +331,24 @@ class ReportQueryServiceTest {
         givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
 
         assertThat(service.getDetail(USER_ID, PUBLIC_ID.toString()).retry()).isNull();
+    }
+
+    /** 리포트 화면을 다시 열었을 때 공유 토글과 링크를 맞추는 데 씁니다. */
+    @Test
+    void 공유_중이면_상세_조회에_공유_링크를_준다() throws Exception {
+        givenReport(shared(finished(ReportStatus.PARTIAL, CONTRACT_RESULT)));
+
+        ReportDetailResponse response = service.getDetail(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.share().shareId()).isEqualTo(SHARE_ID.toString());
+        assertThat(response.share().sharedAt()).isEqualTo(SHARED_AT);
+    }
+
+    @Test
+    void 공유하지_않았으면_share_는_null() throws Exception {
+        givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
+
+        assertThat(service.getDetail(USER_ID, PUBLIC_ID.toString()).share()).isNull();
     }
 
     @Test
@@ -330,11 +407,326 @@ class ReportQueryServiceTest {
                 .containsEntry("rateDetail", Map.of("wordsPerMin", 120));
     }
 
+    // --- 타임라인 ---
+
+    @Test
+    void 타임라인은_근거를_원_질문별로_묶고_되묻기_근거는_원_질문_아래에_둔다() throws Exception {
+        givenReport(finished(ReportStatus.COMPLETED, REASK_RESULT));
+        givenQuestionsInDb();
+
+        ReportTimelineResponse response = service.getTimeline(USER_ID, PUBLIC_ID.toString());
+
+        ReportTimelineResponse.TimelineQuestion first = response.questions().get(0);
+        assertThat(first.questionId()).isEqualTo("q_1");
+        assertThat(first.questionText()).isEqualTo("지원 동기를 말씀해 주세요");
+        assertThat(first.durationSec()).isEqualTo(46.2);
+        assertThat(first.hadReask()).isTrue();
+        assertThat(first.evidence())
+                .extracting("axis", "questionId", "isReask", "tStart")
+                .containsExactly(
+                        tuple("gaze", "q_1", false, 1.0),
+                        tuple("content", "q_1", false, 12.4),
+                        tuple("content", "q_1r", true, 3.1));
+        assertThat(response.questions().get(1).evidence()).singleElement()
+                .satisfies(e -> assertThat(e.questionId()).isEqualTo("q_2"));
+    }
+
+    @Test
+    void 타임라인은_근거가_없는_문항도_빈_배열로_준다() throws Exception {
+        givenReport(finished(ReportStatus.COMPLETED, REASK_RESULT));
+        givenQuestionsInDb();
+
+        ReportTimelineResponse response = service.getTimeline(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.questions()).extracting(ReportTimelineResponse.TimelineQuestion::questionId)
+                .containsExactly("q_1", "q_2", "q_3");
+        assertThat(response.questions().get(2).evidence()).isEmpty();
+        assertThat(response.questions().get(2).durationSec()).isEqualTo(30.0);
+    }
+
+    @Test
+    void 타임라인은_축_상태와_회복력을_준다() throws Exception {
+        givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
+
+        ReportTimelineResponse response = service.getTimeline(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.status()).isEqualTo(ReportStatus.PARTIAL);
+        assertThat(response.axes().content()).isEqualTo("ok");
+        assertThat(response.axes().gaze()).isEqualTo("failed");
+        assertThat(response.resilience().score()).isEqualTo(58);
+        assertThat(response.retry()).isNull();
+    }
+
+    /** 계약 예시의 q_3 근거는 questions[] 에 q_3 이 없습니다. 빠진 근거는 원인을 찾을 수 있게 로그로 남깁니다. */
+    @Test
+    @ExtendWith(OutputCaptureExtension.class)
+    void 타임라인에서_문항을_찾지_못한_근거는_빠진다(CapturedOutput output) throws Exception {
+        givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
+
+        ReportTimelineResponse response = service.getTimeline(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.questions()).singleElement()
+                .satisfies(q -> assertThat(q.evidence()).isEmpty());
+        assertThat(output).contains("원 질문을 찾지 못해 타임라인에서 뺀 근거가 있습니다",
+                "reportId=" + PUBLIC_ID, "questionIds=[q_3]", "count=1");
+    }
+
+    @Test
+    void 타임라인_재시도_중이면_retry_에_축을_준다() throws Exception {
+        Report report = finished(ReportStatus.PARTIAL, CONTRACT_RESULT);
+        givenReport(Report.builder().reportId(10L).publicId(PUBLIC_ID).session(report.getSession())
+                .status(ReportStatus.PARTIAL).retryStatus(ReportRetryStatus.PROCESSING).attempt(2)
+                .reportData(report.getReportData()).createdAt(CREATED_AT).completedAt(COMPLETED_AT).build());
+
+        ReportTimelineResponse response = service.getTimeline(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.retry().status()).isEqualTo(ReportRetryStatus.PROCESSING);
+        assertThat(response.retry().axes()).containsExactly("gaze");
+    }
+
+    @Test
+    void 타임라인은_축이_빠져도_문항을_빈_근거로_준다() throws Exception {
+        givenReport(finished(ReportStatus.COMPLETED, """
+                { "report_status": "complete", "overall": { "score": 50 },
+                  "questions": [ { "question_number": 1, "duration_sec": 10.0 },
+                                 { "question_id": "q_2", "question_number": 2, "duration_sec": 20.0 } ] }
+                """));
+
+        ReportTimelineResponse response = service.getTimeline(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.axes()).isEqualTo(new ReportTimelineResponse.AxisStatuses(null, null, null));
+        assertThat(response.questions()).hasSize(2)
+                .allSatisfy(q -> assertThat(q.evidence()).isEmpty());
+        assertThat(response.resilience()).isNull();
+    }
+
+    @Test
+    void 타임라인에서_시작_시각이_없는_근거는_같은_답변_근거_중_맨_뒤다() throws Exception {
+        givenReport(finished(ReportStatus.COMPLETED, """
+                { "report_status": "complete",
+                  "axes": { "content": { "status": "ok", "evidence": [
+                    { "question_id": "q_1", "t_start": null, "kind": "weakness" },
+                    { "question_id": "q_1", "t_start": 7.0, "kind": "weakness" },
+                    { "question_id": "q_1", "t_start": 2.0, "kind": "strength" } ] } },
+                  "questions": [ { "question_id": "q_1", "question_number": 1 } ] }
+                """));
+
+        ReportTimelineResponse response = service.getTimeline(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.questions().get(0).evidence())
+                .extracting(ReportTimelineResponse.TimelineEvidence::tStart)
+                .containsExactly(2.0, 7.0, null);
+    }
+
+    @Test
+    void 타임라인_응답_JSON_키는_camelCase_다() throws Exception {
+        givenReport(finished(ReportStatus.COMPLETED, REASK_RESULT));
+        givenQuestionsInDb();
+
+        JsonNode json = objectMapper.valueToTree(service.getTimeline(USER_ID, PUBLIC_ID.toString()));
+
+        JsonNode evidence = json.path("questions").get(0).path("evidence").get(2);
+        assertThat(evidence.path("isReask").asBoolean()).isTrue();
+        assertThat(evidence.has("tStart")).isTrue();
+        assertThat(json.path("questions").get(0).has("hadReask")).isTrue();
+        assertThat(fieldNames(json)).noneMatch(name -> name.contains("_"));
+    }
+
+    @Test
+    void 타임라인도_분석_중이면_REPORT_NOT_READY_실패면_REPORT_FAILED() {
+        givenReport(report(ReportStatus.PROCESSING, null, null));
+        assertErrorCode(() -> service.getTimeline(USER_ID, PUBLIC_ID.toString()), ErrorCode.REPORT_NOT_READY);
+
+        givenReport(report(ReportStatus.FAILED, null, COMPLETED_AT));
+        assertErrorCode(() -> service.getTimeline(USER_ID, PUBLIC_ID.toString()), ErrorCode.REPORT_FAILED);
+    }
+
+    // --- 개선 답변 ---
+
+    @Test
+    void 개선_답변은_되묻기에서_발췌했으면_원_질문을_붙인다() throws Exception {
+        givenReport(finished(ReportStatus.COMPLETED, improvements("""
+                { "question_id": "q_1r", "original_excerpt": "그냥 열심히 했습니다.",
+                  "suggestion": "맡은 역할을 먼저 말해 보세요.", "t_start": 3.1, "t_end": 8.0 },
+                { "question_id": "q_2", "original_excerpt": "같이 잘 해결했습니다.",
+                  "suggestion": "갈등의 원인을 구체적으로 말해 보세요.", "t_start": 5.0, "t_end": 9.0 }
+                """)));
+        givenQuestionsInDb();
+
+        ReportImprovementsResponse response = service.getImprovements(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.reportId()).isEqualTo(PUBLIC_ID.toString());
+        assertThat(response.improvedAnswers())
+                .extracting("questionId", "originalQuestionId", "isReask", "questionNumber", "questionText")
+                .containsExactly(
+                        tuple("q_1r", "q_1", true, 1, "지원 동기를 말씀해 주세요"),
+                        tuple("q_2", "q_2", false, 2, "가장 어려웠던 협업 경험은 무엇인가요?"));
+        assertThat(response.improvedAnswers().get(0))
+                .satisfies(a -> {
+                    assertThat(a.originalExcerpt()).isEqualTo("그냥 열심히 했습니다.");
+                    assertThat(a.suggestion()).isEqualTo("맡은 역할을 먼저 말해 보세요.");
+                    assertThat(a.tStart()).isEqualTo(3.1);
+                    assertThat(a.tEnd()).isEqualTo(8.0);
+                });
+    }
+
+    @Test
+    void 개선_답변의_질문을_못_찾으면_번호와_원문만_비고_나머지는_그대로다() throws Exception {
+        givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
+
+        ReportImprovementsResponse response = service.getImprovements(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.improvedAnswers()).singleElement()
+                .satisfies(a -> {
+                    assertThat(a.questionId()).isEqualTo("q_3");
+                    assertThat(a.originalQuestionId()).isEqualTo("q_3");
+                    assertThat(a.isReask()).isFalse();
+                    assertThat(a.questionNumber()).isNull();
+                    assertThat(a.questionText()).isNull();
+                    assertThat(a.originalExcerpt()).isEqualTo("낙관적 락을 썼습니다.");
+                });
+    }
+
+    @Test
+    void 개선_답변이_없으면_빈_배열이다() throws Exception {
+        givenReport(finished(ReportStatus.COMPLETED, """
+                { "report_status": "complete", "overall": { "score": 50 }, "axes": {} }
+                """));
+
+        assertThat(service.getImprovements(USER_ID, PUBLIC_ID.toString()).improvedAnswers()).isEmpty();
+    }
+
+    @Test
+    void 개선_답변_응답_JSON_키는_camelCase_다() throws Exception {
+        givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
+
+        JsonNode json = objectMapper.valueToTree(service.getImprovements(USER_ID, PUBLIC_ID.toString()));
+
+        JsonNode answer = json.path("improvedAnswers").get(0);
+        assertThat(answer.has("isReask")).isTrue();
+        assertThat(answer.has("originalQuestionId")).isTrue();
+        assertThat(answer.has("tStart")).isTrue();
+        assertThat(fieldNames(json)).noneMatch(name -> name.contains("_"));
+    }
+
+    @Test
+    void 개선_답변도_분석_중이면_REPORT_NOT_READY_실패면_REPORT_FAILED() {
+        givenReport(report(ReportStatus.PROCESSING, null, null));
+        assertErrorCode(() -> service.getImprovements(USER_ID, PUBLIC_ID.toString()), ErrorCode.REPORT_NOT_READY);
+
+        givenReport(report(ReportStatus.FAILED, null, COMPLETED_AT));
+        assertErrorCode(() -> service.getImprovements(USER_ID, PUBLIC_ID.toString()), ErrorCode.REPORT_FAILED);
+    }
+
+    @Test
+    void 타임라인과_개선_답변도_남의_리포트나_UUID_가_아니면_REPORT_NOT_FOUND() {
+        when(reportRepository.findByPublicIdAndSession_User_UserId(any(), anyString()))
+                .thenReturn(Optional.empty());
+
+        assertErrorCode(() -> service.getTimeline(USER_ID, PUBLIC_ID.toString()), ErrorCode.REPORT_NOT_FOUND);
+        assertErrorCode(() -> service.getImprovements(USER_ID, PUBLIC_ID.toString()), ErrorCode.REPORT_NOT_FOUND);
+        assertErrorCode(() -> service.getTimeline(USER_ID, "not-a-uuid"), ErrorCode.REPORT_NOT_FOUND);
+        assertErrorCode(() -> service.getImprovements(USER_ID, "not-a-uuid"), ErrorCode.REPORT_NOT_FOUND);
+    }
+
+    // ── 공개 리포트 (공유 링크) ────────────────────────────────
+
+    /** 본인 리포트 화면과 같은 내용을 상세 · 타임라인 · 개선 답변 한 응답으로 줍니다. */
+    @Test
+    void 공유_토큰으로_리포트_화면_전체를_준다() throws Exception {
+        givenSharedReport(shared(finished(ReportStatus.COMPLETED, REASK_RESULT.replace(
+                "\"improved_answers\": []",
+                """
+                "improved_answers": [ { "question_id": "q_1r", "original_excerpt": "그냥 열심히 했습니다.",
+                  "suggestion": "맡은 역할을 먼저 말해 보세요.", "t_start": 3.1, "t_end": 8.0 } ]
+                """))));
+        givenQuestionsInDb();
+
+        PublicReportResponse response = service.getShared(SHARE_ID.toString());
+
+        assertThat(response.status()).isEqualTo(ReportStatus.COMPLETED);
+        assertThat(response.overall().score()).isEqualTo(72);
+        assertThat(response.axes().gaze().score()).isEqualTo(70);
+        assertThat(response.questions()).extracting(ReportDetailResponse.QuestionResult::questionText)
+                .containsExactly("지원 동기를 말씀해 주세요", "가장 어려웠던 협업 경험은 무엇인가요?",
+                        "그때 본인의 역할은 무엇이었나요?");
+        assertThat(response.timeline()).extracting(ReportTimelineResponse.TimelineQuestion::questionId)
+                .containsExactly("q_1", "q_2", "q_3");
+        assertThat(response.timeline().get(0).evidence())
+                .extracting("questionId", "isReask")
+                .contains(tuple("q_1r", true));
+        assertThat(response.improvedAnswers())
+                .extracting("questionId", "originalQuestionId", "questionText")
+                .containsExactly(tuple("q_1r", "q_1", "지원 동기를 말씀해 주세요"));
+        assertThat(response.completedAt()).isEqualTo(COMPLETED_AT);
+    }
+
+    /**
+     * reportId · sessionId 는 본인 API 를 부르는 값이라 공개 응답 어디에도 나가면 안 됩니다.
+     * 재시도 상태와 공유 상태도 본인 화면용입니다. 재시도 중이어도 지금 결과는 그대로 보여줍니다.
+     */
+    @Test
+    void 공개_응답에는_reportId_sessionId_재시도_공유_상태가_없다() throws Exception {
+        Report report = finished(ReportStatus.PARTIAL, CONTRACT_RESULT);
+        givenSharedReport(Report.builder().reportId(10L).publicId(PUBLIC_ID).session(report.getSession())
+                .status(ReportStatus.PARTIAL).retryStatus(ReportRetryStatus.PROCESSING).attempt(2)
+                .reportData(report.getReportData()).createdAt(CREATED_AT).completedAt(COMPLETED_AT)
+                .shareId(SHARE_ID).sharedAt(SHARED_AT).build());
+
+        JsonNode json = objectMapper.valueToTree(service.getShared(SHARE_ID.toString()));
+
+        assertThat(json.path("overall").path("score").asInt()).isEqualTo(68);
+        assertThat(json.toString()).doesNotContain(PUBLIC_ID.toString()).doesNotContain(SESSION_ID);
+        assertThat(fieldNames(json)).doesNotContain("reportId", "sessionId", "retry", "share");
+        assertThat(fieldNames(json)).noneMatch(name -> name.contains("_"));
+    }
+
+    @Test
+    void 없거나_해제된_공유_토큰이면_SHARED_REPORT_NOT_FOUND() {
+        when(reportRepository.findByShareIdForPublic(any())).thenReturn(Optional.empty());
+
+        assertErrorCode(() -> service.getShared(SHARE_ID.toString()), ErrorCode.SHARED_REPORT_NOT_FOUND);
+    }
+
+    @Test
+    void 공유_토큰이_UUID_가_아니면_조회하지_않고_SHARED_REPORT_NOT_FOUND() {
+        assertErrorCode(() -> service.getShared("not-a-uuid"), ErrorCode.SHARED_REPORT_NOT_FOUND);
+
+        verify(reportRepository, never()).findByShareIdForPublic(any());
+    }
+
+    /** improved_answers 만 채운 최소 결과. */
+    private static String improvements(String items) {
+        return """
+                { "report_status": "complete", "overall": { "score": 70 },
+                  "axes": { "content": { "status": "ok" }, "speech": { "status": "ok" }, "gaze": { "status": "ok" } },
+                  "questions": [], "improved_answers": [ %s ] }
+                """.formatted(items);
+    }
+
     private void assertErrorCode(ErrorCode expected) {
-        assertThatThrownBy(() -> service.getDetail(USER_ID, PUBLIC_ID.toString()))
+        assertErrorCode(() -> service.getDetail(USER_ID, PUBLIC_ID.toString()), expected);
+    }
+
+    private void assertErrorCode(ThrowingCallable call, ErrorCode expected) {
+        assertThatThrownBy(call)
                 .isInstanceOf(BusinessException.class)
                 .extracting(e -> ((BusinessException) e).getErrorCode())
                 .isEqualTo(expected);
+    }
+
+    /** REASK_RESULT 의 질문들. q_1r 은 q_1 의 되묻기입니다. */
+    private void givenQuestionsInDb() {
+        when(sessionQueryService.findQuestionsInOrderForInternal(SESSION_ID)).thenReturn(List.of(
+                question("q_1", QuestionType.QUESTION, 1, null, "지원 동기를 말씀해 주세요"),
+                question("q_1r", QuestionType.REASK, 1, "q_1", "조금 더 구체적으로 말씀해 주시겠어요?"),
+                question("q_2", QuestionType.QUESTION, 2, null, "가장 어려웠던 협업 경험은 무엇인가요?"),
+                question("q_3", QuestionType.FOLLOWUP, 3, null, "그때 본인의 역할은 무엇이었나요?")));
+    }
+
+    private static Question question(String id, QuestionType type, int number, String reaskOf, String text) {
+        return Question.builder().sessionId(SESSION_ID).questionId(id).type(type)
+                .questionNumber(number).reaskOf(reaskOf).text(text).build();
     }
 
     private void givenReport(Report report) {
@@ -342,10 +734,22 @@ class ReportQueryServiceTest {
                 .thenReturn(Optional.of(report));
     }
 
+    private void givenSharedReport(Report report) {
+        when(reportRepository.findByShareIdForPublic(SHARE_ID)).thenReturn(Optional.of(report));
+    }
+
     private Report finished(ReportStatus status, String resultJson) throws Exception {
         Map<String, Object> reportData = objectMapper.readValue(resultJson, new TypeReference<>() {
         });
         return report(status, reportData, COMPLETED_AT);
+    }
+
+    /** 같은 리포트에 공유 토큰만 붙입니다. */
+    private static Report shared(Report report) {
+        return Report.builder().reportId(report.getReportId()).publicId(report.getPublicId())
+                .session(report.getSession()).status(report.getStatus()).attempt(report.getAttempt())
+                .reportData(report.getReportData()).createdAt(report.getCreatedAt())
+                .completedAt(report.getCompletedAt()).shareId(SHARE_ID).sharedAt(SHARED_AT).build();
     }
 
     private Report report(ReportStatus status, Map<String, Object> reportData, OffsetDateTime completedAt) {

@@ -8,6 +8,7 @@ import org.springframework.mock.web.MockHttpServletRequest;
 import org.springframework.mock.web.MockHttpServletResponse;
 
 import java.time.Duration;
+import java.util.UUID;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
@@ -96,6 +97,21 @@ class JwtAuthFilterTest {
         assertThat(chain.getRequest())
                 .as("여기서 끊으면 재발급이 구조적으로 불가능합니다")
                 .isNotNull();
+    }
+
+    /**
+     * 공개 리포트는 로그인한 사람도 엽니다. 프론트 인터셉터가 만료된 토큰을 붙여 보내도
+     * 공개 페이지가 401 로 막히면 안 됩니다.
+     */
+    @Test
+    void 공개_경로는_만료된_토큰을_달고_와도_통과시킨다() throws Exception {
+        JwtProvider 만료발급기 = new JwtProvider(
+                new JwtProperties(SECRET, Duration.ofMinutes(-1), Duration.ofDays(14)));
+
+        MockFilterChain chain = 호출("/api/public/reports/" + UUID.randomUUID(),
+                "Bearer " + 만료발급기.createAccessToken("user-1"));
+
+        assertThat(chain.getRequest()).isNotNull();
     }
 
     private MockFilterChain 호출(String uri, String header) throws Exception {

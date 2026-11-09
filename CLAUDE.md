@@ -56,6 +56,7 @@ STT, LLM, TTS, 시선 분석은 전부 별도 Python AI 서버에서 처리하�
 | 면접 세션, 질문·답변 | `docs/11-interview.md` |
 | 재연습 | `docs/12-replay.md` |
 | 리포트, 성장 추적 | `docs/13-report.md` |
+| 연습 기록 목록, 폴더 | `docs/14-record.md` |
 | 파일 업로드, S3 | `docs/20-storage.md` |
 | 배포, 실제 S3·AI 전환 | `docs/30-deploy.md` |
 | 결정되지 않은 것 확인 | `docs/90-open-questions.md` |
@@ -98,6 +99,9 @@ fix(ai): 세션 시작 타임아웃을 90초로 분리
 # 인프라 기동 (PostgreSQL, Redis, MinIO)
 docker compose -f docker-compose.dev.yml up -d
 
+# 로컬 DB 초기화 (Flyway 도입 전에 만든 DB 라 앱이 시작하지 않을 때)
+docker compose -f docker-compose.dev.yml down -v
+
 # 애플리케이션 실행
 ./gradlew bootRun --args='--spring.profiles.active=local'
 
@@ -123,6 +127,7 @@ com/cuea/
 │   ├── config/          CORS, S3, WebSocket, Jackson, OpenAPI
 │   ├── annotation/      @RateLimit
 │   ├── aspect/          RateLimitAspect
+│   ├── paging/          목록 page · size 규칙
 │   └── security/        JWT, AI 서버 시크릿
 ├── infrastructure/      기술 계층
 │   ├── ai/              AI 서버 클라이언트 (요청·폴링·타임아웃·에러분류)
@@ -136,6 +141,7 @@ com/cuea/
     ├── document/        이력서·포트폴리오
     ├── interview/       면접 세션, 질문·답변 로그, 재연습
     ├── report/          리포트
+    ├── record/          연습 기록 (세션 + 리포트 요약 목록)
     ├── growth/          회차 비교
     └── company/         회사·인재상 (Backend 가 원본, AI 에 텍스트로 전달)
 ```
@@ -153,7 +159,9 @@ com/cuea/
 - **AI 서버의 응답 필드명을 Java enum으로 변환하지 마세요.**
   특히 `category`(한글 8종)는 문자열 그대로 저장하고 그대로 되돌려줍니다.
   이유는 `docs/02-database.md` 참고.
-- **`ddl-auto: create` 를 쓰지 마세요.** 재시작마다 데이터가 사라집니다.
+- **스키마를 `ddl-auto` 로 바꾸지 마세요.** `validate` 로 둡니다. 엔티티를 바꾸면 같은 PR 에
+  `db/migration/V{n}__*.sql` 을 넣고, 이미 머지된 마이그레이션 파일은 고치지 않습니다.
+  enum 에 값을 추가하면 `check` 제약도 바꿔야 합니다. `docs/02-database.md` 참고.
 - **AI 서버 주소를 코드에 하드코딩하지 마세요.** 프로파일 설정값을 씁니다.
 - **엔티티를 컨트롤러에서 직접 반환하지 마세요.** 항상 DTO로 변환합니다.
 

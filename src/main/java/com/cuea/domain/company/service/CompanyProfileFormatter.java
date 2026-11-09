@@ -3,9 +3,6 @@ package com.cuea.domain.company.service;
 import com.cuea.domain.company.entity.Company;
 import org.springframework.stereotype.Component;
 
-import java.util.List;
-import java.util.Map;
-
 /**
  * 선택된 기업의 인재상을 AI 계약이 정한 문자열 형식으로 조립합니다.
  *
@@ -29,9 +26,6 @@ import java.util.Map;
 @Component
 public class CompanyProfileFormatter {
 
-    private static final String NAME_KEY = "name";
-    private static final String INDICATOR_KEY = "indicator";
-
     /**
      * @param company verified 된 기업. verified=false 기업을 여기 넘기지 마세요.
      *                 노출 제한은 조회 시점({@code CompanyRepository})에서 거릅니다.
@@ -44,22 +38,14 @@ public class CompanyProfileFormatter {
                 .append(")\n")
                 .append("핵심 가치\n");
 
-        for (String line : coreValueLines(company.getCoreValues())) {
-            sb.append("  ").append(line).append('\n');
+        for (Company.CoreValue coreValue : company.coreValueList()) {
+            sb.append("  ").append(formatLine(coreValue)).append('\n');
         }
 
         return sb.toString().stripTrailing();
     }
 
-    private List<String> coreValueLines(List<Map<String, Object>> coreValues) {
-        return coreValues.stream()
-                .map(this::formatLine)
-                .toList();
-    }
-
-    private String formatLine(Map<String, Object> value) {
-        Object name = value.get(NAME_KEY);
-        Object indicator = value.get(INDICATOR_KEY);
-        return "%s — %s".formatted(name, indicator);
+    private String formatLine(Company.CoreValue coreValue) {
+        return "%s — %s".formatted(coreValue.name(), coreValue.indicator());
     }
 }

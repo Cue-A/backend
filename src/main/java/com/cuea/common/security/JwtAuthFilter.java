@@ -16,6 +16,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
+import java.util.List;
 
 /**
  * Authorization 헤더의 access token 을 풀어 {@code userId} 를 요청 속성에 담습니다.
@@ -40,24 +41,28 @@ public class JwtAuthFilter extends OncePerRequestFilter {
     private static final String PREFIX = "Bearer ";
 
     /**
-     * 인증 경로는 건너뜁니다.
+     * 인증 경로와 공개 경로는 건너뜁니다.
      *
      * <p><b>이게 없으면 재발급이 구조적으로 불가능합니다.</b> 프론트 인터셉터는
      * 모든 요청에 Authorization 헤더를 붙이므로, 재발급 요청은 정의상 <i>만료된</i>
      * access token 을 달고 옵니다. 그대로 두면 필터가 재발급 요청 자체를 401 로
      * 끊습니다.
      *
-     * <p>경로 목록이 아니라 프리픽스 규칙 하나입니다. auth 도메인은 원래 토큰 없이
+     * <p>공개 경로({@code /api/public/})도 같습니다. 로그인한 사람이 공유 링크를 열면 인터셉터가
+     * 만료된 토큰을 붙여 보낼 수 있는데, 토큰이 필요 없는 페이지가 401 로 막히면 안 됩니다.
+     *
+     * <p>경로 목록이 아니라 프리픽스 규칙입니다. 두 프리픽스 모두 원래 토큰 없이
      * 도는 곳이라 엔드포인트가 늘어도 여기를 고칠 일이 없습니다.
      */
-    private static final String AUTH_PREFIX = "/api/auth/";
+    private static final List<String> SKIP_PREFIXES = List.of("/api/auth/", "/api/public/");
 
     private final JwtProvider jwtProvider;
     private final ObjectMapper objectMapper;
 
     @Override
     protected boolean shouldNotFilter(HttpServletRequest request) {
-        return request.getRequestURI().startsWith(AUTH_PREFIX);
+        String uri = request.getRequestURI();
+        return SKIP_PREFIXES.stream().anyMatch(uri::startsWith);
     }
 
     @Override

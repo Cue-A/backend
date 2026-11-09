@@ -4,17 +4,22 @@ import com.cuea.common.annotation.RateLimit;
 import com.cuea.common.result.Result;
 import com.cuea.common.security.CurrentUser;
 import com.cuea.domain.report.dto.response.ReportDetailResponse;
+import com.cuea.domain.report.dto.response.ReportImprovementsResponse;
 import com.cuea.domain.report.dto.response.ReportRequestResponse;
 import com.cuea.domain.report.dto.response.ReportRetryResponse;
+import com.cuea.domain.report.dto.response.ReportShareInfo;
 import com.cuea.domain.report.dto.response.ReportStatusResponse;
+import com.cuea.domain.report.dto.response.ReportTimelineResponse;
 import com.cuea.domain.report.service.ReportQueryService;
 import com.cuea.domain.report.service.ReportRequestService;
 import com.cuea.domain.report.service.ReportRetryService;
+import com.cuea.domain.report.service.ReportShareService;
 import com.cuea.domain.report.service.ReportStatusService;
 import io.swagger.v3.oas.annotations.Operation;
 import io.swagger.v3.oas.annotations.tags.Tag;
 import lombok.RequiredArgsConstructor;
 import org.springframework.http.HttpStatus;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -39,6 +44,7 @@ public class ReportController {
     private final ReportStatusService reportStatusService;
     private final ReportQueryService reportQueryService;
     private final ReportRetryService reportRetryService;
+    private final ReportShareService reportShareService;
 
     @Operation(
             summary = "리포트 분석 작업 등록",
@@ -100,6 +106,32 @@ public class ReportController {
     }
 
     @Operation(
+            summary = "XAI 타임라인·회복력 조회",
+            description = """
+                    근거 구간을 원 질문별로 묶어 회복력과 함께 돌려줍니다. 되묻기 근거는 isReask 가 true 입니다.
+                    tStart · tEnd 는 그 답변 오디오 기준 초라, 한 줄로 그릴 때는 앞 문항의 durationSec 를 더하세요.
+                    상태별 응답(202 · 409 · 404)은 상세 조회와 같습니다.""")
+    @GetMapping("/reports/{reportId}/timeline")
+    @RateLimit(key = "report-timeline", limit = 60, windowSeconds = 60)
+    public Result<ReportTimelineResponse> timeline(@CurrentUser String userId,
+                                                   @PathVariable String reportId) {
+        return Result.ok(reportQueryService.getTimeline(userId, reportId));
+    }
+
+    @Operation(
+            summary = "개선 답변 예시 조회",
+            description = """
+                    내용 점수가 낮은 문항부터 최대 2개. 없으면 빈 배열입니다.
+                    되묻기에서 발췌했으면 questionId 가 되묻기 ID 이고, 문항과 연결할 때는 originalQuestionId 를 쓰세요.
+                    상태별 응답(202 · 409 · 404)은 상세 조회와 같습니다.""")
+    @GetMapping("/reports/{reportId}/improvements")
+    @RateLimit(key = "report-improvements", limit = 60, windowSeconds = 60)
+    public Result<ReportImprovementsResponse> improvements(@CurrentUser String userId,
+                                                           @PathVariable String reportId) {
+        return Result.ok(reportQueryService.getImprovements(userId, reportId));
+    }
+
+    @Operation(
             summary = "실패 축 재시도",
             description = """
                     PARTIAL 리포트에서 실패한 축(말하기·시선)만 다시 분석합니다. 즉시 202 로 응답합니다.
@@ -119,5 +151,37 @@ public class ReportController {
     public Result<ReportRetryResponse> retry(@CurrentUser String userId,
                                              @PathVariable String reportId) {
         return Result.ok(reportRetryService.retry(userId, reportId));
+    }
+
+    @Operation(
+            summary = "공유 링크 생성",
+            description = """
+                    로그인하지 않은 사람도 볼 수 있는 공유 링크를 만듭니다. 링크 URL 은 응답의 shareId 로 프론트가 만들고,
+                    공개 리포트 조회 GET /api/public/reports/{shareId} 로 엽니다.
+                    shareId 는 reportId 와 다른 값입니다. 유효기간은 없고 해제할 때까지 열립니다.
+
+                    이미 공유 중이면 새로 만들지 않고 같은 링크를 돌려줍니다.
+                    해제한 뒤 다시 공유하면 새 링크가 나오고 예전 링크는 계속 404 입니다.
+
+                    끝난 리포트(COMPLETED · PARTIAL)만 공유할 수 있습니다. 상태별 응답(202 · 409 · 404)은 상세 조회와 같습니다.""")
+    @PostMapping("/reports/{reportId}/share")
+    @RateLimit(key = "report-share", limit = 30, windowSeconds = 60)
+    public Result<ReportShareInfo> share(@CurrentUser String userId,
+                                         @PathVariable String reportId) {
+        return Result.ok(reportShareService.share(userId, reportId));
+    }
+
+    @Operation(
+            summary = "공유 링크 해제",
+            description = """
+                    공유 링크를 끊습니다. 그 링크로는 더 이상 열리지 않습니다(404).
+                    공유하지 않은 리포트여도 오류가 아닙니다.
+                    본인 리포트가 아니거나 없으면 404 REPORT_NOT_FOUND 입니다.""")
+    @DeleteMapping("/reports/{reportId}/share")
+    @RateLimit(key = "report-unshare", limit = 30, windowSeconds = 60)
+    public Result<Void> unshare(@CurrentUser String userId,
+                                @PathVariable String reportId) {
+        reportShareService.unshare(userId, reportId);
+        return Result.ok();
     }
 }

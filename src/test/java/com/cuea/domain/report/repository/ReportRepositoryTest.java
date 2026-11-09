@@ -18,6 +18,8 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.boot.test.autoconfigure.orm.jpa.TestEntityManager;
 import org.springframework.dao.DataIntegrityViolationException;
 
+import java.time.OffsetDateTime;
+import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 
@@ -197,6 +199,98 @@ class ReportRepositoryTest extends PostgresRepositoryTest {
 
         assertThat(startRetry(failed, 1, "task_2")).isZero();
         assertThat(reload(failed).getRetryStatus()).isNull();
+    }
+
+    @Test
+    void 요약은_본인_세션의_리포트만_상태와_종합_점수로_준다() {
+        Report partial = partialReport(1, null, null);
+        String sessionId = session.getSessionId();
+
+        List<ReportSummaryRow> mine = reportRepository.findSummaries(session.getUser().getUserId(), List.of(sessionId));
+
+        assertThat(mine).singleElement().satisfies(row -> {
+            assertThat(row.sessionId()).isEqualTo(sessionId);
+            assertThat(row.publicId()).isEqualTo(partial.getPublicId());
+            assertThat(row.status()).isEqualTo(ReportStatus.PARTIAL);
+            assertThat(row.scoreTotal()).isEqualTo(68);
+        });
+        assertThat(reportRepository.findSummaries("someone-else", List.of(sessionId))).isEmpty();
+    }
+
+    /** 회차 비교용. 원본(jsonb)까지 읽고, 세션을 함께 가져와 트랜잭션 밖에서도 세션 ID 를 꺼낼 수 있습니다. */
+    @Test
+    void 세션들의_리포트를_상태로_걸러_원본까지_준다() {
+        Report partial = partialReport(1, null, null);
+        InterviewSession failedSession = em.persist(InterviewSession.builder()
+                .sessionId("sess_" + UUID.randomUUID()).user(session.getUser()).document(session.getDocument())
+                .mode("PRACTICE").jobRole("백엔드").questionCount(6)
+                .persona(Persona.FRIENDLY).hideQuestionText(false)
+                .status(SessionStatus.COMPLETED).build());
+        Report failed = Report.processing(failedSession, "task_1");
+        failed.fail("AI_TIMEOUT");
+        em.persistFlushFind(failed);
+        em.clear();
+        String ownerId = session.getUser().getUserId();
+        List<String> sessionIds = List.of(session.getSessionId(), failedSession.getSessionId());
+
+        List<Report> finished = reportRepository.findAllBySessionIds(
+                ownerId, sessionIds, List.of(ReportStatus.COMPLETED, ReportStatus.PARTIAL));
+
+        assertThat(finished).singleElement().satisfies(report -> {
+            assertThat(report.getPublicId()).isEqualTo(partial.getPublicId());
+            assertThat(Hibernate.isInitialized(report.getSession())).isTrue();
+            assertThat(report.getReportData()).containsEntry("report_status", "partial");
+        });
+        assertThat(reportRepository.findAllBySessionIds("someone-else", sessionIds,
+                List.of(ReportStatus.COMPLETED, ReportStatus.PARTIAL))).isEmpty();
+    }
+
+    /** 공유를 두 번 눌러도 링크가 하나만 생깁니다. 먼저 쓴 쪽의 토큰이 남습니다. */
+    @Test
+    void 공유_토큰은_공유하지_않은_리포트에만_쓴다() {
+        Report partial = partialReport(1, null, null);
+        UUID first = UUID.randomUUID();
+
+        int shared = share(partial, first);
+        int again = share(partial, UUID.randomUUID());
+
+        assertThat(shared).isEqualTo(1);
+        assertThat(again).isZero();
+        Report reloaded = reload(partial);
+        assertThat(reloaded.getShareId()).isEqualTo(first);
+        assertThat(reloaded.getSharedAt()).isNotNull();
+    }
+
+    /** 공개 조회는 소유자 조건 없이 공유 토큰으로만 찾습니다. reportId 로는 열리지 않습니다. */
+    @Test
+    void 공개_리포트는_공유_토큰으로만_찾는다() {
+        Report partial = partialReport(1, null, null);
+        UUID shareId = UUID.randomUUID();
+        share(partial, shareId);
+
+        assertThat(reportRepository.findByShareIdForPublic(shareId))
+                .map(Report::getReportId).contains(partial.getReportId());
+        assertThat(reportRepository.findByShareIdForPublic(partial.getPublicId())).isEmpty();
+        assertThat(reportRepository.findByShareIdForPublic(UUID.randomUUID())).isEmpty();
+    }
+
+    @Test
+    void 공유를_해제하면_예전_토큰으로_찾을_수_없다() {
+        Report partial = partialReport(1, null, null);
+        UUID shareId = UUID.randomUUID();
+        share(partial, shareId);
+
+        reload(partial).unshare();
+        em.flush();
+
+        assertThat(reportRepository.findByShareIdForPublic(shareId)).isEmpty();
+        Report reloaded = reload(partial);
+        assertThat(reloaded.getShareId()).isNull();
+        assertThat(reloaded.getSharedAt()).isNull();
+    }
+
+    private int share(Report report, UUID shareId) {
+        return reportRepository.share(report.getReportId(), shareId, OffsetDateTime.now());
     }
 
     private Report partialReport(int attempt, ReportRetryStatus retryStatus, String errorCode) {

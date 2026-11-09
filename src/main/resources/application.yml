@@ -19,8 +19,9 @@ spring:
 
   jpa:
     hibernate:
-      # create 를 쓰지 마세요. 재시작마다 데이터가 사라집니다.
-      ddl-auto: update
+      # 스키마는 Flyway(db/migration)가 만듭니다. Hibernate 는 엔티티와 맞는지만 보고,
+      # 다르면 앱이 시작하지 않습니다. update · create 로 바꾸지 마세요.
+      ddl-auto: validate
     open-in-view: false
     properties:
       hibernate:

@@ -56,6 +56,7 @@ POST /api/auth/oauth/kakao     카카오        → Result<TokenResponse>   (isN
 POST /api/auth/refresh         재발급        → Result<TokenResponse>
 POST /api/auth/logout          로그아웃      → Result<Void>
 GET  /api/users/me             내 정보       → Result<UserResponse>
+DELETE /api/users/me           회원 탈퇴     → Result<Void>
 ```
 
 **로그인 세 경로가 전부 같은 `TokenResponse` 를 반환합니다.**
@@ -88,6 +89,9 @@ GET  /api/users/me             내 정보       → Result<UserResponse>
 
 `/api/auth/**` 는 `JwtAuthFilter` 를 타지 않습니다. 재발급 요청은 정의상 만료된
 access token 을 달고 오기 때문입니다.
+
+공개 경로 `/api/public/**`(공유 리포트 조회)도 타지 않습니다. 로그인한 사람이 만료된 토큰을 단 채
+공유 링크를 열어도 401 이 나지 않게 하려는 것입니다. 이 경로의 핸들러는 `@PublicApi` 입니다.
 
 ---
 
@@ -149,9 +153,10 @@ return Result.ok(tokenService.issue(user));
 것인지 검증할 책임이 우리에게 넘어옵니다.
 
 계정 연동 규칙은 [`02-database.md`](./02-database.md) 의 "연동 규칙" 을 그대로
-따르세요. **`OAuthUserInfo.linkable()` 이 true 일 때만 기존 계정에 연결합니다.**
-`is_email_verified` 확인은 선택이 아닙니다 — 빼면 남의 이메일 주소만 아는 사람이
-그 계정에 올라탑니다.
+따르세요. **카카오 로그인은 이메일이 같아도 기존 계정에 연결하지 않습니다**(#139).
+카카오 이메일은 `OAuthUserInfo.hasVerifiedEmail()` 이 true 이고 그 이메일을 쓰는 계정이
+없을 때만 새 계정에 넣습니다. `is_email_verified` 확인은 선택이 아닙니다 — 빼면
+남의 이메일 주소가 그 사람 것처럼 저장됩니다.
 
 ---
 

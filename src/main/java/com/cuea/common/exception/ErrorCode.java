@@ -30,6 +30,12 @@ public enum ErrorCode {
     INVALID_PASSWORD_FORMAT(HttpStatus.BAD_REQUEST, "비밀번호는 영문·숫자를 포함해 8~64자여야 합니다"),
     OAUTH_FAILED(HttpStatus.UNAUTHORIZED, "소셜 로그인에 실패했습니다"),
     USER_NOT_FOUND(HttpStatus.NOT_FOUND, "사용자를 찾을 수 없습니다"),
+    // 카카오 전용 계정(LOCAL 인증 없음)의 이메일 변경 시도. 이메일이 카카오 쪽 계정
+    // 연동(KakaoAccountLinker)과 묶여 있어 우리 DB에서만 바꾸면 다음 카카오 로그인 때 어긋난다.
+    EMAIL_CHANGE_NOT_ALLOWED(HttpStatus.BAD_REQUEST, "카카오 계정은 이메일을 변경할 수 없습니다"),
+    // 카카오 전용 계정(LOCAL 인증 없음)의 비밀번호 변경 시도. 비밀번호 자체가 없어 확인할
+    // 대상이 없다. "비밀번호 설정"(OAuth 계정에 LOCAL 인증 신규 추가)은 별도 기능, 범위 밖.
+    PASSWORD_NOT_SET(HttpStatus.BAD_REQUEST, "카카오 계정은 비밀번호가 설정되어 있지 않습니다"),
 
     // ── 문서 · 파일 ──────────────────────────────────────────
     DOCUMENT_NOT_FOUND(HttpStatus.NOT_FOUND, "문서를 찾을 수 없습니다"),
@@ -43,6 +49,12 @@ public enum ErrorCode {
     UPLOAD_NOT_COMPLETED(HttpStatus.BAD_REQUEST, "업로드가 완료되지 않았습니다"),
     STORAGE_ERROR(HttpStatus.INTERNAL_SERVER_ERROR, "파일 저장소 오류가 발생했습니다"),
 
+    // ── 기업 ────────────────────────────────────────────────
+    // 없는 기업과 verified=false 기업을 구별하지 않고 둘 다 이 코드로 돌려줍니다.
+    // 공용 마스터라 소유권 문제는 없지만, verified=false 는 서비스에 아직 노출하지
+    // 않기로 한 데이터라(Issue #85) "없는 것"과 똑같이 다룹니다.
+    COMPANY_NOT_FOUND(HttpStatus.NOT_FOUND, "기업을 찾을 수 없습니다"),
+
     // ── 면접 세션 ────────────────────────────────────────────
     SESSION_NOT_FOUND(HttpStatus.NOT_FOUND, "세션을 찾을 수 없습니다"),
     SESSION_ENDED(HttpStatus.CONFLICT, "이미 종료된 세션입니다"),
@@ -50,6 +62,20 @@ public enum ErrorCode {
     QUESTION_NOT_FOUND(HttpStatus.NOT_FOUND, "질문을 찾을 수 없습니다"),
     INVALID_QUESTION_COUNT(HttpStatus.BAD_REQUEST, "문항 수는 3, 6, 9 중 하나여야 합니다"),
     INVALID_CATEGORY(HttpStatus.BAD_REQUEST, "허용되지 않은 카테고리입니다"),
+
+    // ── 폴더 ─────────────────────────────────────────────────
+    FOLDER_NOT_FOUND(HttpStatus.NOT_FOUND, "폴더를 찾을 수 없습니다"),
+    FOLDER_NAME_DUPLICATED(HttpStatus.CONFLICT, "같은 이름의 폴더가 이미 있습니다"),
+    FOLDER_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "폴더는 최대 20개까지 만들 수 있습니다"),
+
+    // ── 질문은행 ─────────────────────────────────────────────
+    BOOKMARK_NOT_FOUND(HttpStatus.NOT_FOUND, "질문은행에 없는 질문입니다"),
+    CUSTOM_QUESTION_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "내 질문은 최대 100개까지 추가할 수 있습니다"),
+
+    // ── 면접 일정(캘린더) ─────────────────────────────────────
+    // 없는 일정과 남의 일정을 구별하지 않고 둘 다 이 코드로 돌려줍니다. 남의 일정 존재 여부를
+    // 노출하지 않기 위함입니다(소유권은 조회 조건으로 묶음).
+    CALENDAR_EVENT_NOT_FOUND(HttpStatus.NOT_FOUND, "일정을 찾을 수 없습니다"),
 
     // ── AI 서버 (docs/10-ai-client.md 의 errorCode 와 1:1) ────
     AI_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AI 서버에 연결할 수 없습니다"),
@@ -80,7 +106,9 @@ public enum ErrorCode {
     REPORT_FAILED(HttpStatus.CONFLICT, "리포트를 만들지 못했습니다"),
     // 실패 축 재시도는 PARTIAL 리포트만 받습니다. FAILED 는 분석 작업 등록을 다시 요청합니다.
     REPORT_NOT_RETRYABLE(HttpStatus.CONFLICT, "다시 분석할 수 없는 리포트입니다"),
-    REPORT_RETRY_IN_PROGRESS(HttpStatus.CONFLICT, "이미 다시 분석하고 있습니다");
+    REPORT_RETRY_IN_PROGRESS(HttpStatus.CONFLICT, "이미 다시 분석하고 있습니다"),
+    // 공개 리포트 조회. 없는 링크 · 해제된 링크 · UUID 가 아닌 값을 구분하지 않습니다.
+    SHARED_REPORT_NOT_FOUND(HttpStatus.NOT_FOUND, "공유가 해제됐거나 없는 링크입니다");
 
     private final HttpStatus status;
     private final String message;

@@ -15,7 +15,8 @@ import java.util.Optional;
 import java.util.UUID;
 
 /**
- * 카카오에서 받은 사용자 정보로 기존 계정을 찾아 연결하거나 새 계정을 만듭니다.
+ * 카카오에서 받은 사용자 정보로 이미 연결된 계정을 찾거나, 없으면 새 계정을 만들어 카카오를 연결합니다.
+ * 같은 이메일의 기존 계정에는 연결하지 않습니다(#139).
  *
  * <p>{@link AuthService#loginWithKakao} 가 카카오 서버 호출(외부 HTTP)을 끝낸
  * 뒤에만 불러야 합니다. 외부 호출과 DB 트랜잭션을 분리하려고 별도 빈으로
@@ -45,36 +46,22 @@ class KakaoAccountLinker {
             // 검증된 이메일이 생긴 경우를 채웁니다. 다른 사용자가 이미 쓰는 이메일이면
             // users.email UNIQUE 위반이라 건너뜁니다 — 그 경우는 매우 드물고, 값을
             // 강제로 덮어쓰기보다 null 로 남겨두는 쪽이 안전합니다.
-            if (info.linkable() && user.getEmail() == null
+            if (info.hasVerifiedEmail() && user.getEmail() == null
                     && !userRepository.existsByEmail(info.email())) {
                 user.fillEmailIfAbsent(info.email());
             }
         } else {
-            Optional<User> byEmail = info.linkable()
-                    ? userRepository.findByEmail(info.email())
-                    : Optional.empty();
-
-            // 이메일이 일치해도 그 계정에 이미 다른 카카오 계정이 연결돼 있으면 붙일 수
-            // 없습니다(uk_user_auth_user_provider 위반). 카카오 이메일은 나중에 바뀔 수
-            // 있어서, 지금 검증된 이 이메일이 예전에 다른 카카오 계정이 쓰던 값과 같은
-            // 상황이 생깁니다. 이 경우는 서로 다른 사람이므로 새 계정을 만듭니다.
-            boolean alreadyLinkedToOtherKakao = byEmail.isPresent()
-                    && userAuthRepository.findByUser_UserIdAndProvider(byEmail.get().getUserId(), Provider.KAKAO)
-                            .isPresent();
-
-            if (byEmail.isPresent() && !alreadyLinkedToOtherKakao) {
-                user = byEmail.get();
-                isNewUser = false;
-            } else {
-                String nickname = info.nickname() != null
-                        ? info.nickname()
-                        : User.fallbackNickname(UUID.randomUUID().toString());
-                // alreadyLinkedToOtherKakao 면 info.email() 은 이미 byEmail 계정이 쓰고
-                // 있어서, 그대로 넣으면 users.email unique 위반으로 500 이 납니다.
-                boolean canLinkEmail = info.linkable() && !alreadyLinkedToOtherKakao;
-                user = User.create(canLinkEmail ? info.email() : null, nickname);
-                isNewUser = true;
-            }
+            // 이메일이 같아도 기존 계정에 붙이지 않고 새 계정을 만듭니다(#139). 카카오 이메일은 검증됐어도
+            // 기존 계정의 이메일은 소유가 검증된 적이 없습니다(이메일 가입 · 변경에 인증 메일이 없음).
+            // 이메일 주인이 아닌 사람이 만든 계정에 카카오가 붙으면, 그 뒤 올린 이력서 · 면접 기록이 그 계정
+            // 비밀번호를 아는 사람에게 보입니다. 그 이메일을 다른 계정이 쓰고 있으면 users.email UNIQUE
+            // 때문에 새 계정의 이메일은 비웁니다.
+            String nickname = info.nickname() != null
+                    ? info.nickname()
+                    : User.fallbackNickname(UUID.randomUUID().toString());
+            boolean canUseEmail = info.hasVerifiedEmail() && !userRepository.existsByEmail(info.email());
+            user = User.create(canUseEmail ? info.email() : null, nickname);
+            isNewUser = true;
             user.link(Provider.KAKAO, info.providerId(), null);
             userRepository.save(user);
         }

@@ -496,6 +496,8 @@ error_code      VARCHAR(50)   NULL               -- FAILED 일 때, 또는 retry
 retry_status    VARCHAR(20)   NULL               -- null | PROCESSING | FAILED. PARTIAL 실패 축 재시도
 created_at      TIMESTAMPTZ   NOT NULL
 completed_at    TIMESTAMPTZ   NULL
+share_id        UUID          NULL UNIQUE        -- 공유 링크 토큰. null 이면 공유 안 함 (uk_report_share_id)
+shared_at       TIMESTAMPTZ   NULL
 ```
 
 **세션당 한 행입니다**(`session_id` UNIQUE). `FAILED` 리포트를 다시 요청하면 새 행을
@@ -508,6 +510,10 @@ completed_at    TIMESTAMPTZ   NULL
 결과는 그대로 두고 `retry_status = FAILED`, 원인은 `error_code` 에 남깁니다. 재시도는 PARTIAL 에서만
 하므로 `status = FAILED` 와 `retry_status = FAILED` 는 함께 생기지 않습니다.
 [`13-report.md`](./13-report.md) 의 실패 축 재시도 절 참고.
+
+**공유 링크는 `public_id` 가 아니라 `share_id` 입니다.** 해제하면 두 컬럼을 비우고, 다시 공유하면 새 토큰을
+씁니다. 예전 링크가 다시 열리지 않게 하려는 것입니다. 토큰은 `share_id is null` 조건부 UPDATE 로 써서 공유를
+두 번 눌러도 하나만 생깁니다. [`13-report.md`](./13-report.md) 의 공유 링크 절 참고.
 
 **`status` 는 우리 상태라 enum 입니다.** AI 의 `report_status`(complete | partial)는
 `COMPLETED` · `PARTIAL` 로 옮기고, 원문은 `report_data` 에 남습니다.

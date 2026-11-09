@@ -25,6 +25,16 @@ public final class ObjectKeys {
         return "resumes/%s/%s.%s".formatted(userId, documentId, extension);
     }
 
+    /** 한 사용자의 문서 파일이 놓이는 접두사. 회원 탈퇴 때 통째로 지웁니다. */
+    public static String resumePrefix(String userId) {
+        return "resumes/%s/".formatted(userId);
+    }
+
+    /** 한 세션의 답변·질문 미디어가 놓이는 접두사. 회원 탈퇴 때 통째로 지웁니다. */
+    public static String sessionPrefix(String sessionId) {
+        return "sessions/%s/".formatted(sessionId);
+    }
+
     public static String answerAudio(String sessionId, String questionId, String extension) {
         return "sessions/%s/answers/%s.%s".formatted(sessionId, questionId, extension);
     }

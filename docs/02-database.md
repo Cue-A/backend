@@ -141,20 +141,22 @@ users(user_id=u_1, email=kim@example.com, nickname=김취준)
 
 | 상황 | 동작 |
 |---|---|
-| 카카오 로그인 → 같은 이메일의 계정이 이미 있음 | **연결한다.** `user_auth(KAKAO)` 행만 추가 |
+| 카카오 로그인 → 같은 이메일의 계정이 이미 있음 | **연결하지 않는다**(#139). 새 `users` 행 생성 (`email = null`) |
 | 이메일 회원가입 → 같은 이메일의 계정이 이미 있음 | **거부한다.** `EMAIL_ALREADY_EXISTS` |
 | 카카오가 이메일을 안 줬거나 미검증 | 연결하지 않고 **새 `users` 행 생성** (`email = null`) |
 
-**왜 한쪽만 막나요.** 카카오는 이메일 소유를 검증하고 그 결과를
-`kakao_account.is_email_verified` 로 알려줍니다. 검증된 이메일이면 "이 사람이 그
-이메일의 주인"이 보장되므로 연결해도 안전합니다.
+**왜 둘 다 막나요.** 카카오는 이메일 소유를 검증하고 그 결과를
+`kakao_account.is_email_verified` 로 알려주지만, 그건 카카오 쪽 이메일만의 이야기입니다.
+**연결될 기존 계정의 이메일은 소유가 검증된 적이 없습니다.** 이메일 회원가입과 이메일
+변경은 인증 메일 없이 이메일을 저장하므로, 그 계정은 이메일 주인이 아닌 사람이 만든
+것일 수 있습니다. 그런 계정에 카카오가 붙으면 그 뒤 올린 이력서 · 면접 기록이 그 계정
+비밀번호를 아는 사람에게 보입니다. 예전에는 카카오 쪽 검증만 보고 연결했다가 #139 에서
+막았습니다.
 
-반대로 **이메일 회원가입은 이메일 소유를 증명하지 않습니다.** 이 방향을 열어두면
-남의 이메일 주소만 아는 사람이 그 주소로 가입해 비밀번호를 걸고 남의 카카오
-계정에 올라탈 수 있습니다. 이메일 인증 메일 기능이 생기기 전까지는 막습니다.
-
-연결은 `is_email_verified` 가 **true 일 때만** 합니다. 카카오가 이메일을 줘도
-미검증이면 새 계정을 만듭니다.
+카카오 이메일은 `is_email_verified` 가 **true 이고** 그 이메일을 쓰는 계정이 없을 때만 새
+계정에 넣습니다. 같은 이메일의 계정이 있으면 `users.email` UNIQUE 때문에 비웁니다. 이메일로
+가입한 사람이 같은 이메일의 카카오로 처음 로그인하면 계정이 따로 생깁니다. 두 계정을 합치는
+기능(로그인한 상태에서 카카오 연결)과 이메일 인증 메일은 아직 없습니다. 생기면 다시 봅니다.
 
 ### 카카오가 안 주는 값
 
@@ -496,6 +498,8 @@ error_code      VARCHAR(50)   NULL               -- FAILED 일 때, 또는 retry
 retry_status    VARCHAR(20)   NULL               -- null | PROCESSING | FAILED. PARTIAL 실패 축 재시도
 created_at      TIMESTAMPTZ   NOT NULL
 completed_at    TIMESTAMPTZ   NULL
+share_id        UUID          NULL UNIQUE        -- 공유 링크 토큰. null 이면 공유 안 함 (uk_report_share_id)
+shared_at       TIMESTAMPTZ   NULL
 ```
 
 **세션당 한 행입니다**(`session_id` UNIQUE). `FAILED` 리포트를 다시 요청하면 새 행을
@@ -508,6 +512,10 @@ completed_at    TIMESTAMPTZ   NULL
 결과는 그대로 두고 `retry_status = FAILED`, 원인은 `error_code` 에 남깁니다. 재시도는 PARTIAL 에서만
 하므로 `status = FAILED` 와 `retry_status = FAILED` 는 함께 생기지 않습니다.
 [`13-report.md`](./13-report.md) 의 실패 축 재시도 절 참고.
+
+**공유 링크는 `public_id` 가 아니라 `share_id` 입니다.** 해제하면 두 컬럼을 비우고, 다시 공유하면 새 토큰을
+씁니다. 예전 링크가 다시 열리지 않게 하려는 것입니다. 토큰은 `share_id is null` 조건부 UPDATE 로 써서 공유를
+두 번 눌러도 하나만 생깁니다. [`13-report.md`](./13-report.md) 의 공유 링크 절 참고.
 
 **`status` 는 우리 상태라 enum 입니다.** AI 의 `report_status`(complete | partial)는
 `COMPLETED` · `PARTIAL` 로 옮기고, 원문은 `report_data` 에 남습니다.
@@ -699,6 +707,35 @@ UNIQUE (user_id, session_id, question_id)
 합니다.** 둘이 어긋나면 목록과 상세가 다르게 보입니다.
 
 ```sql
+common_question
+common_question_id BIGINT       PK
+public_id          UUID         NOT NULL UNIQUE
+user_id            VARCHAR(50)  NULL FK -> users(user_id)  -- null 이면 기본 질문
+text               VARCHAR(200) NOT NULL
+category           VARCHAR(10)  NOT NULL  -- 인성 · 경험 · 지원동기 · 직무 · 기타 (check)
+created_at         TIMESTAMPTZ  NOT NULL
+updated_at         TIMESTAMPTZ  NOT NULL
+
+common_question_note
+common_question_note_id BIGINT       PK
+user_id                 VARCHAR(50)  NOT NULL FK -> users(user_id)
+common_question_id      BIGINT       NOT NULL FK -> common_question
+favorite                BOOLEAN      NOT NULL
+favorited_at            TIMESTAMPTZ  NULL  -- 꺼져 있으면 null
+memo                    VARCHAR(500) NULL
+created_at              TIMESTAMPTZ  NOT NULL
+updated_at              TIMESTAMPTZ  NOT NULL
+
+UNIQUE (user_id, common_question_id)
+```
+
+질문은행 「공통 질문」 탭입니다(Issue #136, V5). 기본 질문(`user_id` null, V5 시드 12개)과 사용자가 추가한
+내 질문을 한 테이블에 두고, 즐겨찾기 · 메모는 사람마다 달라 `common_question_note` 로 나눴습니다. 면접 질문
+북마크와 달리 세션이 없어 `bookmarked_question` 을 쓰지 않습니다. 기본 질문도 밖으로는 `public_id` 만 내보냅니다.
+**`category` 는 우리가 정한 다섯 가지라 check 제약을 겁니다.** 목록을 바꾸면 `CustomQuestionRule` 과 제약을 함께
+바꿉니다. AI 가 주는 `question.category` 와는 다른 목록입니다.
+
+```sql
 user_profile
 user_profile_id   BIGINT        PK
 user_id           VARCHAR(50)   UNIQUE NOT NULL FK -> users(user_id)
@@ -762,6 +799,7 @@ updated_at        TIMESTAMPTZ   NOT NULL
 users 삭제      → 종속 테이블 전부 CASCADE
 session 삭제    → question, report CASCADE
 question 삭제   → answer, bookmarked_question CASCADE
+common_question 삭제 → common_question_note CASCADE
 session 삭제    → retry_of_session_id, user_badge.source_session_id SET NULL
 folder 삭제     → session.folder_id SET NULL
 badge 삭제      → user_badge 가 막음 (NO ACTION)
@@ -788,6 +826,8 @@ CREATE INDEX idx_user_badge_badge       ON user_badge(badge_id);
 CREATE INDEX idx_bookmarked_question_user ON bookmarked_question(user_id, created_at);
 CREATE INDEX idx_calendar_event_user_scheduled ON calendar_event(user_id, scheduled_at);
 CREATE INDEX idx_user_company_interest_company ON user_company_interest(company_id);
+CREATE INDEX idx_common_question_user ON common_question(user_id, created_at);
+CREATE INDEX idx_common_question_note_question ON common_question_note(common_question_id);
 ```
 
 `idx_session_retry_root` 는 회차 목록 조회(같은 루트를 가진 세션 전부)에 씁니다.

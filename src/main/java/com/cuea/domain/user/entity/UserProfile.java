@@ -62,4 +62,30 @@ public class UserProfile extends BaseTimeEntity {
 
     @Column(name = "graduation_year")
     private Integer graduationYear;
+
+    /**
+     * 프로필 수정. 보낸 필드(null 아닌 값)만 반영합니다 — {@code profileImageUrl} 은
+     * 여기 없습니다. 전용 업로드 API로만 바뀝니다.
+     */
+    public void update(String introduction, String targetJobRole, String careerLevel,
+                        String schoolName, String major, Integer graduationYear) {
+        if (introduction != null) {
+            this.introduction = introduction;
+        }
+        if (targetJobRole != null) {
+            this.targetJobRole = targetJobRole;
+        }
+        if (careerLevel != null) {
+            this.careerLevel = careerLevel;
+        }
+        if (schoolName != null) {
+            this.schoolName = schoolName;
+        }
+        if (major != null) {
+            this.major = major;
+        }
+        if (graduationYear != null) {
+            this.graduationYear = graduationYear;
+        }
+    }
 }

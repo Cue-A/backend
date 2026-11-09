@@ -64,6 +64,12 @@ public enum ErrorCode {
 
     // ── 질문은행 ─────────────────────────────────────────────
     BOOKMARK_NOT_FOUND(HttpStatus.NOT_FOUND, "질문은행에 없는 질문입니다"),
+    CUSTOM_QUESTION_LIMIT_EXCEEDED(HttpStatus.CONFLICT, "내 질문은 최대 100개까지 추가할 수 있습니다"),
+
+    // ── 면접 일정(캘린더) ─────────────────────────────────────
+    // 없는 일정과 남의 일정을 구별하지 않고 둘 다 이 코드로 돌려줍니다. 남의 일정 존재 여부를
+    // 노출하지 않기 위함입니다(소유권은 조회 조건으로 묶음).
+    CALENDAR_EVENT_NOT_FOUND(HttpStatus.NOT_FOUND, "일정을 찾을 수 없습니다"),
 
     // ── AI 서버 (docs/10-ai-client.md 의 errorCode 와 1:1) ────
     AI_UNAVAILABLE(HttpStatus.SERVICE_UNAVAILABLE, "AI 서버에 연결할 수 없습니다"),
@@ -94,7 +100,9 @@ public enum ErrorCode {
     REPORT_FAILED(HttpStatus.CONFLICT, "리포트를 만들지 못했습니다"),
     // 실패 축 재시도는 PARTIAL 리포트만 받습니다. FAILED 는 분석 작업 등록을 다시 요청합니다.
     REPORT_NOT_RETRYABLE(HttpStatus.CONFLICT, "다시 분석할 수 없는 리포트입니다"),
-    REPORT_RETRY_IN_PROGRESS(HttpStatus.CONFLICT, "이미 다시 분석하고 있습니다");
+    REPORT_RETRY_IN_PROGRESS(HttpStatus.CONFLICT, "이미 다시 분석하고 있습니다"),
+    // 공개 리포트 조회. 없는 링크 · 해제된 링크 · UUID 가 아닌 값을 구분하지 않습니다.
+    SHARED_REPORT_NOT_FOUND(HttpStatus.NOT_FOUND, "공유가 해제됐거나 없는 링크입니다");
 
     private final HttpStatus status;
     private final String message;

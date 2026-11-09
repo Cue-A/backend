@@ -496,6 +496,8 @@ error_code      VARCHAR(50)   NULL               -- FAILED 일 때, 또는 retry
 retry_status    VARCHAR(20)   NULL               -- null | PROCESSING | FAILED. PARTIAL 실패 축 재시도
 created_at      TIMESTAMPTZ   NOT NULL
 completed_at    TIMESTAMPTZ   NULL
+share_id        UUID          NULL UNIQUE        -- 공유 링크 토큰. null 이면 공유 안 함 (uk_report_share_id)
+shared_at       TIMESTAMPTZ   NULL
 ```
 
 **세션당 한 행입니다**(`session_id` UNIQUE). `FAILED` 리포트를 다시 요청하면 새 행을
@@ -508,6 +510,10 @@ completed_at    TIMESTAMPTZ   NULL
 결과는 그대로 두고 `retry_status = FAILED`, 원인은 `error_code` 에 남깁니다. 재시도는 PARTIAL 에서만
 하므로 `status = FAILED` 와 `retry_status = FAILED` 는 함께 생기지 않습니다.
 [`13-report.md`](./13-report.md) 의 실패 축 재시도 절 참고.
+
+**공유 링크는 `public_id` 가 아니라 `share_id` 입니다.** 해제하면 두 컬럼을 비우고, 다시 공유하면 새 토큰을
+씁니다. 예전 링크가 다시 열리지 않게 하려는 것입니다. 토큰은 `share_id is null` 조건부 UPDATE 로 써서 공유를
+두 번 눌러도 하나만 생깁니다. [`13-report.md`](./13-report.md) 의 공유 링크 절 참고.
 
 **`status` 는 우리 상태라 enum 입니다.** AI 의 `report_status`(complete | partial)는
 `COMPLETED` · `PARTIAL` 로 옮기고, 원문은 `report_data` 에 남습니다.
@@ -699,6 +705,35 @@ UNIQUE (user_id, session_id, question_id)
 합니다.** 둘이 어긋나면 목록과 상세가 다르게 보입니다.
 
 ```sql
+common_question
+common_question_id BIGINT       PK
+public_id          UUID         NOT NULL UNIQUE
+user_id            VARCHAR(50)  NULL FK -> users(user_id)  -- null 이면 기본 질문
+text               VARCHAR(200) NOT NULL
+category           VARCHAR(10)  NOT NULL  -- 인성 · 경험 · 지원동기 · 직무 · 기타 (check)
+created_at         TIMESTAMPTZ  NOT NULL
+updated_at         TIMESTAMPTZ  NOT NULL
+
+common_question_note
+common_question_note_id BIGINT       PK
+user_id                 VARCHAR(50)  NOT NULL FK -> users(user_id)
+common_question_id      BIGINT       NOT NULL FK -> common_question
+favorite                BOOLEAN      NOT NULL
+favorited_at            TIMESTAMPTZ  NULL  -- 꺼져 있으면 null
+memo                    VARCHAR(500) NULL
+created_at              TIMESTAMPTZ  NOT NULL
+updated_at              TIMESTAMPTZ  NOT NULL
+
+UNIQUE (user_id, common_question_id)
+```
+
+질문은행 「공통 질문」 탭입니다(Issue #136, V5). 기본 질문(`user_id` null, V5 시드 12개)과 사용자가 추가한
+내 질문을 한 테이블에 두고, 즐겨찾기 · 메모는 사람마다 달라 `common_question_note` 로 나눴습니다. 면접 질문
+북마크와 달리 세션이 없어 `bookmarked_question` 을 쓰지 않습니다. 기본 질문도 밖으로는 `public_id` 만 내보냅니다.
+**`category` 는 우리가 정한 다섯 가지라 check 제약을 겁니다.** 목록을 바꾸면 `CustomQuestionRule` 과 제약을 함께
+바꿉니다. AI 가 주는 `question.category` 와는 다른 목록입니다.
+
+```sql
 user_profile
 user_profile_id   BIGINT        PK
 user_id           VARCHAR(50)   UNIQUE NOT NULL FK -> users(user_id)
@@ -762,6 +797,7 @@ updated_at        TIMESTAMPTZ   NOT NULL
 users 삭제      → 종속 테이블 전부 CASCADE
 session 삭제    → question, report CASCADE
 question 삭제   → answer, bookmarked_question CASCADE
+common_question 삭제 → common_question_note CASCADE
 session 삭제    → retry_of_session_id, user_badge.source_session_id SET NULL
 folder 삭제     → session.folder_id SET NULL
 badge 삭제      → user_badge 가 막음 (NO ACTION)
@@ -788,6 +824,8 @@ CREATE INDEX idx_user_badge_badge       ON user_badge(badge_id);
 CREATE INDEX idx_bookmarked_question_user ON bookmarked_question(user_id, created_at);
 CREATE INDEX idx_calendar_event_user_scheduled ON calendar_event(user_id, scheduled_at);
 CREATE INDEX idx_user_company_interest_company ON user_company_interest(company_id);
+CREATE INDEX idx_common_question_user ON common_question(user_id, created_at);
+CREATE INDEX idx_common_question_note_question ON common_question_note(common_question_id);
 ```
 
 `idx_session_retry_root` 는 회차 목록 조회(같은 루트를 가진 세션 전부)에 씁니다.

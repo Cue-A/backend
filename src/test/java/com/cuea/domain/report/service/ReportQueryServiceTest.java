@@ -7,6 +7,7 @@ import com.cuea.domain.interview.entity.Question;
 import com.cuea.domain.interview.entity.QuestionType;
 import com.cuea.domain.interview.service.InterviewSessionQueryService;
 import com.cuea.domain.report.dto.response.ReportDetailResponse;
+import com.cuea.domain.report.dto.response.PublicReportResponse;
 import com.cuea.domain.report.dto.response.ReportImprovementsResponse;
 import com.cuea.domain.report.dto.response.ReportTimelineResponse;
 import com.cuea.domain.report.entity.Report;
@@ -54,6 +55,8 @@ class ReportQueryServiceTest {
     private static final String SESSION_ID = "sess_9f2a1c";
     private static final OffsetDateTime CREATED_AT = OffsetDateTime.parse("2026-09-05T14:10:00Z");
     private static final OffsetDateTime COMPLETED_AT = OffsetDateTime.parse("2026-09-05T14:22:40Z");
+    private static final UUID SHARE_ID = UUID.randomUUID();
+    private static final OffsetDateTime SHARED_AT = OffsetDateTime.parse("2026-09-06T09:00:00Z");
 
     /** 리포트 계약 13장 예시. 시선 축 실패라 partial 입니다. 모르는 키(future_field)를 하나 섞었습니다. */
     private static final String CONTRACT_RESULT = """
@@ -328,6 +331,24 @@ class ReportQueryServiceTest {
         givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
 
         assertThat(service.getDetail(USER_ID, PUBLIC_ID.toString()).retry()).isNull();
+    }
+
+    /** 리포트 화면을 다시 열었을 때 공유 토글과 링크를 맞추는 데 씁니다. */
+    @Test
+    void 공유_중이면_상세_조회에_공유_링크를_준다() throws Exception {
+        givenReport(shared(finished(ReportStatus.PARTIAL, CONTRACT_RESULT)));
+
+        ReportDetailResponse response = service.getDetail(USER_ID, PUBLIC_ID.toString());
+
+        assertThat(response.share().shareId()).isEqualTo(SHARE_ID.toString());
+        assertThat(response.share().sharedAt()).isEqualTo(SHARED_AT);
+    }
+
+    @Test
+    void 공유하지_않았으면_share_는_null() throws Exception {
+        givenReport(finished(ReportStatus.PARTIAL, CONTRACT_RESULT));
+
+        assertThat(service.getDetail(USER_ID, PUBLIC_ID.toString()).share()).isNull();
     }
 
     @Test
@@ -608,6 +629,72 @@ class ReportQueryServiceTest {
         assertErrorCode(() -> service.getImprovements(USER_ID, "not-a-uuid"), ErrorCode.REPORT_NOT_FOUND);
     }
 
+    // ── 공개 리포트 (공유 링크) ────────────────────────────────
+
+    /** 본인 리포트 화면과 같은 내용을 상세 · 타임라인 · 개선 답변 한 응답으로 줍니다. */
+    @Test
+    void 공유_토큰으로_리포트_화면_전체를_준다() throws Exception {
+        givenSharedReport(shared(finished(ReportStatus.COMPLETED, REASK_RESULT.replace(
+                "\"improved_answers\": []",
+                """
+                "improved_answers": [ { "question_id": "q_1r", "original_excerpt": "그냥 열심히 했습니다.",
+                  "suggestion": "맡은 역할을 먼저 말해 보세요.", "t_start": 3.1, "t_end": 8.0 } ]
+                """))));
+        givenQuestionsInDb();
+
+        PublicReportResponse response = service.getShared(SHARE_ID.toString());
+
+        assertThat(response.status()).isEqualTo(ReportStatus.COMPLETED);
+        assertThat(response.overall().score()).isEqualTo(72);
+        assertThat(response.axes().gaze().score()).isEqualTo(70);
+        assertThat(response.questions()).extracting(ReportDetailResponse.QuestionResult::questionText)
+                .containsExactly("지원 동기를 말씀해 주세요", "가장 어려웠던 협업 경험은 무엇인가요?",
+                        "그때 본인의 역할은 무엇이었나요?");
+        assertThat(response.timeline()).extracting(ReportTimelineResponse.TimelineQuestion::questionId)
+                .containsExactly("q_1", "q_2", "q_3");
+        assertThat(response.timeline().get(0).evidence())
+                .extracting("questionId", "isReask")
+                .contains(tuple("q_1r", true));
+        assertThat(response.improvedAnswers())
+                .extracting("questionId", "originalQuestionId", "questionText")
+                .containsExactly(tuple("q_1r", "q_1", "지원 동기를 말씀해 주세요"));
+        assertThat(response.completedAt()).isEqualTo(COMPLETED_AT);
+    }
+
+    /**
+     * reportId · sessionId 는 본인 API 를 부르는 값이라 공개 응답 어디에도 나가면 안 됩니다.
+     * 재시도 상태와 공유 상태도 본인 화면용입니다. 재시도 중이어도 지금 결과는 그대로 보여줍니다.
+     */
+    @Test
+    void 공개_응답에는_reportId_sessionId_재시도_공유_상태가_없다() throws Exception {
+        Report report = finished(ReportStatus.PARTIAL, CONTRACT_RESULT);
+        givenSharedReport(Report.builder().reportId(10L).publicId(PUBLIC_ID).session(report.getSession())
+                .status(ReportStatus.PARTIAL).retryStatus(ReportRetryStatus.PROCESSING).attempt(2)
+                .reportData(report.getReportData()).createdAt(CREATED_AT).completedAt(COMPLETED_AT)
+                .shareId(SHARE_ID).sharedAt(SHARED_AT).build());
+
+        JsonNode json = objectMapper.valueToTree(service.getShared(SHARE_ID.toString()));
+
+        assertThat(json.path("overall").path("score").asInt()).isEqualTo(68);
+        assertThat(json.toString()).doesNotContain(PUBLIC_ID.toString()).doesNotContain(SESSION_ID);
+        assertThat(fieldNames(json)).doesNotContain("reportId", "sessionId", "retry", "share");
+        assertThat(fieldNames(json)).noneMatch(name -> name.contains("_"));
+    }
+
+    @Test
+    void 없거나_해제된_공유_토큰이면_SHARED_REPORT_NOT_FOUND() {
+        when(reportRepository.findByShareIdForPublic(any())).thenReturn(Optional.empty());
+
+        assertErrorCode(() -> service.getShared(SHARE_ID.toString()), ErrorCode.SHARED_REPORT_NOT_FOUND);
+    }
+
+    @Test
+    void 공유_토큰이_UUID_가_아니면_조회하지_않고_SHARED_REPORT_NOT_FOUND() {
+        assertErrorCode(() -> service.getShared("not-a-uuid"), ErrorCode.SHARED_REPORT_NOT_FOUND);
+
+        verify(reportRepository, never()).findByShareIdForPublic(any());
+    }
+
     /** improved_answers 만 채운 최소 결과. */
     private static String improvements(String items) {
         return """
@@ -647,10 +734,22 @@ class ReportQueryServiceTest {
                 .thenReturn(Optional.of(report));
     }
 
+    private void givenSharedReport(Report report) {
+        when(reportRepository.findByShareIdForPublic(SHARE_ID)).thenReturn(Optional.of(report));
+    }
+
     private Report finished(ReportStatus status, String resultJson) throws Exception {
         Map<String, Object> reportData = objectMapper.readValue(resultJson, new TypeReference<>() {
         });
         return report(status, reportData, COMPLETED_AT);
+    }
+
+    /** 같은 리포트에 공유 토큰만 붙입니다. */
+    private static Report shared(Report report) {
+        return Report.builder().reportId(report.getReportId()).publicId(report.getPublicId())
+                .session(report.getSession()).status(report.getStatus()).attempt(report.getAttempt())
+                .reportData(report.getReportData()).createdAt(report.getCreatedAt())
+                .completedAt(report.getCompletedAt()).shareId(SHARE_ID).sharedAt(SHARED_AT).build();
     }
 
     private Report report(ReportStatus status, Map<String, Object> reportData, OffsetDateTime completedAt) {

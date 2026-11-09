@@ -3,6 +3,7 @@ package com.cuea.domain.report.service;
 import com.cuea.common.exception.BusinessException;
 import com.cuea.common.exception.ErrorCode;
 import com.cuea.domain.interview.service.InterviewSessionQueryService;
+import com.cuea.domain.report.dto.response.PublicReportResponse;
 import com.cuea.domain.report.dto.response.ReportDetailResponse;
 import com.cuea.domain.report.dto.response.ReportImprovementsResponse;
 import com.cuea.domain.report.dto.response.ReportQuestions;
@@ -16,7 +17,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 /**
- * 끝난 리포트의 조회. <b>본인 리포트만 보입니다.</b>
+ * 끝난 리포트의 조회. <b>본인 리포트만 보입니다.</b> 예외는 공유 링크로 여는 {@link #getShared} 하나입니다.
  *
  * <p>끝난 리포트(COMPLETED · PARTIAL)만 내려줍니다. 진행 중이면 202 {@code REPORT_NOT_READY},
  * 실패했으면 409 {@code REPORT_FAILED} 입니다. 프론트는 상태 조회나 WebSocket 으로 끝난 걸
@@ -51,6 +52,21 @@ public class ReportQueryService {
     public ReportImprovementsResponse getImprovements(String userId, String reportId) {
         Report report = reportFinder.getOwned(userId, reportId);
         return ReportImprovementsResponse.of(report, readFinished(report), questions(report));
+    }
+
+    /**
+     * 공유 링크로 연 리포트. <b>소유자를 보지 않습니다.</b> 본인 화면과 같은 세 응답을 만들어 본인 전용 값을 뺍니다.
+     * 공유는 끝난 리포트만 되고 끝난 리포트는 다시 진행 중 · 실패로 돌아가지 않아, 상태로 막힐 일은 없습니다.
+     */
+    @Transactional(readOnly = true)
+    public PublicReportResponse getShared(String shareId) {
+        Report report = reportFinder.getShared(shareId);
+        AiReportResult result = readFinished(report);
+        ReportQuestions questions = questions(report);
+        return PublicReportResponse.of(
+                ReportDetailResponse.of(report, result, questions, null),
+                ReportTimelineResponse.of(report, result, questions, null),
+                ReportImprovementsResponse.of(report, result, questions));
     }
 
     /** 끝난 리포트의 AI 결과. 진행 중 · 실패한 리포트는 여기서 막습니다. */
